@@ -1,8 +1,8 @@
 use jot_cache::JotPaths;
 use quick_xml::de::from_str;
 use reqwest::blocking::Client;
-use serde::Deserialize;
-use std::collections::HashSet;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeSet, HashSet};
 use std::fmt::{Display, Formatter};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,7 +10,7 @@ use std::time::Duration;
 
 const MAVEN_CENTRAL: &str = "https://repo1.maven.org/maven2";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct MavenCoordinate {
     pub group: String,
     pub artifact: String,
@@ -133,6 +133,46 @@ impl MavenResolver {
         seen.insert(root.to_string());
         self.walk_dependencies(&root, 1, max_depth, &mut seen, &mut entries)?;
         Ok(entries)
+    }
+
+    pub fn resolve_lockfile(
+        &self,
+        inputs: &[String],
+        max_depth: usize,
+    ) -> Result<Lockfile, ResolverError> {
+        let mut roots = Vec::new();
+        let mut packages = BTreeSet::new();
+
+        for input in inputs {
+            let root = self.resolve_coordinate(input)?;
+            roots.push(root.clone());
+            packages.insert(root.clone());
+
+            let tree = self.resolve_dependency_tree(input, max_depth)?;
+            for entry in tree.into_iter().skip(1) {
+                if entry.note.as_deref() == Some("unresolved version") {
+                    continue;
+                }
+                if entry.coordinate.version.is_some() {
+                    packages.insert(entry.coordinate);
+                }
+            }
+        }
+
+        roots.sort();
+
+        Ok(Lockfile {
+            version: 1,
+            roots,
+            package: packages
+                .into_iter()
+                .map(|coordinate| LockedPackage {
+                    group: coordinate.group,
+                    artifact: coordinate.artifact,
+                    version: coordinate.version.expect("locked package version"),
+                })
+                .collect(),
+        })
     }
 
     fn walk_dependencies(
@@ -306,6 +346,20 @@ pub struct TreeEntry {
     pub note: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Lockfile {
+    pub version: u32,
+    pub roots: Vec<MavenCoordinate>,
+    pub package: Vec<LockedPackage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct LockedPackage {
+    pub group: String,
+    pub artifact: String,
+    pub version: String,
+}
+
 fn resolve_best_version(versioning: &MavenVersioning) -> Option<String> {
     if let Some(release) = &versioning.release
         && is_stable_maven_version(release)
@@ -438,8 +492,9 @@ pub enum ResolverError {
 #[cfg(test)]
 mod tests {
     use super::{
+        Lockfile,
         MavenCoordinate, MavenDependency, MavenProject, MavenVersioning, MavenVersions,
-        ResolvedDependency, is_cache_usable, is_stable_maven_version,
+        ResolvedDependency, LockedPackage, is_cache_usable, is_stable_maven_version,
         is_unresolved_version_expression,
         resolve_best_version,
     };
@@ -576,5 +631,32 @@ mod tests {
 
                 assert!(is_cache_usable(&file_path, Some(Duration::from_secs(60))).expect("fresh cache"));
                 assert!(is_cache_usable(&file_path, None).expect("ttl-free cache"));
+            }
+
+            #[test]
+            fn lockfile_packages_are_deterministic_and_deduplicated() {
+                let lockfile = Lockfile {
+                    version: 1,
+                    roots: vec![MavenCoordinate {
+                        group: "org.example".into(),
+                        artifact: "demo".into(),
+                        version: Some("1.0.0".into()),
+                    }],
+                    package: vec![
+                        LockedPackage {
+                            group: "b.group".into(),
+                            artifact: "beta".into(),
+                            version: "1.0.0".into(),
+                        },
+                        LockedPackage {
+                            group: "a.group".into(),
+                            artifact: "alpha".into(),
+                            version: "2.0.0".into(),
+                        },
+                    ],
+                };
+
+                assert_eq!(lockfile.package[0].group, "b.group");
+                assert_eq!(lockfile.package[1].group, "a.group");
             }
 }

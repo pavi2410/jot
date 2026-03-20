@@ -766,6 +766,7 @@ dependencies = [
  "jot-config",
  "jot-resolver",
  "jot-toolchain",
+ "toml",
 ]
 
 [[package]]

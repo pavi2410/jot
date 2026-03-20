@@ -19,6 +19,13 @@ enum Command {
         #[arg(long)]
         global: bool,
     },
+    Lock {
+        dependencies: Vec<String>,
+        #[arg(long, default_value_t = 8)]
+        depth: usize,
+        #[arg(long, default_value = "jot.lock")]
+        output: PathBuf,
+    },
     Resolve {
         dependency: String,
         #[arg(long)]
@@ -72,11 +79,35 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Command::Clean { global } => handle_clean(global, paths)?,
+        Command::Lock {
+            dependencies,
+            depth,
+            output,
+        } => handle_lock(&dependencies, depth, &output)?,
         Command::Resolve { dependency, deps } => handle_resolve(&dependency, deps)?,
         Command::Tree { dependency, depth } => handle_tree(&dependency, depth)?,
         Command::Java(command) => handle_java(command, manager, paths)?,
     }
 
+    Ok(())
+}
+
+fn handle_lock(
+    dependencies: &[String],
+    depth: usize,
+    output: &PathBuf,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if dependencies.is_empty() {
+        return Err("at least one dependency coordinate is required".into());
+    }
+
+    let paths = JotPaths::new()?;
+    paths.ensure_exists()?;
+    let resolver = MavenResolver::new(paths)?;
+    let lockfile = resolver.resolve_lockfile(dependencies, depth)?;
+    let content = toml::to_string_pretty(&lockfile)?;
+    std::fs::write(output, content)?;
+    println!("wrote {}", output.display());
     Ok(())
 }
 
