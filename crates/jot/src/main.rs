@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use jot_cache::JotPaths;
 use jot_config::{find_workspace_jot_toml, pin_java_toolchain, read_toolchain_request};
-use jot_resolver::MavenResolver;
+use jot_resolver::{MavenResolver, TreeEntry};
 use jot_toolchain::{InstallOptions, JavaToolchainRequest, JdkVendor, ToolchainManager};
 
 #[derive(Debug, Parser)]
@@ -23,6 +23,11 @@ enum Command {
         dependency: String,
         #[arg(long)]
         deps: bool,
+    },
+    Tree {
+        dependency: String,
+        #[arg(long, default_value_t = 3)]
+        depth: usize,
     },
     Java(JavaCommand),
 }
@@ -68,6 +73,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Command::Clean { global } => handle_clean(global, paths)?,
         Command::Resolve { dependency, deps } => handle_resolve(&dependency, deps)?,
+        Command::Tree { dependency, depth } => handle_tree(&dependency, depth)?,
         Command::Java(command) => handle_java(command, manager, paths)?,
     }
 
@@ -97,6 +103,36 @@ fn handle_resolve(dependency: &str, deps: bool) -> Result<(), Box<dyn std::error
         println!("{}", coordinate);
     }
     Ok(())
+}
+
+fn handle_tree(dependency: &str, depth: usize) -> Result<(), Box<dyn std::error::Error>> {
+    let resolver = MavenResolver::new()?;
+    let entries = resolver.resolve_dependency_tree(dependency, depth)?;
+    for entry in entries {
+        print_tree_entry(&entry);
+    }
+    Ok(())
+}
+
+fn print_tree_entry(entry: &TreeEntry) {
+    let indent = "  ".repeat(entry.depth);
+    let scope = entry.scope.clone().unwrap_or_else(|| "compile".to_owned());
+    let optional = if entry.optional { " optional" } else { "" };
+    let note = entry
+        .note
+        .as_ref()
+        .map(|value| format!(" ({value})"))
+        .unwrap_or_default();
+
+    if entry.depth == 0 {
+        println!("{}", entry.coordinate);
+        return;
+    }
+
+    println!(
+        "{}- {} [{}{}]{}",
+        indent, entry.coordinate, scope, optional, note
+    );
 }
 
 fn handle_clean(global: bool, paths: JotPaths) -> Result<(), Box<dyn std::error::Error>> {

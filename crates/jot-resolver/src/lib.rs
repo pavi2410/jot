@@ -1,6 +1,7 @@
 use quick_xml::de::from_str;
 use reqwest::blocking::Client;
 use serde::Deserialize;
+use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
 
 const MAVEN_CENTRAL: &str = "https://repo1.maven.org/maven2";
@@ -107,6 +108,92 @@ impl MavenResolver {
         input: &str,
     ) -> Result<(MavenCoordinate, Vec<ResolvedDependency>), ResolverError> {
         let coordinate = self.resolve_coordinate(input)?;
+        let dependencies = self.fetch_direct_dependencies(&coordinate)?;
+
+        Ok((coordinate, dependencies))
+    }
+
+    pub fn resolve_dependency_tree(
+        &self,
+        input: &str,
+        max_depth: usize,
+    ) -> Result<Vec<TreeEntry>, ResolverError> {
+        let root = self.resolve_coordinate(input)?;
+        let mut entries = vec![TreeEntry {
+            depth: 0,
+            coordinate: root.clone(),
+            scope: None,
+            optional: false,
+            note: None,
+        }];
+        let mut seen = HashSet::new();
+        seen.insert(root.to_string());
+        self.walk_dependencies(&root, 1, max_depth, &mut seen, &mut entries)?;
+        Ok(entries)
+    }
+
+    fn walk_dependencies(
+        &self,
+        coordinate: &MavenCoordinate,
+        depth: usize,
+        max_depth: usize,
+        seen: &mut HashSet<String>,
+        out: &mut Vec<TreeEntry>,
+    ) -> Result<(), ResolverError> {
+        if depth > max_depth {
+            return Ok(());
+        }
+
+        let dependencies = self.fetch_direct_dependencies(coordinate)?;
+        for dependency in dependencies {
+            let scope = dependency.scope.clone();
+            let optional = dependency.optional;
+
+            let Some(next_coordinate) = dependency.to_coordinate()? else {
+                out.push(TreeEntry {
+                    depth,
+                    coordinate: MavenCoordinate {
+                        group: dependency.group,
+                        artifact: dependency.artifact,
+                        version: dependency.version,
+                    },
+                    scope,
+                    optional,
+                    note: Some("unresolved version".to_owned()),
+                });
+                continue;
+            };
+
+            let key = next_coordinate.to_string();
+            if seen.contains(&key) {
+                out.push(TreeEntry {
+                    depth,
+                    coordinate: next_coordinate,
+                    scope,
+                    optional,
+                    note: Some("cycle detected".to_owned()),
+                });
+                continue;
+            }
+
+            seen.insert(key);
+            out.push(TreeEntry {
+                depth,
+                coordinate: next_coordinate.clone(),
+                scope,
+                optional,
+                note: None,
+            });
+            self.walk_dependencies(&next_coordinate, depth + 1, max_depth, seen, out)?;
+        }
+
+        Ok(())
+    }
+
+    fn fetch_direct_dependencies(
+        &self,
+        coordinate: &MavenCoordinate,
+    ) -> Result<Vec<ResolvedDependency>, ResolverError> {
         let pom_url = coordinate.pom_url()?;
         let pom_xml = self
             .client
@@ -133,7 +220,7 @@ impl MavenResolver {
             })
             .unwrap_or_default();
 
-        Ok((coordinate, dependencies))
+        Ok(dependencies)
     }
 }
 
@@ -144,6 +231,33 @@ pub struct ResolvedDependency {
     pub version: Option<String>,
     pub scope: Option<String>,
     pub optional: bool,
+}
+
+impl ResolvedDependency {
+    fn to_coordinate(&self) -> Result<Option<MavenCoordinate>, ResolverError> {
+        let Some(version) = self.version.clone() else {
+            return Ok(None);
+        };
+
+        if is_unresolved_version_expression(&version) {
+            return Ok(None);
+        }
+
+        Ok(Some(MavenCoordinate {
+            group: self.group.clone(),
+            artifact: self.artifact.clone(),
+            version: Some(version),
+        }))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TreeEntry {
+    pub depth: usize,
+    pub coordinate: MavenCoordinate,
+    pub scope: Option<String>,
+    pub optional: bool,
+    pub note: Option<String>,
 }
 
 fn resolve_best_version(versioning: &MavenVersioning) -> Option<String> {
@@ -188,6 +302,10 @@ fn is_stable_maven_version(version: &str) -> bool {
         && !lowered.contains("rc")
         && !lowered.contains("milestone")
         && !lowered.contains("m")
+}
+
+fn is_unresolved_version_expression(version: &str) -> bool {
+    version.contains("${") || version.contains('[') || version.contains('(') || version.contains(',')
 }
 
 #[derive(Debug, Deserialize)]
@@ -248,7 +366,8 @@ pub enum ResolverError {
 mod tests {
     use super::{
         MavenCoordinate, MavenDependency, MavenProject, MavenVersioning, MavenVersions,
-        is_stable_maven_version, resolve_best_version,
+        ResolvedDependency, is_stable_maven_version, is_unresolved_version_expression,
+        resolve_best_version,
     };
     use quick_xml::de::from_str;
 
@@ -335,4 +454,40 @@ mod tests {
                 assert_eq!(first.scope.as_deref(), Some("test"));
                 assert_eq!(first.optional, Some(false));
         }
+
+            #[test]
+            fn unresolved_version_expression_detection_matches_expected_cases() {
+                assert!(is_unresolved_version_expression("${junit.version}"));
+                assert!(is_unresolved_version_expression("[1.0,2.0)"));
+                assert!(is_unresolved_version_expression("(,1.4.0]"));
+                assert!(!is_unresolved_version_expression("1.2.3"));
+            }
+
+            #[test]
+            fn dependency_to_coordinate_requires_literal_version() {
+                let literal = ResolvedDependency {
+                    group: "org.example".into(),
+                    artifact: "demo".into(),
+                    version: Some("1.0.0".into()),
+                    scope: None,
+                    optional: false,
+                };
+                assert_eq!(
+                    literal
+                        .to_coordinate()
+                        .expect("literal version")
+                        .expect("coordinate")
+                        .to_string(),
+                    "org.example:demo:1.0.0"
+                );
+
+                let managed = ResolvedDependency {
+                    group: "org.example".into(),
+                    artifact: "demo".into(),
+                    version: Some("${demo.version}".into()),
+                    scope: None,
+                    optional: false,
+                };
+                assert!(managed.to_coordinate().expect("managed version").is_none());
+            }
 }
