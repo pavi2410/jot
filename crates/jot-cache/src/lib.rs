@@ -34,10 +34,46 @@ impl JotPaths {
         Ok(())
     }
 
+    pub fn clear_global_cache(&self) -> Result<CacheCleanupSummary, CacheError> {
+        let jdk_entries = count_entries(&self.jdks_dir())?;
+        let download_entries = count_entries(&self.downloads_dir())?;
+
+        remove_dir_if_exists(&self.jdks_dir())?;
+        remove_dir_if_exists(&self.downloads_dir())?;
+        self.ensure_exists()?;
+
+        Ok(CacheCleanupSummary {
+            removed_jdk_entries: jdk_entries,
+            removed_download_entries: download_entries,
+        })
+    }
+
     pub fn install_dir(&self, vendor: &str, release_name: &str, platform: &str) -> PathBuf {
         self.jdks_dir()
             .join(format!("{vendor}-{release_name}-{platform}"))
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CacheCleanupSummary {
+    pub removed_jdk_entries: usize,
+    pub removed_download_entries: usize,
+}
+
+fn count_entries(path: &Path) -> Result<usize, CacheError> {
+    if !path.exists() {
+        return Ok(0);
+    }
+
+    Ok(fs::read_dir(path)?.count())
+}
+
+fn remove_dir_if_exists(path: &Path) -> Result<(), CacheError> {
+    if path.exists() {
+        fs::remove_dir_all(path)?;
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -46,4 +82,31 @@ pub enum CacheError {
     HomeDirectoryUnavailable,
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::JotPaths;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn clear_global_cache_removes_managed_directories_and_recreates_them() {
+        let temp = tempdir().expect("tempdir");
+        let paths = JotPaths {
+            root: temp.path().join(".jot"),
+        };
+        paths.ensure_exists().expect("ensure paths");
+
+        fs::write(paths.jdks_dir().join("installed.json"), "jdk").expect("write jdk metadata");
+        fs::write(paths.downloads_dir().join("archive.tar.gz"), "jar").expect("write archive");
+
+        let summary = paths.clear_global_cache().expect("clear cache");
+        assert_eq!(summary.removed_jdk_entries, 1);
+        assert_eq!(summary.removed_download_entries, 1);
+        assert!(paths.jdks_dir().is_dir());
+        assert!(paths.downloads_dir().is_dir());
+        assert_eq!(fs::read_dir(paths.jdks_dir()).expect("read jdks").count(), 0);
+        assert_eq!(fs::read_dir(paths.downloads_dir()).expect("read downloads").count(), 0);
+    }
 }

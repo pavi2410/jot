@@ -46,6 +46,28 @@ pub fn find_jot_toml(start: &Path) -> Result<Option<PathBuf>, ConfigError> {
     }
 }
 
+pub fn find_workspace_jot_toml(start: &Path) -> Result<Option<PathBuf>, ConfigError> {
+    let mut current = if start.is_dir() {
+        start.to_path_buf()
+    } else {
+        start.parent()
+            .ok_or_else(|| ConfigError::InvalidStartPath(start.to_path_buf()))?
+            .to_path_buf()
+    };
+    let mut found = None;
+
+    loop {
+        let candidate = current.join("jot.toml");
+        if candidate.is_file() {
+            found = Some(candidate);
+        }
+
+        if !current.pop() {
+            return Ok(found);
+        }
+    }
+}
+
 pub fn read_toolchain_request(start: &Path) -> Result<Option<JavaToolchainRequest>, ConfigError> {
     let Some(path) = find_jot_toml(start)? else {
         return Ok(None);
@@ -107,7 +129,10 @@ pub enum ConfigError {
 
 #[cfg(test)]
 mod tests {
-    use super::{JavaToolchainRequest, find_jot_toml, pin_java_toolchain, read_toolchain_request};
+    use super::{
+        JavaToolchainRequest, find_jot_toml, find_workspace_jot_toml, pin_java_toolchain,
+        read_toolchain_request,
+    };
     use jot_toolchain::JdkVendor;
     use std::fs;
     use tempfile::tempdir;
@@ -122,6 +147,22 @@ mod tests {
 
         let path = find_jot_toml(&nested).expect("find config");
         assert_eq!(path, Some(root.join("jot.toml")));
+    }
+
+    #[test]
+    fn finds_topmost_config_for_workspace_pin() {
+        let temp = tempdir().expect("tempdir");
+        let workspace = temp.path().join("workspace");
+        let member = workspace.join("member");
+        let nested = member.join("src");
+        fs::create_dir_all(&nested).expect("create dirs");
+        fs::write(workspace.join("jot.toml"), "[workspace]\nmembers = [\"member\"]\n")
+            .expect("write workspace config");
+        fs::write(member.join("jot.toml"), "[project]\nname = \"member\"\n")
+            .expect("write member config");
+
+        let path = find_workspace_jot_toml(&nested).expect("find workspace config");
+        assert_eq!(path, Some(workspace.join("jot.toml")));
     }
 
     #[test]

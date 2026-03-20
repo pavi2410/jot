@@ -762,6 +762,7 @@ name = "jot-cache"
 version = "0.1.0"
 dependencies = [
  "directories",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 
