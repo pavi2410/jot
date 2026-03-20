@@ -1,0 +1,10 @@
+[package]
+name = "jot"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+clap.workspace = true
+jot-cache = { path = "../jot-cache" }
+jot-config = { path = "../jot-config" }
+jot-toolchain = { path = "../jot-toolchain" }

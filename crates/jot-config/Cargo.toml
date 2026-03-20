@@ -1,0 +1,14 @@
+[package]
+name = "jot-config"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+toml_edit.workspace = true
+jot-toolchain = { path = "../jot-toolchain" }
+
+[dev-dependencies]
+tempfile.workspace = true

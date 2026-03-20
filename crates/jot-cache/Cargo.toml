@@ -1,0 +1,8 @@
+[package]
+name = "jot-cache"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+directories.workspace = true
+thiserror.workspace = true
