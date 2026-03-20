@@ -7,6 +7,7 @@ use toml_edit::{DocumentMut, Item, Table, Value, value};
 
 #[derive(Debug, Deserialize)]
 struct RawConfig {
+    dependencies: Option<std::collections::BTreeMap<String, RawDependencySpec>>,
     toolchains: Option<RawToolchains>,
 }
 
@@ -22,6 +23,17 @@ enum RawJavaToolchain {
     Detailed {
         version: String,
         vendor: Option<JdkVendor>,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum RawDependencySpec {
+    Coords(String),
+    Detailed {
+        coords: Option<String>,
+        path: Option<String>,
+        catalog: Option<String>,
     },
 }
 
@@ -91,6 +103,46 @@ pub fn read_toolchain_request(start: &Path) -> Result<Option<JavaToolchainReques
     }))
 }
 
+pub fn read_declared_dependencies(start: &Path) -> Result<Vec<String>, ConfigError> {
+    let Some(path) = find_jot_toml(start)? else {
+        return Ok(Vec::new());
+    };
+
+    let content = fs::read_to_string(path)?;
+    let config: RawConfig = toml::from_str(&content)?;
+    let mut dependencies = Vec::new();
+
+    for (name, spec) in config.dependencies.unwrap_or_default() {
+        match spec {
+            RawDependencySpec::Coords(coords) => dependencies.push(coords),
+            RawDependencySpec::Detailed {
+                coords: Some(coords), ..
+            } => dependencies.push(coords),
+            RawDependencySpec::Detailed {
+                path: Some(_), ..
+            } => {}
+            RawDependencySpec::Detailed {
+                catalog: Some(_), ..
+            } => {
+                return Err(ConfigError::UnsupportedDependencyDeclaration {
+                    name,
+                    reason: "catalog-based dependencies are not supported by `jot lock` yet"
+                        .to_owned(),
+                });
+            }
+            RawDependencySpec::Detailed { .. } => {
+                return Err(ConfigError::UnsupportedDependencyDeclaration {
+                    name,
+                    reason: "dependency declaration must include `coords` for `jot lock`"
+                        .to_owned(),
+                });
+            }
+        }
+    }
+
+    Ok(dependencies)
+}
+
 pub fn pin_java_toolchain(path: &Path, request: &JavaToolchainRequest) -> Result<(), ConfigError> {
     let content = fs::read_to_string(path)?;
     let mut document = content.parse::<DocumentMut>()?;
@@ -125,13 +177,15 @@ pub enum ConfigError {
     Toml(#[from] toml::de::Error),
     #[error("failed to update jot.toml: {0}")]
     EditToml(#[from] toml_edit::TomlError),
+    #[error("unsupported dependency declaration for `{name}`: {reason}")]
+    UnsupportedDependencyDeclaration { name: String, reason: String },
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         JavaToolchainRequest, find_jot_toml, find_workspace_jot_toml, pin_java_toolchain,
-        read_toolchain_request,
+        read_declared_dependencies, read_toolchain_request,
     };
     use jot_toolchain::JdkVendor;
     use std::fs;
@@ -185,5 +239,41 @@ mod tests {
             .expect("toolchain request");
         assert_eq!(request.version, "21");
         assert_eq!(request.vendor, Some(JdkVendor::Adoptium));
+    }
+
+    #[test]
+    fn reads_explicit_coords_dependencies_from_config() {
+        let temp = tempdir().expect("tempdir");
+        let config_path = temp.path().join("jot.toml");
+        fs::write(
+            &config_path,
+            "[dependencies]\nslf4j = \"org.slf4j:slf4j-api:2.0.16\"\nserde = { coords = \"org.example:serde:1.0.0\" }\nlocal = { path = \"../local\" }\n",
+        )
+        .expect("write config");
+
+        let dependencies = read_declared_dependencies(&config_path).expect("read dependencies");
+        assert_eq!(
+            dependencies,
+            vec![
+                "org.example:serde:1.0.0".to_owned(),
+                "org.slf4j:slf4j-api:2.0.16".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_catalog_dependencies_for_lock_until_supported() {
+        let temp = tempdir().expect("tempdir");
+        let config_path = temp.path().join("jot.toml");
+        fs::write(
+            &config_path,
+            "[dependencies]\njunit = { catalog = \"junit\" }\n",
+        )
+        .expect("write config");
+
+        let error = read_declared_dependencies(&config_path).expect_err("catalog should fail");
+        assert!(error
+            .to_string()
+            .contains("catalog-based dependencies are not supported by `jot lock` yet"));
     }
 }

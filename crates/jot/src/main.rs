@@ -2,7 +2,10 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use jot_cache::JotPaths;
-use jot_config::{find_workspace_jot_toml, pin_java_toolchain, read_toolchain_request};
+use jot_config::{
+    find_workspace_jot_toml, pin_java_toolchain, read_declared_dependencies,
+    read_toolchain_request,
+};
 use jot_resolver::{MavenResolver, TreeEntry};
 use jot_toolchain::{InstallOptions, JavaToolchainRequest, JdkVendor, ToolchainManager};
 
@@ -97,14 +100,23 @@ fn handle_lock(
     depth: usize,
     output: &PathBuf,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if dependencies.is_empty() {
-        return Err("at least one dependency coordinate is required".into());
-    }
+    let resolved_inputs = if dependencies.is_empty() {
+        let inputs = read_declared_dependencies(&std::env::current_dir()?)?;
+        if inputs.is_empty() {
+            return Err(
+                "no dependency coordinates were provided and no supported `[dependencies]` entries were found in jot.toml"
+                    .into(),
+            );
+        }
+        inputs
+    } else {
+        dependencies.to_vec()
+    };
 
     let paths = JotPaths::new()?;
     paths.ensure_exists()?;
     let resolver = MavenResolver::new(paths)?;
-    let lockfile = resolver.resolve_lockfile(dependencies, depth)?;
+    let lockfile = resolver.resolve_lockfile(&resolved_inputs, depth)?;
     let content = toml::to_string_pretty(&lockfile)?;
     std::fs::write(output, content)?;
     println!("wrote {}", output.display());
