@@ -1,16 +1,18 @@
 use std::fmt::{Display, Formatter};
 use std::fs;
+use std::fs::OpenOptions;
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
+use fs2::FileExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use jot_cache::JotPaths;
 use jot_platform::{OperatingSystem, Platform};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tempfile::TempDir;
+use tempfile::{NamedTempFile, TempDir};
 use time::OffsetDateTime;
 use zip::ZipArchive;
 
@@ -120,12 +122,19 @@ impl ToolchainManager {
         request: &impl ToolchainRequest,
         options: InstallOptions,
     ) -> Result<InstalledJdk, ToolchainError> {
+        let vendor = request.vendor().unwrap_or(JdkVendor::Adoptium);
+        let _install_lock = InstallLock::acquire(
+            &self.paths,
+            vendor,
+            request.version(),
+            &self.platform,
+        )?;
+
         let resolve_progress = spinner(&format!(
             "Resolving JDK {} ({})",
             request.version(),
-            request.vendor().unwrap_or(JdkVendor::Adoptium)
+            vendor
         ));
-        let vendor = request.vendor().unwrap_or(JdkVendor::Adoptium);
         let asset = self.resolve_latest_asset(request.version(), vendor)?;
         resolve_progress.finish_with_message(format!(
             "Resolved {} {} for {}",
@@ -139,18 +148,24 @@ impl ToolchainManager {
         let metadata_path = install_dir.join("install.json");
 
         if metadata_path.is_file() && !options.force {
-            return Self::read_installation(&metadata_path);
+            let existing = Self::read_installation(&metadata_path)?;
+            if is_installation_usable(&existing) {
+                return Ok(existing);
+            }
+            fs::remove_dir_all(&install_dir)?;
         }
 
-        if install_dir.exists() && options.force {
+        if install_dir.exists() && (options.force || !metadata_path.is_file()) {
             fs::remove_dir_all(&install_dir)?;
         }
 
         let download_path = self.paths.downloads_dir().join(&asset.binary.package.name);
-        if !download_path.is_file() || options.force {
-            self.download(&asset.binary.package.link, &download_path)?;
-        }
-        self.verify_checksum(&download_path, &asset.binary.package.checksum)?;
+        self.fetch_archive_checked(
+            &asset.binary.package.link,
+            &download_path,
+            &asset.binary.package.checksum,
+            options.force,
+        )?;
 
         let temp_dir = TempDir::new_in(self.paths.jdks_dir())?;
         let extract_progress = spinner(&format!("Extracting {}", asset.binary.package.name));
@@ -244,7 +259,7 @@ impl ToolchainManager {
                     .unwrap_or("archive")
             ),
         );
-        let mut file = fs::File::create(destination)?;
+        let mut temp_file = NamedTempFile::new_in(self.paths.downloads_dir())?;
         let mut buffer = [0_u8; 64 * 1024];
 
         loop {
@@ -252,9 +267,17 @@ impl ToolchainManager {
             if bytes_read == 0 {
                 break;
             }
-            file.write_all(&buffer[..bytes_read])?;
+            temp_file.write_all(&buffer[..bytes_read])?;
             progress.inc(bytes_read as u64);
         }
+
+        temp_file.flush()?;
+        if destination.exists() {
+            fs::remove_file(destination)?;
+        }
+        temp_file
+            .persist(destination)
+            .map_err(|error| ToolchainError::Io(error.error))?;
 
         progress.finish_with_message(format!(
             "Downloaded {}",
@@ -264,6 +287,31 @@ impl ToolchainManager {
                 .unwrap_or("archive")
         ));
         Ok(())
+    }
+
+    fn fetch_archive_checked(
+        &self,
+        url: &str,
+        destination: &Path,
+        checksum: &str,
+        force: bool,
+    ) -> Result<(), ToolchainError> {
+        if force && destination.exists() {
+            fs::remove_file(destination)?;
+        }
+
+        if destination.is_file() {
+            match self.verify_checksum(destination, checksum) {
+                Ok(_) => return Ok(()),
+                Err(ToolchainError::ChecksumMismatch { .. }) => {
+                    fs::remove_file(destination)?;
+                }
+                Err(other) => return Err(other),
+            }
+        }
+
+        self.download(url, destination)?;
+        self.verify_checksum(destination, checksum)
     }
 
     fn verify_checksum(&self, path: &Path, expected: &str) -> Result<(), ToolchainError> {
@@ -315,6 +363,38 @@ impl ToolchainManager {
     fn read_installation(path: &Path) -> Result<InstalledJdk, ToolchainError> {
         let content = fs::read(path)?;
         Ok(serde_json::from_slice(&content)?)
+    }
+}
+
+struct InstallLock {
+    file: fs::File,
+}
+
+impl InstallLock {
+    fn acquire(
+        paths: &JotPaths,
+        vendor: JdkVendor,
+        version: &str,
+        platform: &Platform,
+    ) -> Result<Self, ToolchainError> {
+        let lock_path = paths.install_lock_path(&vendor.to_string(), version, &platform.to_string());
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&lock_path)?;
+        file.lock_exclusive()
+            .map_err(|source| ToolchainError::LockAcquisition {
+                path: lock_path,
+                source,
+            })?;
+        Ok(Self { file })
+    }
+}
+
+impl Drop for InstallLock {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
     }
 }
 
@@ -376,6 +456,15 @@ fn detect_java_home(root: &Path) -> Result<PathBuf, ToolchainError> {
     Ok(first)
 }
 
+fn is_installation_usable(installation: &InstalledJdk) -> bool {
+    java_binary_path(&installation.java_home).is_file()
+}
+
+fn java_binary_path(java_home: &Path) -> PathBuf {
+    let executable = if cfg!(windows) { "java.exe" } else { "java" };
+    java_home.join("bin").join(executable)
+}
+
 #[derive(Debug, Deserialize)]
 struct AdoptiumAsset {
     binary: AdoptiumBinary,
@@ -414,6 +503,8 @@ pub enum ToolchainError {
     Json(#[from] serde_json::Error),
     #[error("failed to normalize PATH entries: {0}")]
     JoinPaths(#[source] std::env::JoinPathsError),
+    #[error("failed to acquire install lock at {path}: {source}")]
+    LockAcquisition { path: PathBuf, source: std::io::Error },
     #[error("archive extraction failed: {0}")]
     Zip(#[from] zip::result::ZipError),
     #[error("failed to resolve an Adoptium JDK for version {version}, vendor {vendor}, platform {platform}")]
@@ -438,9 +529,13 @@ pub enum ToolchainError {
 
 #[cfg(test)]
 mod tests {
-    use super::{InstalledJdk, JdkVendor, ToolchainRequest};
+    use super::{
+        InstalledJdk, JdkVendor, ToolchainRequest, is_installation_usable, java_binary_path,
+    };
     use jot_platform::{Architecture, OperatingSystem, Platform};
+    use std::fs;
     use std::path::PathBuf;
+    use tempfile::tempdir;
     use time::OffsetDateTime;
 
     struct Request {
@@ -486,5 +581,31 @@ mod tests {
         assert_eq!(JdkVendor::Corretto.as_adoptium_vendor(), "amazon");
         assert_eq!(JdkVendor::Zulu.as_adoptium_vendor(), "azul");
         assert_eq!(JdkVendor::Oracle.as_adoptium_vendor(), "oracle");
+    }
+
+    #[test]
+    fn installation_is_usable_only_when_java_binary_exists() {
+        let temp = tempdir().expect("tempdir");
+        let java_home = temp.path().join("jdk-home");
+        fs::create_dir_all(java_home.join("bin")).expect("create bin directory");
+
+        let installation = InstalledJdk {
+            vendor: JdkVendor::Adoptium,
+            requested_version: "21".into(),
+            release_name: "jdk-21.0.10+7".into(),
+            semver: "21.0.10+7.0.LTS".into(),
+            java_home: java_home.clone(),
+            install_dir: temp.path().join("install-dir"),
+            platform: Platform {
+                os: OperatingSystem::Mac,
+                arch: Architecture::Aarch64,
+            },
+            installed_at: OffsetDateTime::UNIX_EPOCH,
+        };
+
+        assert!(!is_installation_usable(&installation));
+
+        fs::write(java_binary_path(&java_home), "binary").expect("write fake java binary");
+        assert!(is_installation_usable(&installation));
     }
 }

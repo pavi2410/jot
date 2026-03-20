@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 clap.workspace = true
+fs2.workspace = true
 hex.workspace = true
 indicatif.workspace = true
 jot-cache = { path = "../jot-cache" }

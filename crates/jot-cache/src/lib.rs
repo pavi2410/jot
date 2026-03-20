@@ -27,24 +27,32 @@ impl JotPaths {
         self.root.join("downloads")
     }
 
+    pub fn locks_dir(&self) -> PathBuf {
+        self.root.join("locks")
+    }
+
     pub fn ensure_exists(&self) -> Result<(), CacheError> {
         fs::create_dir_all(self.root())?;
         fs::create_dir_all(self.jdks_dir())?;
         fs::create_dir_all(self.downloads_dir())?;
+        fs::create_dir_all(self.locks_dir())?;
         Ok(())
     }
 
     pub fn clear_global_cache(&self) -> Result<CacheCleanupSummary, CacheError> {
         let jdk_entries = count_entries(&self.jdks_dir())?;
         let download_entries = count_entries(&self.downloads_dir())?;
+        let lock_entries = count_entries(&self.locks_dir())?;
 
         remove_dir_if_exists(&self.jdks_dir())?;
         remove_dir_if_exists(&self.downloads_dir())?;
+        remove_dir_if_exists(&self.locks_dir())?;
         self.ensure_exists()?;
 
         Ok(CacheCleanupSummary {
             removed_jdk_entries: jdk_entries,
             removed_download_entries: download_entries,
+            removed_lock_entries: lock_entries,
         })
     }
 
@@ -52,12 +60,30 @@ impl JotPaths {
         self.jdks_dir()
             .join(format!("{vendor}-{release_name}-{platform}"))
     }
+
+    pub fn install_lock_path(&self, vendor: &str, version: &str, platform: &str) -> PathBuf {
+        let safe_version = sanitize_for_filename(version);
+        let safe_platform = sanitize_for_filename(platform);
+        self.locks_dir()
+            .join(format!("jdk-{vendor}-{safe_version}-{safe_platform}.lock"))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CacheCleanupSummary {
     pub removed_jdk_entries: usize,
     pub removed_download_entries: usize,
+    pub removed_lock_entries: usize,
+}
+
+fn sanitize_for_filename(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' => ch,
+            _ => '_',
+        })
+        .collect()
 }
 
 fn count_entries(path: &Path) -> Result<usize, CacheError> {
@@ -100,13 +126,17 @@ mod tests {
 
         fs::write(paths.jdks_dir().join("installed.json"), "jdk").expect("write jdk metadata");
         fs::write(paths.downloads_dir().join("archive.tar.gz"), "jar").expect("write archive");
+        fs::write(paths.locks_dir().join("install.lock"), "lock").expect("write lock file");
 
         let summary = paths.clear_global_cache().expect("clear cache");
         assert_eq!(summary.removed_jdk_entries, 1);
         assert_eq!(summary.removed_download_entries, 1);
+        assert_eq!(summary.removed_lock_entries, 1);
         assert!(paths.jdks_dir().is_dir());
         assert!(paths.downloads_dir().is_dir());
+        assert!(paths.locks_dir().is_dir());
         assert_eq!(fs::read_dir(paths.jdks_dir()).expect("read jdks").count(), 0);
         assert_eq!(fs::read_dir(paths.downloads_dir()).expect("read downloads").count(), 0);
+        assert_eq!(fs::read_dir(paths.locks_dir()).expect("read locks").count(), 0);
     }
 }

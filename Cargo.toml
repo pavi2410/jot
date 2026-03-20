@@ -16,6 +16,7 @@ edition = "2024"
 clap = { version = "4.5.38", features = ["derive"] }
 directories = "5.0.1"
 flate2 = "1.1.1"
+fs2 = "0.4.3"
 hex = "0.4.3"
 indicatif = "0.17.11"
 reqwest = { version = "0.12.15", default-features = false, features = ["blocking", "json", "rustls-tls"] }
