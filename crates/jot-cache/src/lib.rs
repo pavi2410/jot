@@ -27,6 +27,10 @@ impl JotPaths {
         self.root.join("downloads")
     }
 
+    pub fn resolve_cache_dir(&self) -> PathBuf {
+        self.root.join("resolve-cache")
+    }
+
     pub fn locks_dir(&self) -> PathBuf {
         self.root.join("locks")
     }
@@ -35,6 +39,7 @@ impl JotPaths {
         fs::create_dir_all(self.root())?;
         fs::create_dir_all(self.jdks_dir())?;
         fs::create_dir_all(self.downloads_dir())?;
+        fs::create_dir_all(self.resolve_cache_dir())?;
         fs::create_dir_all(self.locks_dir())?;
         Ok(())
     }
@@ -42,16 +47,19 @@ impl JotPaths {
     pub fn clear_global_cache(&self) -> Result<CacheCleanupSummary, CacheError> {
         let jdk_entries = count_entries(&self.jdks_dir())?;
         let download_entries = count_entries(&self.downloads_dir())?;
+        let resolve_cache_entries = count_entries(&self.resolve_cache_dir())?;
         let lock_entries = count_entries(&self.locks_dir())?;
 
         remove_dir_if_exists(&self.jdks_dir())?;
         remove_dir_if_exists(&self.downloads_dir())?;
+        remove_dir_if_exists(&self.resolve_cache_dir())?;
         remove_dir_if_exists(&self.locks_dir())?;
         self.ensure_exists()?;
 
         Ok(CacheCleanupSummary {
             removed_jdk_entries: jdk_entries,
             removed_download_entries: download_entries,
+            removed_resolve_cache_entries: resolve_cache_entries,
             removed_lock_entries: lock_entries,
         })
     }
@@ -73,6 +81,7 @@ impl JotPaths {
 pub struct CacheCleanupSummary {
     pub removed_jdk_entries: usize,
     pub removed_download_entries: usize,
+    pub removed_resolve_cache_entries: usize,
     pub removed_lock_entries: usize,
 }
 
@@ -126,17 +135,21 @@ mod tests {
 
         fs::write(paths.jdks_dir().join("installed.json"), "jdk").expect("write jdk metadata");
         fs::write(paths.downloads_dir().join("archive.tar.gz"), "jar").expect("write archive");
+        fs::write(paths.resolve_cache_dir().join("asset.json"), "cache").expect("write resolve cache");
         fs::write(paths.locks_dir().join("install.lock"), "lock").expect("write lock file");
 
         let summary = paths.clear_global_cache().expect("clear cache");
         assert_eq!(summary.removed_jdk_entries, 1);
         assert_eq!(summary.removed_download_entries, 1);
+        assert_eq!(summary.removed_resolve_cache_entries, 1);
         assert_eq!(summary.removed_lock_entries, 1);
         assert!(paths.jdks_dir().is_dir());
         assert!(paths.downloads_dir().is_dir());
+        assert!(paths.resolve_cache_dir().is_dir());
         assert!(paths.locks_dir().is_dir());
         assert_eq!(fs::read_dir(paths.jdks_dir()).expect("read jdks").count(), 0);
         assert_eq!(fs::read_dir(paths.downloads_dir()).expect("read downloads").count(), 0);
+        assert_eq!(fs::read_dir(paths.resolve_cache_dir()).expect("read resolve cache").count(), 0);
         assert_eq!(fs::read_dir(paths.locks_dir()).expect("read locks").count(), 0);
     }
 }

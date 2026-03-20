@@ -3,6 +3,7 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use flate2::read::GzDecoder;
 use fs2::FileExt;
@@ -108,6 +109,8 @@ pub struct ToolchainManager {
 }
 
 impl ToolchainManager {
+    const RESOLVE_CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
+
     pub fn new(paths: JotPaths) -> Result<Self, ToolchainError> {
         let client = Client::builder().build()?;
         Ok(Self {
@@ -232,6 +235,11 @@ impl ToolchainManager {
         feature_version: &str,
         vendor: JdkVendor,
     ) -> Result<AdoptiumAsset, ToolchainError> {
+        let cache_path = self.resolve_cache_path(feature_version, vendor);
+        if let Some(cached) = self.read_resolve_cache(&cache_path)? {
+            return Ok(cached.asset);
+        }
+
         let url = format!(
             "https://api.adoptium.net/v3/assets/latest/{feature_version}/hotspot?release_type=ga&os={os}&architecture={arch}&image_type=jdk&vendor={vendor}",
             os = self.platform.os.as_adoptium(),
@@ -239,11 +247,43 @@ impl ToolchainManager {
             vendor = vendor.as_adoptium_vendor(),
         );
         let assets: Vec<AdoptiumAsset> = self.client.get(url).send()?.error_for_status()?.json()?;
-        assets.into_iter().next().ok_or(ToolchainError::NoMatchingAsset {
+        let asset = assets.into_iter().next().ok_or(ToolchainError::NoMatchingAsset {
             version: feature_version.to_owned(),
             platform: self.platform,
             vendor,
-        })
+        })?;
+
+        let cache_entry = ResolveCacheEntry {
+            fetched_at: OffsetDateTime::now_utc(),
+            asset: asset.clone(),
+        };
+        fs::write(cache_path, serde_json::to_vec_pretty(&cache_entry)?)?;
+
+        Ok(asset)
+    }
+
+    fn resolve_cache_path(&self, feature_version: &str, vendor: JdkVendor) -> PathBuf {
+        let safe_version = sanitize_for_filename(feature_version);
+        self.paths.resolve_cache_dir().join(format!(
+            "asset-{vendor}-{version}-{platform}.json",
+            vendor = vendor,
+            version = safe_version,
+            platform = self.platform,
+        ))
+    }
+
+    fn read_resolve_cache(&self, path: &Path) -> Result<Option<ResolveCacheEntry>, ToolchainError> {
+        if !path.is_file() {
+            return Ok(None);
+        }
+
+        let bytes = fs::read(path)?;
+        let entry: ResolveCacheEntry = serde_json::from_slice(&bytes)?;
+        if is_cache_fresh(entry.fetched_at, OffsetDateTime::now_utc(), Self::RESOLVE_CACHE_TTL) {
+            return Ok(Some(entry));
+        }
+
+        Ok(None)
     }
 
     fn download(&self, url: &str, destination: &Path) -> Result<(), ToolchainError> {
@@ -460,33 +500,58 @@ fn is_installation_usable(installation: &InstalledJdk) -> bool {
     java_binary_path(&installation.java_home).is_file()
 }
 
+fn sanitize_for_filename(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' => ch,
+            _ => '_',
+        })
+        .collect()
+}
+
+fn is_cache_fresh(fetched_at: OffsetDateTime, now: OffsetDateTime, ttl: Duration) -> bool {
+    if now < fetched_at {
+        return true;
+    }
+
+    let age = now - fetched_at;
+    age.whole_seconds() <= ttl.as_secs() as i64
+}
+
 fn java_binary_path(java_home: &Path) -> PathBuf {
     let executable = if cfg!(windows) { "java.exe" } else { "java" };
     java_home.join("bin").join(executable)
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct AdoptiumAsset {
     binary: AdoptiumBinary,
     release_name: String,
     version: AdoptiumVersion,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct AdoptiumBinary {
     package: AdoptiumPackage,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct AdoptiumPackage {
     checksum: String,
     link: String,
     name: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct AdoptiumVersion {
     semver: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct ResolveCacheEntry {
+    fetched_at: OffsetDateTime,
+    asset: AdoptiumAsset,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -530,11 +595,13 @@ pub enum ToolchainError {
 #[cfg(test)]
 mod tests {
     use super::{
-        InstalledJdk, JdkVendor, ToolchainRequest, is_installation_usable, java_binary_path,
+        InstalledJdk, JdkVendor, ToolchainRequest, is_cache_fresh, is_installation_usable,
+        java_binary_path,
     };
     use jot_platform::{Architecture, OperatingSystem, Platform};
     use std::fs;
     use std::path::PathBuf;
+    use std::time::Duration;
     use tempfile::tempdir;
     use time::OffsetDateTime;
 
@@ -607,5 +674,16 @@ mod tests {
 
         fs::write(java_binary_path(&java_home), "binary").expect("write fake java binary");
         assert!(is_installation_usable(&installation));
+    }
+
+    #[test]
+    fn cache_freshness_respects_ttl_boundary() {
+        let now = OffsetDateTime::UNIX_EPOCH + time::Duration::seconds(1000);
+        let fetched_recent = now - time::Duration::seconds(60);
+        let fetched_stale = now - time::Duration::hours(8);
+        let ttl = Duration::from_secs(6 * 60 * 60);
+
+        assert!(is_cache_fresh(fetched_recent, now, ttl));
+        assert!(!is_cache_fresh(fetched_stale, now, ttl));
     }
 }
