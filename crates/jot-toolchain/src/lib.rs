@@ -18,12 +18,18 @@ use zip::ZipArchive;
 #[serde(rename_all = "kebab-case")]
 pub enum JdkVendor {
     Adoptium,
+    Corretto,
+    Zulu,
+    Oracle,
 }
 
 impl JdkVendor {
     pub fn as_adoptium_vendor(self) -> &'static str {
         match self {
             Self::Adoptium => "eclipse",
+            Self::Corretto => "amazon",
+            Self::Zulu => "azul",
+            Self::Oracle => "oracle",
         }
     }
 }
@@ -32,6 +38,9 @@ impl Display for JdkVendor {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::Adoptium => "adoptium",
+            Self::Corretto => "corretto",
+            Self::Zulu => "zulu",
+            Self::Oracle => "oracle",
         })
     }
 }
@@ -469,5 +478,13 @@ mod tests {
             version: "21".into(),
             vendor: Some(JdkVendor::Adoptium),
         }));
+    }
+
+    #[test]
+    fn vendor_mappings_match_expected_values() {
+        assert_eq!(JdkVendor::Adoptium.as_adoptium_vendor(), "eclipse");
+        assert_eq!(JdkVendor::Corretto.as_adoptium_vendor(), "amazon");
+        assert_eq!(JdkVendor::Zulu.as_adoptium_vendor(), "azul");
+        assert_eq!(JdkVendor::Oracle.as_adoptium_vendor(), "oracle");
     }
 }
