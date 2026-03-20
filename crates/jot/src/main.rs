@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use jot_cache::JotPaths;
 use jot_config::{find_workspace_jot_toml, pin_java_toolchain, read_toolchain_request};
+use jot_resolver::MavenResolver;
 use jot_toolchain::{InstallOptions, JavaToolchainRequest, JdkVendor, ToolchainManager};
 
 #[derive(Debug, Parser)]
@@ -17,6 +18,9 @@ enum Command {
     Clean {
         #[arg(long)]
         global: bool,
+    },
+    Resolve {
+        dependency: String,
     },
     Java(JavaCommand),
 }
@@ -61,9 +65,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Command::Clean { global } => handle_clean(global, paths)?,
+        Command::Resolve { dependency } => handle_resolve(&dependency)?,
         Command::Java(command) => handle_java(command, manager, paths)?,
     }
 
+    Ok(())
+}
+
+fn handle_resolve(dependency: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let resolver = MavenResolver::new()?;
+    let coordinate = resolver.resolve_coordinate(dependency)?;
+    println!("{}", coordinate);
     Ok(())
 }
 

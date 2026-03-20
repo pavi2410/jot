@@ -7,4 +7,5 @@ edition.workspace = true
 clap.workspace = true
 jot-cache = { path = "../jot-cache" }
 jot-config = { path = "../jot-config" }
+jot-resolver = { path = "../jot-resolver" }
 jot-toolchain = { path = "../jot-toolchain" }
