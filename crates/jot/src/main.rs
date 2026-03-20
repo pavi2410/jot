@@ -21,6 +21,8 @@ enum Command {
     },
     Resolve {
         dependency: String,
+        #[arg(long)]
+        deps: bool,
     },
     Java(JavaCommand),
 }
@@ -65,17 +67,35 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Command::Clean { global } => handle_clean(global, paths)?,
-        Command::Resolve { dependency } => handle_resolve(&dependency)?,
+        Command::Resolve { dependency, deps } => handle_resolve(&dependency, deps)?,
         Command::Java(command) => handle_java(command, manager, paths)?,
     }
 
     Ok(())
 }
 
-fn handle_resolve(dependency: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn handle_resolve(dependency: &str, deps: bool) -> Result<(), Box<dyn std::error::Error>> {
     let resolver = MavenResolver::new()?;
-    let coordinate = resolver.resolve_coordinate(dependency)?;
-    println!("{}", coordinate);
+    if deps {
+        let (coordinate, dependencies) = resolver.resolve_direct_dependencies(dependency)?;
+        println!("{}", coordinate);
+        if dependencies.is_empty() {
+            println!("  (no direct dependencies)");
+        } else {
+            for dependency in dependencies {
+                let version = dependency.version.unwrap_or_else(|| "<managed>".to_owned());
+                let scope = dependency.scope.unwrap_or_else(|| "compile".to_owned());
+                let optional = if dependency.optional { " optional" } else { "" };
+                println!(
+                    "  - {}:{}:{} [{}{}]",
+                    dependency.group, dependency.artifact, version, scope, optional
+                );
+            }
+        }
+    } else {
+        let coordinate = resolver.resolve_coordinate(dependency)?;
+        println!("{}", coordinate);
+    }
     Ok(())
 }
 

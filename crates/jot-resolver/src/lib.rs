@@ -45,6 +45,18 @@ impl MavenCoordinate {
             MAVEN_CENTRAL, group_path, self.artifact
         )
     }
+
+    fn pom_url(&self) -> Result<String, ResolverError> {
+        let version = self
+            .version
+            .as_deref()
+            .ok_or_else(|| ResolverError::MissingVersionForPom(self.to_string()))?;
+        let group_path = self.group.replace('.', "/");
+        Ok(format!(
+            "{}/{}/{}/{}/{}-{}.pom",
+            MAVEN_CENTRAL, group_path, self.artifact, version, self.artifact, version
+        ))
+    }
 }
 
 impl Display for MavenCoordinate {
@@ -89,6 +101,49 @@ impl MavenResolver {
             .ok_or_else(|| ResolverError::MissingVersionMetadata(coordinate.to_string()))?;
         Ok(coordinate.with_version(version))
     }
+
+    pub fn resolve_direct_dependencies(
+        &self,
+        input: &str,
+    ) -> Result<(MavenCoordinate, Vec<ResolvedDependency>), ResolverError> {
+        let coordinate = self.resolve_coordinate(input)?;
+        let pom_url = coordinate.pom_url()?;
+        let pom_xml = self
+            .client
+            .get(pom_url)
+            .send()?
+            .error_for_status()?
+            .text()?;
+        let project: MavenProject = from_str(&pom_xml)?;
+
+        let dependencies = project
+            .dependencies
+            .map(|deps| {
+                deps.dependency
+                    .into_iter()
+                    .filter(|dependency| dependency.group_id.is_some() && dependency.artifact_id.is_some())
+                    .map(|dependency| ResolvedDependency {
+                        group: dependency.group_id.unwrap_or_default(),
+                        artifact: dependency.artifact_id.unwrap_or_default(),
+                        version: dependency.version,
+                        scope: dependency.scope,
+                        optional: dependency.optional.unwrap_or(false),
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        Ok((coordinate, dependencies))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedDependency {
+    pub group: String,
+    pub artifact: String,
+    pub version: Option<String>,
+    pub scope: Option<String>,
+    pub optional: bool,
 }
 
 fn resolve_best_version(versioning: &MavenVersioning) -> Option<String> {
@@ -153,6 +208,28 @@ struct MavenVersions {
     version: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct MavenProject {
+    dependencies: Option<MavenDependencies>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MavenDependencies {
+    #[serde(default)]
+    dependency: Vec<MavenDependency>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MavenDependency {
+    #[serde(rename = "groupId")]
+    group_id: Option<String>,
+    #[serde(rename = "artifactId")]
+    artifact_id: Option<String>,
+    version: Option<String>,
+    scope: Option<String>,
+    optional: Option<bool>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ResolverError {
     #[error("invalid Maven coordinate {0}; expected group:artifact or group:artifact:version")]
@@ -163,14 +240,17 @@ pub enum ResolverError {
     Xml(#[from] quick_xml::DeError),
     #[error("version metadata is missing for {0}")]
     MissingVersionMetadata(String),
+    #[error("cannot compute POM URL because version is missing for {0}")]
+    MissingVersionForPom(String),
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        MavenCoordinate, MavenVersioning, MavenVersions, is_stable_maven_version,
-        resolve_best_version,
+        MavenCoordinate, MavenDependency, MavenProject, MavenVersioning, MavenVersions,
+        is_stable_maven_version, resolve_best_version,
     };
+    use quick_xml::de::from_str;
 
     #[test]
     fn parses_coordinates_with_optional_version() {
@@ -228,4 +308,31 @@ mod tests {
         assert!(!is_stable_maven_version("2.0.0-M1"));
         assert!(!is_stable_maven_version("2.0.0-RC1"));
     }
+
+        #[test]
+        fn parses_maven_dependencies_block_from_pom_xml() {
+                let xml = r#"
+                        <project>
+                            <dependencies>
+                                <dependency>
+                                    <groupId>org.junit.jupiter</groupId>
+                                    <artifactId>junit-jupiter-api</artifactId>
+                                    <version>5.11.0</version>
+                                    <scope>test</scope>
+                                    <optional>false</optional>
+                                </dependency>
+                            </dependencies>
+                        </project>
+                "#;
+
+                let project: MavenProject = from_str(xml).expect("parse pom");
+                let dependencies = project.dependencies.expect("dependencies").dependency;
+                assert_eq!(dependencies.len(), 1);
+                let first: &MavenDependency = &dependencies[0];
+                assert_eq!(first.group_id.as_deref(), Some("org.junit.jupiter"));
+                assert_eq!(first.artifact_id.as_deref(), Some("junit-jupiter-api"));
+                assert_eq!(first.version.as_deref(), Some("5.11.0"));
+                assert_eq!(first.scope.as_deref(), Some("test"));
+                assert_eq!(first.optional, Some(false));
+        }
 }
