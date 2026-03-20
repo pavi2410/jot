@@ -81,7 +81,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn handle_resolve(dependency: &str, deps: bool) -> Result<(), Box<dyn std::error::Error>> {
-    let resolver = MavenResolver::new()?;
+    let paths = JotPaths::new()?;
+    paths.ensure_exists()?;
+    let resolver = MavenResolver::new(paths)?;
     if deps {
         let (coordinate, dependencies) = resolver.resolve_direct_dependencies(dependency)?;
         println!("{}", coordinate);
@@ -106,7 +108,9 @@ fn handle_resolve(dependency: &str, deps: bool) -> Result<(), Box<dyn std::error
 }
 
 fn handle_tree(dependency: &str, depth: usize) -> Result<(), Box<dyn std::error::Error>> {
-    let resolver = MavenResolver::new()?;
+    let paths = JotPaths::new()?;
+    paths.ensure_exists()?;
+    let resolver = MavenResolver::new(paths)?;
     let entries = resolver.resolve_dependency_tree(dependency, depth)?;
     for entry in entries {
         print_tree_entry(&entry);

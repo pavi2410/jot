@@ -1,8 +1,12 @@
+use jot_cache::JotPaths;
 use quick_xml::de::from_str;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 const MAVEN_CENTRAL: &str = "https://repo1.maven.org/maven2";
 
@@ -73,12 +77,16 @@ impl Display for MavenCoordinate {
 #[derive(Debug)]
 pub struct MavenResolver {
     client: Client,
+    paths: JotPaths,
 }
 
 impl MavenResolver {
-    pub fn new() -> Result<Self, ResolverError> {
+    const METADATA_CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
+
+    pub fn new(paths: JotPaths) -> Result<Self, ResolverError> {
         Ok(Self {
             client: Client::builder().build()?,
+            paths,
         })
     }
 
@@ -88,12 +96,7 @@ impl MavenResolver {
             return Ok(coordinate);
         }
 
-        let metadata_xml = self
-            .client
-            .get(coordinate.metadata_url())
-            .send()?
-            .error_for_status()?
-            .text()?;
+        let metadata_xml = self.fetch_metadata_xml(&coordinate)?;
         let metadata: MavenMetadata = from_str(&metadata_xml)?;
         let version = metadata
             .versioning
@@ -194,13 +197,7 @@ impl MavenResolver {
         &self,
         coordinate: &MavenCoordinate,
     ) -> Result<Vec<ResolvedDependency>, ResolverError> {
-        let pom_url = coordinate.pom_url()?;
-        let pom_xml = self
-            .client
-            .get(pom_url)
-            .send()?
-            .error_for_status()?
-            .text()?;
+        let pom_xml = self.fetch_pom_xml(coordinate)?;
         let project: MavenProject = from_str(&pom_xml)?;
 
         let dependencies = project
@@ -221,6 +218,55 @@ impl MavenResolver {
             .unwrap_or_default();
 
         Ok(dependencies)
+    }
+
+    fn fetch_metadata_xml(&self, coordinate: &MavenCoordinate) -> Result<String, ResolverError> {
+        let url = coordinate.metadata_url();
+        let cache_path = self.metadata_cache_path(coordinate);
+        self.fetch_text_with_cache(&url, &cache_path, Some(Self::METADATA_CACHE_TTL))
+    }
+
+    fn fetch_pom_xml(&self, coordinate: &MavenCoordinate) -> Result<String, ResolverError> {
+        let url = coordinate.pom_url()?;
+        let cache_path = self.pom_cache_path(coordinate)?;
+        self.fetch_text_with_cache(&url, &cache_path, None)
+    }
+
+    fn fetch_text_with_cache(
+        &self,
+        url: &str,
+        cache_path: &Path,
+        ttl: Option<Duration>,
+    ) -> Result<String, ResolverError> {
+        if cache_path.is_file() && is_cache_usable(cache_path, ttl)? {
+            return Ok(fs::read_to_string(cache_path)?);
+        }
+
+        let body = self.client.get(url).send()?.error_for_status()?.text()?;
+        fs::write(cache_path, &body)?;
+        Ok(body)
+    }
+
+    fn metadata_cache_path(&self, coordinate: &MavenCoordinate) -> PathBuf {
+        self.paths.resolve_cache_dir().join(format!(
+            "maven-metadata-{}-{}.xml",
+            sanitize_for_filename(&coordinate.group),
+            sanitize_for_filename(&coordinate.artifact),
+        ))
+    }
+
+    fn pom_cache_path(&self, coordinate: &MavenCoordinate) -> Result<PathBuf, ResolverError> {
+        Ok(self.paths.resolve_cache_dir().join(format!(
+            "pom-{}-{}-{}.xml",
+            sanitize_for_filename(&coordinate.group),
+            sanitize_for_filename(&coordinate.artifact),
+            sanitize_for_filename(
+                coordinate
+                    .version
+                    .as_deref()
+                    .ok_or_else(|| ResolverError::MissingVersionForPom(coordinate.to_string()))?
+            ),
+        )))
     }
 }
 
@@ -308,6 +354,29 @@ fn is_unresolved_version_expression(version: &str) -> bool {
     version.contains("${") || version.contains('[') || version.contains('(') || version.contains(',')
 }
 
+fn sanitize_for_filename(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' => ch,
+            _ => '_',
+        })
+        .collect()
+}
+
+fn is_cache_usable(path: &Path, ttl: Option<Duration>) -> Result<bool, ResolverError> {
+    let Some(ttl) = ttl else {
+        return Ok(true);
+    };
+
+    let metadata = fs::metadata(path)?;
+    let modified = metadata.modified()?;
+    match modified.elapsed() {
+        Ok(elapsed) => Ok(elapsed <= ttl),
+        Err(_) => Ok(true),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct MavenMetadata {
     versioning: Option<MavenVersioning>,
@@ -352,8 +421,12 @@ struct MavenDependency {
 pub enum ResolverError {
     #[error("invalid Maven coordinate {0}; expected group:artifact or group:artifact:version")]
     InvalidCoordinate(String),
+    #[error("cache error: {0}")]
+    Cache(#[from] jot_cache::CacheError),
     #[error("http error: {0}")]
     Http(#[from] reqwest::Error),
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
     #[error("xml parse error: {0}")]
     Xml(#[from] quick_xml::DeError),
     #[error("version metadata is missing for {0}")]
@@ -366,10 +439,14 @@ pub enum ResolverError {
 mod tests {
     use super::{
         MavenCoordinate, MavenDependency, MavenProject, MavenVersioning, MavenVersions,
-        ResolvedDependency, is_stable_maven_version, is_unresolved_version_expression,
+        ResolvedDependency, is_cache_usable, is_stable_maven_version,
+        is_unresolved_version_expression,
         resolve_best_version,
     };
     use quick_xml::de::from_str;
+    use std::fs;
+    use std::time::Duration;
+    use tempfile::tempdir;
 
     #[test]
     fn parses_coordinates_with_optional_version() {
@@ -489,5 +566,15 @@ mod tests {
                     optional: false,
                 };
                 assert!(managed.to_coordinate().expect("managed version").is_none());
+            }
+
+            #[test]
+            fn cache_usability_respects_file_age_when_ttl_is_present() {
+                let temp = tempdir().expect("tempdir");
+                let file_path = temp.path().join("metadata.xml");
+                fs::write(&file_path, "<metadata />").expect("write metadata");
+
+                assert!(is_cache_usable(&file_path, Some(Duration::from_secs(60))).expect("fresh cache"));
+                assert!(is_cache_usable(&file_path, None).expect("ttl-free cache"));
             }
 }
