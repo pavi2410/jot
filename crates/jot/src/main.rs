@@ -4,8 +4,8 @@ use clap::{Parser, Subcommand};
 use jot_builder::JavaProjectBuilder;
 use jot_cache::JotPaths;
 use jot_config::{
-    find_workspace_jot_toml, pin_java_toolchain, read_declared_dependencies,
-    read_toolchain_request,
+    find_workspace_jot_toml, find_workspace_root_jot_toml, load_workspace_build_config,
+    pin_java_toolchain, read_declared_dependencies, read_toolchain_request,
 };
 use jot_resolver::{MavenResolver, TreeEntry};
 use jot_toolchain::{InstallOptions, JavaToolchainRequest, JdkVendor, ToolchainManager};
@@ -19,7 +19,10 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    Build,
+    Build {
+        #[arg(long)]
+        module: Option<String>,
+    },
     Clean {
         #[arg(long)]
         global: bool,
@@ -42,6 +45,8 @@ enum Command {
         depth: usize,
     },
     Run {
+        #[arg(long)]
+        module: Option<String>,
         #[arg(last = true)]
         args: Vec<String>,
     },
@@ -88,7 +93,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let manager = ToolchainManager::new(paths.clone())?;
 
     match cli.command {
-        Command::Build => handle_build(paths, manager)?,
+        Command::Build { module } => handle_build(paths, manager, module.as_deref())?,
         Command::Clean { global } => handle_clean(global, paths)?,
         Command::Lock {
             dependencies,
@@ -96,7 +101,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             output,
         } => handle_lock(&dependencies, depth, &output)?,
         Command::Resolve { dependency, deps } => handle_resolve(&dependency, deps)?,
-        Command::Run { args } => handle_run(paths, manager, &args)?,
+        Command::Run { module, args } => handle_run(paths, manager, module.as_deref(), &args)?,
         Command::Test => handle_test(paths, manager)?,
         Command::Tree { dependency, depth } => handle_tree(&dependency, depth)?,
         Command::Java(command) => handle_java(command, manager, paths)?,
@@ -174,10 +179,36 @@ fn handle_tree(dependency: &str, depth: usize) -> Result<(), Box<dyn std::error:
 fn handle_build(
     paths: JotPaths,
     manager: ToolchainManager,
+    module: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let resolver = MavenResolver::new(paths)?;
     let builder = JavaProjectBuilder::new(resolver, manager);
-    let output = builder.build(&std::env::current_dir()?)?;
+    let cwd = std::env::current_dir()?;
+
+    if find_workspace_root_jot_toml(&cwd)?.is_some() {
+        let output = builder.build_workspace(&cwd, module)?;
+        for module in output.modules {
+            println!(
+                "built {} {} at {}",
+                module.build.project.name,
+                module.build.project.version,
+                module.build.jar_path.display()
+            );
+            if let Some(path) = module.build.fat_jar_path {
+                println!("fat-jar ({}): {}", module.module_name, path.display());
+            }
+            for warning in module.build.fat_jar_warnings {
+                eprintln!("warning: {warning}");
+            }
+        }
+        return Ok(());
+    }
+
+    if module.is_some() {
+        return Err("--module can only be used from inside a workspace".into());
+    }
+
+    let output = builder.build(&cwd)?;
     println!(
         "built {} {} at {}",
         output.project.name,
@@ -196,11 +227,47 @@ fn handle_build(
 fn handle_run(
     paths: JotPaths,
     manager: ToolchainManager,
+    module: Option<&str>,
     args: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let resolver = MavenResolver::new(paths)?;
     let builder = JavaProjectBuilder::new(resolver, manager);
-    builder.run(&std::env::current_dir()?, args)?;
+    let cwd = std::env::current_dir()?;
+
+    if find_workspace_root_jot_toml(&cwd)?.is_some() {
+        let module = module.ok_or("workspace run requires --module <name>")?;
+        let output = builder.build_workspace(&cwd, Some(module))?;
+        let selected = output
+            .modules
+            .into_iter()
+            .find(|item| item.module_name == module)
+            .ok_or("selected workspace module was not built")?;
+        let fat_jar = selected
+            .build
+            .fat_jar_path
+            .ok_or("selected module has no runnable main-class")?;
+
+        let status = std::process::Command::new(selected.build.installed_jdk.java_binary())
+            .current_dir(selected.build.project.project_root)
+            .arg("-jar")
+            .arg(fat_jar)
+            .args(args)
+            .stdin(std::process::Stdio::inherit())
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
+            .status()?;
+
+        if !status.success() {
+            return Err(format!("java exited with status {:?}", status.code()).into());
+        }
+        return Ok(());
+    }
+
+    if module.is_some() {
+        return Err("--module can only be used from inside a workspace".into());
+    }
+
+    builder.run(&cwd, args)?;
     Ok(())
 }
 
@@ -210,7 +277,21 @@ fn handle_test(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let resolver = MavenResolver::new(paths)?;
     let builder = JavaProjectBuilder::new(resolver, manager);
-    let output = builder.test(&std::env::current_dir()?)?;
+    let cwd = std::env::current_dir()?;
+
+    if let Some(workspace) = load_workspace_build_config(&cwd)? {
+        for member in workspace.members {
+            let output = builder.test(&member.project.project_root)?;
+            if output.tests_found {
+                println!("test execution completed for {}", output.project.name);
+            } else {
+                println!("no tests found for {}", output.project.name);
+            }
+        }
+        return Ok(());
+    }
+
+    let output = builder.test(&cwd)?;
     if output.tests_found {
         println!("test execution completed for {}", output.project.name);
     } else {

@@ -1,6 +1,6 @@
 use annotate_snippets::renderer::DecorStyle;
 use annotate_snippets::{AnnotationKind, Level, Renderer, Snippet};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ffi::OsString;
 use std::fs;
 use std::io::{IsTerminal, Read};
@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use zip::ZipArchive;
 
-use jot_config::{ProjectBuildConfig, load_project_build_config};
+use jot_config::{ProjectBuildConfig, WorkspaceBuildConfig, load_project_build_config, load_workspace_build_config};
 use jot_resolver::{MavenResolver, ResolvedArtifact};
 use jot_toolchain::{InstalledJdk, ToolchainManager};
 
@@ -31,7 +31,223 @@ impl JavaProjectBuilder {
 	}
 
 	pub fn build(&self, start: &Path) -> Result<BuildOutput, BuildError> {
+		let mut cache = HashMap::<PathBuf, BuildOutput>::new();
+		let mut stack = Vec::<PathBuf>::new();
 		let project = load_project_build_config(start)?;
+		self.build_project_with_cache(project, &mut cache, &mut stack)
+	}
+
+	pub fn build_workspace(
+		&self,
+		start: &Path,
+		module: Option<&str>,
+	) -> Result<WorkspaceBuildOutput, BuildError> {
+		let workspace = load_workspace_build_config(start)?
+			.ok_or_else(|| BuildError::WorkspaceNotFound(start.to_path_buf()))?;
+		let order = Self::workspace_build_order(&workspace)?;
+    
+		let selected_modules = Self::select_modules_for_build(&workspace, module)?;
+
+		let mut cache = HashMap::<PathBuf, BuildOutput>::new();
+		let mut stack = Vec::<PathBuf>::new();
+		let mut modules = Vec::new();
+
+		for module_name in order {
+			if !selected_modules.contains(&module_name) {
+				continue;
+			}
+			let member = workspace
+				.members
+				.iter()
+				.find(|candidate| candidate.module_name == module_name)
+				.ok_or_else(|| BuildError::UnknownWorkspaceModule(module_name.clone()))?;
+			let build = self.build_project_with_cache(
+				member.project.clone(),
+				&mut cache,
+				&mut stack,
+			)?;
+			modules.push(WorkspaceModuleBuildOutput {
+				module_name: module_name.clone(),
+				build,
+			});
+		}
+
+		Ok(WorkspaceBuildOutput { modules })
+	}
+
+	fn workspace_build_order(workspace: &WorkspaceBuildConfig) -> Result<Vec<String>, BuildError> {
+		let root_to_module = workspace
+			.members
+			.iter()
+			.map(|member| {
+				(
+					member.project.project_root.clone(),
+					member.module_name.clone(),
+				)
+			})
+			.collect::<BTreeMap<_, _>>();
+
+		let mut incoming = workspace
+			.members
+			.iter()
+			.map(|member| (member.module_name.clone(), 0_usize))
+			.collect::<BTreeMap<_, _>>();
+		let mut adjacency = workspace
+			.members
+			.iter()
+			.map(|member| (member.module_name.clone(), Vec::<String>::new()))
+			.collect::<BTreeMap<_, _>>();
+
+		for member in &workspace.members {
+			for dependency_path in &member.project.path_dependencies {
+				let dependency = root_to_module
+					.get(dependency_path)
+					.ok_or_else(|| BuildError::UnknownWorkspaceDependency {
+						module: member.module_name.clone(),
+						path: dependency_path.clone(),
+					})?
+					.clone();
+				adjacency
+					.entry(dependency)
+					.or_default()
+					.push(member.module_name.clone());
+				*incoming.entry(member.module_name.clone()).or_default() += 1;
+			}
+		}
+
+		let mut ready = incoming
+			.iter()
+			.filter_map(|(module, degree)| (*degree == 0).then_some(module.clone()))
+			.collect::<Vec<_>>();
+		ready.sort();
+
+		let mut order = Vec::new();
+		while let Some(module) = ready.pop() {
+			order.push(module.clone());
+			let mut neighbors = adjacency.remove(&module).unwrap_or_default();
+			neighbors.sort();
+			neighbors.reverse();
+			for dependent in neighbors {
+				if let Some(value) = incoming.get_mut(&dependent) {
+					*value = value.saturating_sub(1);
+					if *value == 0 {
+						ready.push(dependent);
+					}
+				}
+			}
+		}
+
+		if order.len() != workspace.members.len() {
+			return Err(BuildError::WorkspaceCycleDetected);
+		}
+
+		Ok(order)
+	}
+
+	fn select_modules_for_build(
+		workspace: &WorkspaceBuildConfig,
+		module: Option<&str>,
+	) -> Result<BTreeSet<String>, BuildError> {
+		let mut roots = workspace
+			.members
+			.iter()
+			.map(|member| {
+				(
+					member.module_name.clone(),
+					member.project.project_root.clone(),
+				)
+			})
+			.collect::<BTreeMap<_, _>>();
+
+		if module.is_none() {
+			return Ok(roots.keys().cloned().collect());
+		}
+
+		let requested = module.expect("module checked as some").to_owned();
+		let root = roots
+			.remove(&requested)
+			.ok_or_else(|| BuildError::UnknownWorkspaceModule(requested.clone()))?;
+
+		let by_root = workspace
+			.members
+			.iter()
+			.map(|member| (member.project.project_root.clone(), member.module_name.clone()))
+			.collect::<BTreeMap<_, _>>();
+
+		let by_module = workspace
+			.members
+			.iter()
+			.map(|member| (member.module_name.clone(), member))
+			.collect::<BTreeMap<_, _>>();
+
+		let mut selected = BTreeSet::new();
+		let mut stack = vec![by_root
+			.get(&root)
+			.expect("root is in workspace map")
+			.clone()];
+
+		while let Some(next) = stack.pop() {
+			if !selected.insert(next.clone()) {
+				continue;
+			}
+			let member = by_module
+				.get(&next)
+				.ok_or_else(|| BuildError::UnknownWorkspaceModule(next.clone()))?;
+			for dep_root in &member.project.path_dependencies {
+				let dep = by_root
+					.get(dep_root)
+					.ok_or_else(|| BuildError::UnknownWorkspaceDependency {
+						module: next.clone(),
+						path: dep_root.clone(),
+					})?
+					.clone();
+				stack.push(dep);
+			}
+		}
+
+		Ok(selected)
+	}
+
+	fn build_project_with_cache(
+		&self,
+		project: ProjectBuildConfig,
+		cache: &mut HashMap<PathBuf, BuildOutput>,
+		stack: &mut Vec<PathBuf>,
+	) -> Result<BuildOutput, BuildError> {
+		let project_root = project.project_root.canonicalize()?;
+		if let Some(cached) = cache.get(&project_root) {
+			return Ok(cached.clone());
+		}
+
+		if stack.contains(&project_root) {
+			let cycle = stack
+				.iter()
+				.chain(std::iter::once(&project_root))
+				.map(|path| path.display().to_string())
+				.collect::<Vec<_>>()
+				.join(" -> ");
+			return Err(BuildError::PathDependencyCycle(cycle));
+		}
+
+		stack.push(project_root.clone());
+		let mut path_dependency_jars = Vec::new();
+		for dependency_root in &project.path_dependencies {
+			let dependency_project = load_project_build_config(dependency_root)?;
+			let dependency_output = self.build_project_with_cache(dependency_project, cache, stack)?;
+			path_dependency_jars.push(dependency_output.jar_path.clone());
+		}
+
+		let output = self.build_project_internal(project, &path_dependency_jars)?;
+		cache.insert(project_root, output.clone());
+		stack.pop();
+		Ok(output)
+	}
+
+	fn build_project_internal(
+		&self,
+		project: ProjectBuildConfig,
+		extra_classpath: &[PathBuf],
+	) -> Result<BuildOutput, BuildError> {
 		let toolchain_request = project
 			.toolchain
 			.clone()
@@ -49,10 +265,11 @@ impl JavaProjectBuilder {
 			return Err(BuildError::NoJavaSources(project.project_root.clone()));
 		}
 
-		let dependency_paths = dependencies
+		let mut dependency_paths = dependencies
 			.iter()
 			.map(|artifact| artifact.path.clone())
 			.collect::<Vec<_>>();
+		dependency_paths.extend(extra_classpath.iter().cloned());
 		compile_sources(
 			&installed_jdk,
 			project.toolchain.as_ref().map(|value| value.version.as_str()),
@@ -68,9 +285,14 @@ impl JavaProjectBuilder {
 		let (fat_jar_path, fat_jar_warnings) = if let Some(main_class) = project.main_class.as_deref()
 		{
 			let path = target_dir.join("bin").join(format!("{}.jar", project.name));
+			let mut fat_jar_dependencies = dependencies
+				.iter()
+				.map(|item| item.path.clone())
+				.collect::<Vec<_>>();
+			fat_jar_dependencies.extend(extra_classpath.iter().cloned());
 			let warnings = build_fat_jar(
 				&installed_jdk,
-				&dependencies,
+				&fat_jar_dependencies,
 				&classes_dir,
 				&path,
 				main_class,
@@ -125,6 +347,15 @@ impl JavaProjectBuilder {
 
 	pub fn test(&self, start: &Path) -> Result<TestOutput, BuildError> {
 		let project = load_project_build_config(start)?;
+		let mut cache = HashMap::<PathBuf, BuildOutput>::new();
+		let mut stack = Vec::<PathBuf>::new();
+		let mut path_dependency_jars = Vec::new();
+		for dependency_root in &project.path_dependencies {
+			let dependency_project = load_project_build_config(dependency_root)?;
+			let dependency_output = self.build_project_with_cache(dependency_project, &mut cache, &mut stack)?;
+			path_dependency_jars.push(dependency_output.jar_path.clone());
+		}
+
 		let toolchain_request = project
 			.toolchain
 			.clone()
@@ -173,6 +404,7 @@ impl JavaProjectBuilder {
 		prepare_directory(&test_classes_dir)?;
 		let mut test_compile_classpath = vec![classes_dir.clone()];
 		test_compile_classpath.extend(compile_dependencies.iter().map(|item| item.path.clone()));
+		test_compile_classpath.extend(path_dependency_jars.iter().cloned());
 		test_compile_classpath.extend(test_dependencies.iter().map(|item| item.path.clone()));
 		compile_sources(
 			&installed_jdk,
@@ -194,6 +426,7 @@ impl JavaProjectBuilder {
 
 		let mut runtime_classpath = vec![classes_dir, test_classes_dir];
 		runtime_classpath.extend(compile_dependencies.iter().map(|item| item.path.clone()));
+		runtime_classpath.extend(path_dependency_jars);
 		runtime_classpath.extend(test_dependencies.iter().map(|item| item.path.clone()));
 		let classpath = join_paths_for_classpath(&runtime_classpath)?;
 
@@ -224,7 +457,7 @@ impl JavaProjectBuilder {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BuildOutput {
 	pub project: ProjectBuildConfig,
 	pub installed_jdk: InstalledJdk,
@@ -239,6 +472,17 @@ pub struct BuildOutput {
 pub struct TestOutput {
 	pub project: ProjectBuildConfig,
 	pub tests_found: bool,
+}
+
+#[derive(Debug)]
+pub struct WorkspaceBuildOutput {
+	pub modules: Vec<WorkspaceModuleBuildOutput>,
+}
+
+#[derive(Debug)]
+pub struct WorkspaceModuleBuildOutput {
+	pub module_name: String,
+	pub build: BuildOutput,
 }
 
 fn compile_sources(
@@ -308,7 +552,7 @@ fn package_jar(
 
 fn build_fat_jar(
 	installed_jdk: &InstalledJdk,
-	dependencies: &[ResolvedArtifact],
+	dependency_jars: &[PathBuf],
 	classes_dir: &Path,
 	fat_jar_path: &Path,
 	main_class: &str,
@@ -322,9 +566,9 @@ fn build_fat_jar(
 	let mut services = BTreeMap::<String, Vec<String>>::new();
 	let mut warnings = Vec::<String>::new();
 
-	for dependency in dependencies {
+	for jar_path in dependency_jars {
 		extract_jar_into_staging(
-			&dependency.path,
+			jar_path,
 			&staging_root,
 			&mut services,
 			&mut warnings,
@@ -740,6 +984,16 @@ pub enum BuildError {
 	MissingJavaToolchain(PathBuf),
 	#[error("missing `main-class` in [project] section of {0}")]
 	MissingMainClass(PathBuf),
+	#[error("workspace config not found from {0}")]
+	WorkspaceNotFound(PathBuf),
+	#[error("unknown workspace module `{0}`")]
+	UnknownWorkspaceModule(String),
+	#[error("module `{module}` has unknown workspace path dependency {path}")]
+	UnknownWorkspaceDependency { module: String, path: PathBuf },
+	#[error("workspace dependency graph contains a cycle")]
+	WorkspaceCycleDetected,
+	#[error("path dependency cycle detected: {0}")]
+	PathDependencyCycle(String),
 	#[error("no Java source files found under {0}")]
 	NoJavaSources(PathBuf),
 	#[error("could not locate junit-platform-console-standalone in resolved test dependencies")]
