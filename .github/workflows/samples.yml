@@ -1,0 +1,47 @@
+name: Samples
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  sample:
+    name: ${{ matrix.sample.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sample:
+          - name: CLI sample
+            path: samples/java/cli
+          - name: Library sample
+            path: samples/java/library
+          - name: Minimal app sample
+            path: samples/java/minimal-app
+          - name: Multi-module workspace sample
+            path: samples/java/multi-module-workspace
+          - name: Webserver sample
+            path: samples/java/webserver
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build jot CLI
+        run: cargo build --locked -p jot --verbose
+
+      - name: Build sample
+        working-directory: ${{ matrix.sample.path }}
+        run: ${{ github.workspace }}/target/debug/jot build
+
+      - name: Test sample
+        working-directory: ${{ matrix.sample.path }}
+        run: ${{ github.workspace }}/target/debug/jot test

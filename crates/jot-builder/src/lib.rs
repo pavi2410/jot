@@ -398,6 +398,8 @@ impl JavaProjectBuilder {
                 .iter()
                 .map(|item| item.path.clone())
                 .collect::<Vec<_>>();
+            let mut main_compile_classpath = compile_dependency_paths;
+            main_compile_classpath.extend(path_dependency_jars.iter().cloned());
             compile_sources(
                 &installed_jdk,
                 project
@@ -405,7 +407,7 @@ impl JavaProjectBuilder {
                     .as_ref()
                     .map(|value| value.version.as_str()),
                 &project.project_root,
-                &compile_dependency_paths,
+                &main_compile_classpath,
                 &classes_dir,
                 &main_sources,
             )?;
