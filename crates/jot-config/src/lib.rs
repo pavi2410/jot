@@ -113,6 +113,21 @@ pub struct WorkspaceMemberBuildConfig {
     pub project: ProjectBuildConfig,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceDependencySet {
+    pub root_dir: PathBuf,
+    pub members: Vec<WorkspaceMemberDependencies>,
+    pub external_dependencies: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceMemberDependencies {
+    pub module_name: String,
+    pub project_root: PathBuf,
+    pub path_dependencies: Vec<PathBuf>,
+    pub external_dependencies: Vec<String>,
+}
+
 pub fn find_jot_toml(start: &Path) -> Result<Option<PathBuf>, ConfigError> {
     let mut current = if start.is_dir() {
         start.to_path_buf()
@@ -283,6 +298,37 @@ pub fn load_workspace_build_config(start: &Path) -> Result<Option<WorkspaceBuild
         group: workspace.group,
         toolchain: root_toolchain,
         members,
+    }))
+}
+
+pub fn load_workspace_dependency_set(
+    start: &Path,
+) -> Result<Option<WorkspaceDependencySet>, ConfigError> {
+    let Some(workspace) = load_workspace_build_config(start)? else {
+        return Ok(None);
+    };
+
+    let mut external_dependencies = workspace
+        .members
+        .iter()
+        .flat_map(|member| member.project.dependencies.iter().cloned())
+        .collect::<Vec<_>>();
+    external_dependencies.sort();
+    external_dependencies.dedup();
+
+    Ok(Some(WorkspaceDependencySet {
+        root_dir: workspace.root_dir.clone(),
+        members: workspace
+            .members
+            .into_iter()
+            .map(|member| WorkspaceMemberDependencies {
+                module_name: member.module_name,
+                project_root: member.project.project_root,
+                path_dependencies: member.project.path_dependencies,
+                external_dependencies: member.project.dependencies,
+            })
+            .collect(),
+        external_dependencies,
     }))
 }
 
@@ -693,7 +739,8 @@ mod tests {
     use super::{
         JavaToolchainRequest, find_jot_toml, find_workspace_jot_toml,
         find_workspace_root_jot_toml, load_project_build_config, load_workspace_build_config,
-        pin_java_toolchain, read_declared_dependencies, read_toolchain_request,
+        load_workspace_dependency_set, pin_java_toolchain, read_declared_dependencies,
+        read_toolchain_request,
     };
     use jot_toolchain::JdkVendor;
     use std::fs;
@@ -920,5 +967,44 @@ mod tests {
 
         let config = load_project_build_config(&api).expect("load member config");
         assert_eq!(config.dependencies, vec!["info.picocli:picocli:4.7.6".to_owned()]);
+    }
+
+    #[test]
+    fn aggregates_workspace_external_dependencies_for_locking() {
+        let temp = tempdir().expect("tempdir");
+        let workspace = temp.path().join("workspace");
+        let domain = workspace.join("domain");
+        let api = workspace.join("api");
+        fs::create_dir_all(&domain).expect("create domain");
+        fs::create_dir_all(&api).expect("create api");
+
+        fs::write(
+            workspace.join("jot.toml"),
+            "[workspace]\nmembers = [\"domain\", \"api\"]\n\n[toolchains]\njava = \"21\"\n",
+        )
+        .expect("write workspace config");
+        fs::write(
+            domain.join("jot.toml"),
+            "[project]\nname = \"domain\"\nversion = \"1.0.0\"\n\n[dependencies]\njackson = \"com.fasterxml.jackson.core:jackson-databind:2.18.0\"\n",
+        )
+        .expect("write domain config");
+        fs::write(
+            api.join("jot.toml"),
+            "[project]\nname = \"api\"\nversion = \"1.0.0\"\n\n[dependencies]\ndomain = { path = \"../domain\" }\njackson = \"com.fasterxml.jackson.core:jackson-databind:2.18.0\"\npicocli = \"info.picocli:picocli:4.7.6\"\n",
+        )
+        .expect("write api config");
+
+        let dependencies = load_workspace_dependency_set(&workspace)
+            .expect("load workspace dependency set")
+            .expect("workspace set");
+
+        assert_eq!(
+            dependencies.external_dependencies,
+            vec![
+                "com.fasterxml.jackson.core:jackson-databind:2.18.0".to_owned(),
+                "info.picocli:picocli:4.7.6".to_owned(),
+            ]
+        );
+        assert_eq!(dependencies.members.len(), 2);
     }
 }
