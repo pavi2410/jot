@@ -2,10 +2,13 @@ use jot_cache::JotPaths;
 use quick_xml::de::from_str;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt::{Display, Formatter};
 use std::fs;
+use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
+use tempfile::NamedTempFile;
 use std::time::Duration;
 
 const MAVEN_CENTRAL: &str = "https://repo1.maven.org/maven2";
@@ -71,6 +74,34 @@ impl MavenCoordinate {
             "{}/{}/{}/{}/{}-{}.pom",
             MAVEN_CENTRAL, group_path, self.artifact, version, self.artifact, version
         ))
+    }
+
+    fn jar_url(&self) -> Result<String, ResolverError> {
+        let version = self
+            .version
+            .as_deref()
+            .ok_or_else(|| ResolverError::MissingVersionForArtifact(self.to_string()))?;
+        let group_path = self.group.replace('.', "/");
+        let classifier_suffix = self
+            .classifier
+            .as_deref()
+            .map(|value| format!("-{value}"))
+            .unwrap_or_default();
+
+        Ok(format!(
+            "{}/{}/{}/{}/{}-{}{}.jar",
+            MAVEN_CENTRAL,
+            group_path,
+            self.artifact,
+            version,
+            self.artifact,
+            version,
+            classifier_suffix,
+        ))
+    }
+
+    fn jar_sha256_url(&self) -> Result<String, ResolverError> {
+        Ok(format!("{}.sha256", self.jar_url()?))
     }
 }
 
@@ -188,13 +219,17 @@ impl MavenResolver {
             roots,
             package: packages
                 .into_iter()
-                .map(|coordinate| LockedPackage {
-                    group: coordinate.group,
-                    artifact: coordinate.artifact,
-                    version: coordinate.version.expect("locked package version"),
-                    classifier: coordinate.classifier,
+                .map(|coordinate| {
+                    let sha256 = self.cache_artifact_and_hash(&coordinate)?;
+                    Ok(LockedPackage {
+                        group: coordinate.group,
+                        artifact: coordinate.artifact,
+                        version: coordinate.version.expect("locked package version"),
+                        classifier: coordinate.classifier,
+                        sha256,
+                    })
                 })
-                .collect(),
+                .collect::<Result<Vec<_>, ResolverError>>()?,
         })
     }
 
@@ -355,7 +390,7 @@ impl MavenResolver {
             properties.insert("project.artifactId".to_owned(), project_artifact.clone());
 
             if let Some(raw_properties) = project.properties {
-                for (name, value) in raw_properties.entries {
+                for (name, value) in raw_properties {
                     let interpolated = interpolate_value(&value, &properties);
                     properties.insert(name, interpolated);
                 }
@@ -537,6 +572,122 @@ impl MavenResolver {
             ),
         )))
     }
+
+    fn artifact_cache_path(&self, coordinate: &MavenCoordinate) -> Result<PathBuf, ResolverError> {
+        let version = coordinate
+            .version
+            .as_deref()
+            .ok_or_else(|| ResolverError::MissingVersionForArtifact(coordinate.to_string()))?;
+        let classifier_suffix = coordinate
+            .classifier
+            .as_deref()
+            .map(|value| format!("-{value}"))
+            .unwrap_or_default();
+
+        Ok(self.paths.downloads_dir().join(format!(
+            "jar-{}-{}-{}{}.jar",
+            sanitize_for_filename(&coordinate.group),
+            sanitize_for_filename(&coordinate.artifact),
+            sanitize_for_filename(version),
+            sanitize_for_filename(&classifier_suffix),
+        )))
+    }
+
+    fn artifact_checksum_cache_path(
+        &self,
+        coordinate: &MavenCoordinate,
+    ) -> Result<PathBuf, ResolverError> {
+        let version = coordinate
+            .version
+            .as_deref()
+            .ok_or_else(|| ResolverError::MissingVersionForArtifact(coordinate.to_string()))?;
+        let classifier_suffix = coordinate
+            .classifier
+            .as_deref()
+            .map(|value| format!("-{value}"))
+            .unwrap_or_default();
+
+        Ok(self.paths.resolve_cache_dir().join(format!(
+            "jar-{}-{}-{}{}.sha256",
+            sanitize_for_filename(&coordinate.group),
+            sanitize_for_filename(&coordinate.artifact),
+            sanitize_for_filename(version),
+            sanitize_for_filename(&classifier_suffix),
+        )))
+    }
+
+    fn cache_artifact_and_hash(&self, coordinate: &MavenCoordinate) -> Result<String, ResolverError> {
+        let artifact_path = self.artifact_cache_path(coordinate)?;
+        let expected_checksum = self.fetch_artifact_checksum(coordinate)?;
+
+        if artifact_path.is_file() {
+            let actual_checksum = sha256_file(&artifact_path)?;
+            if expected_checksum.as_ref().is_none_or(|expected| expected == &actual_checksum) {
+                return Ok(actual_checksum);
+            }
+            fs::remove_file(&artifact_path)?;
+        }
+
+        self.download_artifact(coordinate, &artifact_path)?;
+        let actual_checksum = sha256_file(&artifact_path)?;
+
+        if let Some(expected_checksum) = expected_checksum
+            && expected_checksum != actual_checksum
+        {
+            fs::remove_file(&artifact_path)?;
+            return Err(ResolverError::ChecksumMismatch {
+                coordinate: coordinate.to_string(),
+                expected: expected_checksum,
+                actual: actual_checksum,
+            });
+        }
+
+        Ok(actual_checksum)
+    }
+
+    fn fetch_artifact_checksum(
+        &self,
+        coordinate: &MavenCoordinate,
+    ) -> Result<Option<String>, ResolverError> {
+        let checksum_url = coordinate.jar_sha256_url()?;
+        let cache_path = self.artifact_checksum_cache_path(coordinate)?;
+
+        match self.fetch_text_with_cache(&checksum_url, &cache_path, None) {
+            Ok(body) => Ok(normalize_checksum_response(&body)),
+            Err(ResolverError::Http(error)) if error.status() == Some(reqwest::StatusCode::NOT_FOUND) => {
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn download_artifact(
+        &self,
+        coordinate: &MavenCoordinate,
+        destination: &Path,
+    ) -> Result<(), ResolverError> {
+        let url = coordinate.jar_url()?;
+        let mut response = self.client.get(url).send()?.error_for_status()?;
+        let mut temp_file = NamedTempFile::new_in(self.paths.downloads_dir())?;
+        let mut buffer = [0_u8; 64 * 1024];
+
+        loop {
+            let bytes_read = response.read(&mut buffer)?;
+            if bytes_read == 0 {
+                break;
+            }
+            temp_file.write_all(&buffer[..bytes_read])?;
+        }
+
+        temp_file.flush()?;
+        if destination.exists() {
+            fs::remove_file(destination)?;
+        }
+        temp_file
+            .persist(destination)
+            .map_err(|error| ResolverError::Io(error.error))?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -592,6 +743,7 @@ pub struct LockedPackage {
     pub version: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub classifier: Option<String>,
+    pub sha256: String,
 }
 
 #[derive(Debug)]
@@ -755,6 +907,30 @@ fn relocation_target(project: &MavenProject, coordinate: &MavenCoordinate) -> Op
     }
 }
 
+fn sha256_file(path: &Path) -> Result<String, ResolverError> {
+    let file = fs::File::open(path)?;
+    let mut reader = BufReader::new(file);
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+
+    loop {
+        let bytes_read = reader.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]);
+    }
+
+    Ok(hex::encode(hasher.finalize()))
+}
+
+fn normalize_checksum_response(input: &str) -> Option<String> {
+    input
+        .split_whitespace()
+        .find(|token| token.chars().all(|ch| ch.is_ascii_hexdigit()))
+        .map(|token| token.to_ascii_lowercase())
+}
+
 fn is_cache_usable(path: &Path, ttl: Option<Duration>) -> Result<bool, ResolverError> {
     let Some(ttl) = ttl else {
         return Ok(true);
@@ -794,7 +970,7 @@ struct MavenProject {
     artifact_id: Option<String>,
     version: Option<String>,
     parent: Option<MavenParent>,
-    properties: Option<MavenProperties>,
+    properties: Option<BTreeMap<String, String>>,
     #[serde(rename = "dependencyManagement")]
     dependency_management: Option<MavenDependencyManagement>,
     #[serde(rename = "distributionManagement")]
@@ -809,12 +985,6 @@ struct MavenParent {
     #[serde(rename = "artifactId")]
     artifact_id: Option<String>,
     version: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct MavenProperties {
-    #[serde(flatten)]
-    entries: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -888,10 +1058,18 @@ pub enum ResolverError {
     MissingVersionMetadata(String),
     #[error("cannot compute POM URL because version is missing for {0}")]
     MissingVersionForPom(String),
+    #[error("cannot compute artifact URL because version is missing for {0}")]
+    MissingVersionForArtifact(String),
     #[error("invalid parent POM declaration: {0}")]
     InvalidParentPom(String),
     #[error("detected a cycle while resolving POM model: {0}")]
     PomCycleDetected(String),
+    #[error("checksum mismatch for {coordinate}: expected {expected}, got {actual}")]
+    ChecksumMismatch {
+        coordinate: String,
+        expected: String,
+        actual: String,
+    },
 }
 
 #[cfg(test)]
@@ -902,7 +1080,8 @@ mod tests {
         MavenCoordinate, MavenDependency, MavenProject, MavenVersioning, MavenVersions,
         ResolvedDependency, LockedPackage, dependency_exclusions, is_cache_usable,
         is_stable_maven_version,
-        is_unresolved_version_expression, interpolate_value,
+        is_unresolved_version_expression, interpolate_value, normalize_checksum_response,
+        sha256_file,
         resolve_best_version,
     };
     use quick_xml::de::from_str;
@@ -1067,12 +1246,14 @@ mod tests {
                             artifact: "beta".into(),
                             version: "1.0.0".into(),
                             classifier: None,
+                            sha256: "abc123".into(),
                         },
                         LockedPackage {
                             group: "a.group".into(),
                             artifact: "alpha".into(),
                             version: "2.0.0".into(),
                             classifier: Some("sources".into()),
+                            sha256: "def456".into(),
                         },
                     ],
                 };
@@ -1174,6 +1355,28 @@ mod tests {
 
                 let exclusions = dependency_exclusions(&dependency, &properties);
                 assert!(exclusions.contains(&("org.slf4j".to_owned(), "slf4j-api".to_owned())));
+            }
+
+            #[test]
+            fn normalizes_checksum_sidecar_contents() {
+                assert_eq!(
+                    normalize_checksum_response("ABCDEF0123456789  demo.jar\n"),
+                    Some("abcdef0123456789".to_owned())
+                );
+                assert_eq!(normalize_checksum_response(""), None);
+            }
+
+            #[test]
+            fn sha256_file_hashes_contents() {
+                let temp = tempdir().expect("tempdir");
+                let file_path = temp.path().join("demo.jar");
+                fs::write(&file_path, b"hello world").expect("write artifact");
+
+                let checksum = sha256_file(&file_path).expect("sha256");
+                assert_eq!(
+                    checksum,
+                    "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+                );
             }
 
             #[test]

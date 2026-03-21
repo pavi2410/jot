@@ -4,10 +4,13 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+hex.workspace = true
 jot-cache = { path = "../jot-cache" }
 quick-xml.workspace = true
 reqwest.workspace = true
 serde.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
