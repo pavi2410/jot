@@ -1,5 +1,6 @@
 use std::ffi::OsString;
 use std::fs;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -134,9 +135,10 @@ fn compile_sources(
 	command.args(source_files);
 	let output = command.output()?;
 	if !output.status.success() {
+		let raw_stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
 		return Err(BuildError::CommandFailed {
 			tool: "javac",
-			stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+			stderr: format_javac_stderr(&raw_stderr, std::io::stderr().is_terminal()),
 		});
 	}
 
@@ -249,6 +251,152 @@ fn java_release_flag(version: &str) -> Option<String> {
 	}
 }
 
+fn format_javac_stderr(raw: &str, color: bool) -> String {
+	let diagnostics = parse_javac_diagnostics(raw);
+	if diagnostics.is_empty() {
+		return raw.to_owned();
+	}
+
+	let mut output = String::new();
+	output.push_str(&style("javac diagnostics", Style::Bold, color));
+	output.push('\n');
+
+	for diagnostic in diagnostics {
+		let severity_style = match diagnostic.severity {
+			DiagnosticSeverity::Error => Style::RedBold,
+			DiagnosticSeverity::Warning => Style::YellowBold,
+		};
+		output.push_str(&format!(
+			"{} {}:{}\n",
+			style(diagnostic.severity.as_str(), severity_style, color),
+			style(&diagnostic.path, Style::Cyan, color),
+			diagnostic.line
+		));
+		output.push_str(&format!("  {}\n", diagnostic.message));
+		if let Some(source_line) = diagnostic.source_line.as_ref() {
+			output.push_str(&format!("  {}\n", source_line));
+		}
+		if let Some(caret_line) = diagnostic.caret_line.as_ref() {
+			output.push_str(&format!("  {}\n", style(caret_line, Style::Green, color)));
+		}
+	}
+
+	output.trim_end().to_owned()
+}
+
+fn parse_javac_diagnostics(raw: &str) -> Vec<JavacDiagnostic> {
+	let mut diagnostics = Vec::new();
+	let lines = raw.lines().collect::<Vec<_>>();
+	let mut index = 0;
+
+	while index < lines.len() {
+		let line = lines[index].trim_end();
+		if let Some((path, line_number, severity, message)) = parse_diagnostic_header(line) {
+			let mut source_line = None;
+			let mut caret_line = None;
+
+			if index + 1 < lines.len() {
+				let candidate = lines[index + 1].trim_end();
+				if !candidate.contains(": error:") && !candidate.contains(": warning:") {
+					source_line = Some(candidate.to_owned());
+					index += 1;
+
+					if index + 1 < lines.len() {
+						let caret_candidate = lines[index + 1].trim_end();
+						if caret_candidate.contains('^') {
+							caret_line = Some(caret_candidate.to_owned());
+							index += 1;
+						}
+					}
+				}
+			}
+
+			diagnostics.push(JavacDiagnostic {
+				path,
+				line: line_number,
+				severity,
+				message,
+				source_line,
+				caret_line,
+			});
+		}
+
+		index += 1;
+	}
+
+	diagnostics
+}
+
+fn parse_diagnostic_header(
+	line: &str,
+) -> Option<(String, usize, DiagnosticSeverity, String)> {
+	let (severity, marker) = if line.contains(": error: ") {
+		(DiagnosticSeverity::Error, ": error: ")
+	} else if line.contains(": warning: ") {
+		(DiagnosticSeverity::Warning, ": warning: ")
+	} else {
+		return None;
+	};
+
+	let marker_idx = line.find(marker)?;
+	let location = &line[..marker_idx];
+	let message = line[marker_idx + marker.len()..].trim().to_owned();
+	let split_idx = location.rfind(':')?;
+	let path = location[..split_idx].to_owned();
+	let line_number = location[split_idx + 1..].parse::<usize>().ok()?;
+
+	Some((path, line_number, severity, message))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiagnosticSeverity {
+	Error,
+	Warning,
+}
+
+impl DiagnosticSeverity {
+	fn as_str(self) -> &'static str {
+		match self {
+			Self::Error => "error",
+			Self::Warning => "warning",
+		}
+	}
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct JavacDiagnostic {
+	path: String,
+	line: usize,
+	severity: DiagnosticSeverity,
+	message: String,
+	source_line: Option<String>,
+	caret_line: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Style {
+	Bold,
+	RedBold,
+	YellowBold,
+	Cyan,
+	Green,
+}
+
+fn style(value: &str, style: Style, color: bool) -> String {
+	if !color {
+		return value.to_owned();
+	}
+
+	let code = match style {
+		Style::Bold => "1",
+		Style::RedBold => "1;31",
+		Style::YellowBold => "1;33",
+		Style::Cyan => "36",
+		Style::Green => "32",
+	};
+	format!("\x1b[{code}m{value}\x1b[0m")
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum BuildError {
 	#[error("config error: {0}")]
@@ -275,7 +423,9 @@ pub enum BuildError {
 
 #[cfg(test)]
 mod tests {
-	use super::{collect_java_sources, java_release_flag};
+	use super::{
+		collect_java_sources, format_javac_stderr, java_release_flag, parse_javac_diagnostics,
+	};
 	use std::fs;
 	use tempfile::tempdir;
 
@@ -298,5 +448,26 @@ mod tests {
 			collect_java_sources(&[temp.path().join("src/main/java")]).expect("collect sources");
 		assert_eq!(sources.len(), 1);
 		assert!(sources[0].ends_with("Main.java"));
+	}
+
+	#[test]
+	fn parses_javac_error_and_warning_diagnostics() {
+		let raw = "src/main/java/demo/Main.java:7: error: ';' expected\n        System.out.println(\"oops\")\n                                  ^\nsrc/main/java/demo/Main.java:8: warning: [deprecation] stop() in Thread has been deprecated\n        t.stop();\n          ^\n";
+		let diagnostics = parse_javac_diagnostics(raw);
+		assert_eq!(diagnostics.len(), 2);
+		assert_eq!(diagnostics[0].line, 7);
+		assert!(diagnostics[0].message.contains("';' expected"));
+		assert_eq!(diagnostics[1].line, 8);
+		assert!(diagnostics[1].message.contains("deprecated"));
+	}
+
+	#[test]
+	fn formats_javac_diagnostics_without_ansi_when_disabled() {
+		let raw = "src/main/java/demo/Main.java:7: error: ';' expected\n        System.out.println(\"oops\")\n                                  ^\n";
+		let formatted = format_javac_stderr(raw, false);
+		assert!(formatted.contains("javac diagnostics"));
+		assert!(formatted.contains("error src/main/java/demo/Main.java:7"));
+		assert!(formatted.contains("';' expected"));
+		assert!(!formatted.contains("\u{1b}["));
 	}
 }
