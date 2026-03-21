@@ -184,6 +184,12 @@ fn handle_build(
         output.project.version,
         output.jar_path.display()
     );
+    if let Some(path) = output.fat_jar_path {
+        println!("fat-jar: {}", path.display());
+    }
+    for warning in output.fat_jar_warnings {
+        eprintln!("warning: {warning}");
+    }
     Ok(())
 }
 

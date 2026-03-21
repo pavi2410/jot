@@ -791,6 +791,7 @@ dependencies = [
  "jot-toolchain",
  "tempfile",
  "thiserror 2.0.18",
+ "zip",
 ]
 
 [[package]]
