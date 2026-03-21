@@ -1,0 +1,12 @@
+[project]
+name = "library"
+version = "0.1.0"
+
+[toolchains]
+java = "21"
+
+[dependencies]
+jackson = "com.fasterxml.jackson.core:jackson-databind:2.18.0"
+
+[test-dependencies]
+junit = "org.junit.jupiter:junit-jupiter:5.11.0"

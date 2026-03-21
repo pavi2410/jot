@@ -1,0 +1,7 @@
+[versions]
+jackson = "2.18.0"
+junit = "5.11.0"
+
+[libraries]
+jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
+junit = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }

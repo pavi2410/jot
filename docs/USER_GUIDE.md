@@ -35,7 +35,40 @@ Each member has its own `jot.toml`. External dependencies are resolved into one 
 
 jot supports a root `libs.versions.toml` catalog and `catalog = "name"` references in dependency entries.
 
+## Project Templates
+
+Use `jot init` to scaffold starter projects:
+
+```bash
+jot init --template java-minimal my-app
+jot init --template java-lib my-lib
+jot init --template java-cli my-cli
+jot init --template java-server my-server
+jot init --template java-workspace my-workspace
+```
+
+Optional flags:
+
+- `--group <group>` sets `[workspace].group` or project group metadata defaults
+- `--package <package>` sets generated Java package names
+
+Committed runnable samples are available under `samples/java/`:
+
+- `samples/java/minimal-app`
+- `samples/java/library`
+- `samples/java/cli`
+- `samples/java/webserver`
+- `samples/java/multi-module-workspace`
+
 ## Common Workflows
+
+### Init
+
+- Minimal app: `jot init --template java-minimal my-app`
+- Library: `jot init --template java-lib my-lib`
+- CLI: `jot init --template java-cli my-cli`
+- Webserver: `jot init --template java-server my-server`
+- Workspace: `jot init --template java-workspace my-workspace`
 
 ### Build
 

@@ -33,6 +33,26 @@ jot build
 jot run
 ```
 
+## Java Samples
+
+Runnable sample projects live in `samples/java`:
+
+- `samples/java/minimal-app` - simple single-project app
+- `samples/java/library` - library-only project
+- `samples/java/cli` - command-line app
+- `samples/java/webserver` - lightweight HTTP server
+- `samples/java/multi-module-workspace` - workspace with `domain`, `api`, and `cli`
+
+You can scaffold the same shapes with `jot init`:
+
+```bash
+jot init --template java-minimal my-app
+jot init --template java-lib my-lib
+jot init --template java-cli my-cli
+jot init --template java-server my-server
+jot init --template java-workspace my-workspace
+```
+
 ## Why jot vs Maven/Gradle
 
 | Capability | jot | Maven | Gradle |
@@ -45,6 +65,7 @@ jot run
 
 ## Command Reference
 
+- `jot init [--template <java-minimal|java-lib|java-cli|java-server|java-workspace>] [--group <group>] [--package <package>] [<name>]`
 - `jot build [--module <name>]`
 - `jot run [--module <name>] [-- <args...>]`
 - `jot test [--module <name>]`

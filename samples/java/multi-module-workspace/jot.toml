@@ -1,0 +1,6 @@
+[workspace]
+members = ["domain", "api", "cli"]
+group = "com.jot.samples"
+
+[toolchains]
+java = "21"

@@ -890,7 +890,11 @@ fn update_dependency_item(
     1
 }
 
-fn write_locked_file(output_path: &Path, content: &[u8], paths: &jot_cache::JotPaths) -> Result<(), DevToolsError> {
+fn write_locked_file(
+    output_path: &Path,
+    content: &[u8],
+    paths: &jot_cache::JotPaths,
+) -> Result<(), DevToolsError> {
     let lock_path = paths.locks_dir().join(format!(
         "file-{}.lock",
         sanitize_for_filename(&output_path.to_string_lossy())
@@ -905,7 +909,10 @@ fn write_locked_file(output_path: &Path, content: &[u8], paths: &jot_cache::JotP
         .map_err(|error| DevToolsError::AuditInvariant(error.to_string()))?;
 
     let parent = output_path.parent().ok_or_else(|| {
-        DevToolsError::AuditInvariant(format!("path {} has no parent directory", output_path.display()))
+        DevToolsError::AuditInvariant(format!(
+            "path {} has no parent directory",
+            output_path.display()
+        ))
     })?;
     let mut temp_file = NamedTempFile::new_in(parent)?;
     temp_file.write_all(content)?;
@@ -1065,8 +1072,7 @@ fn parse_cvss_v3_vector(vector: &str) -> Option<f64> {
     let availability = availability?;
     let privileges_required = cvss_privileges_required(privileges_required?.as_str(), &scope)?;
 
-    let impact_sub_score = 1.0
-        - (1.0 - confidentiality) * (1.0 - integrity) * (1.0 - availability);
+    let impact_sub_score = 1.0 - (1.0 - confidentiality) * (1.0 - integrity) * (1.0 - availability);
     let impact = if scope == "U" {
         6.42 * impact_sub_score
     } else {
@@ -1077,11 +1083,8 @@ fn parse_cvss_v3_vector(vector: &str) -> Option<f64> {
         return Some(0.0);
     }
 
-    let exploitability = 8.22
-        * attack_vector
-        * attack_complexity
-        * privileges_required
-        * user_interaction;
+    let exploitability =
+        8.22 * attack_vector * attack_complexity * privileges_required * user_interaction;
     let score = if scope == "U" {
         (impact + exploitability).min(10.0)
     } else {
@@ -1348,7 +1351,10 @@ mod tests {
         )
         .expect("valid osv payload");
 
-        assert_eq!(severity_for_vulnerability(&vulnerability), AuditSeverity::Critical);
+        assert_eq!(
+            severity_for_vulnerability(&vulnerability),
+            AuditSeverity::Critical
+        );
     }
 
     #[test]
@@ -1364,7 +1370,10 @@ mod tests {
         )
         .expect("valid osv payload");
 
-        assert_eq!(severity_for_vulnerability(&vulnerability), AuditSeverity::Moderate);
+        assert_eq!(
+            severity_for_vulnerability(&vulnerability),
+            AuditSeverity::Moderate
+        );
     }
 
     #[test]

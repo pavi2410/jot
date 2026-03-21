@@ -599,9 +599,12 @@ fn is_cache_fresh(fetched_at: OffsetDateTime, now: OffsetDateTime, ttl: Duration
 }
 
 fn offline_mode_enabled() -> bool {
-    std::env::var("JOT_OFFLINE")
-        .ok()
-        .is_some_and(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+    std::env::var("JOT_OFFLINE").ok().is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
 }
 
 fn java_binary_path(java_home: &Path) -> PathBuf {

@@ -1,0 +1,9 @@
+[project]
+name = "shopflow-domain"
+version = "1.0.0"
+
+[dependencies]
+jackson = { catalog = "jackson-databind" }
+
+[test-dependencies]
+junit = { catalog = "junit" }

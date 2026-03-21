@@ -1,5 +1,5 @@
-use jot_cache::JotPaths;
 use fs2::FileExt;
+use jot_cache::JotPaths;
 use quick_xml::de::from_str;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
@@ -711,9 +711,10 @@ impl MavenResolver {
     }
 
     fn artifact_lock_path(&self, coordinate: &MavenCoordinate) -> PathBuf {
-        self.paths
-            .locks_dir()
-            .join(format!("artifact-{}.lock", sanitize_for_filename(&coordinate.to_string())))
+        self.paths.locks_dir().join(format!(
+            "artifact-{}.lock",
+            sanitize_for_filename(&coordinate.to_string())
+        ))
     }
 
     fn metadata_cache_path(&self, coordinate: &MavenCoordinate) -> PathBuf {
@@ -940,9 +941,12 @@ fn write_text_atomic(path: &Path, body: &str) -> Result<(), ResolverError> {
 }
 
 fn offline_mode_enabled() -> bool {
-    std::env::var("JOT_OFFLINE")
-        .ok()
-        .is_some_and(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+    std::env::var("JOT_OFFLINE").ok().is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

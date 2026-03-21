@@ -5,6 +5,8 @@ use std::io::IsTerminal;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+mod init_templates;
+
 use annotate_snippets::renderer::DecorStyle;
 use annotate_snippets::{AnnotationKind, Level, Renderer, Snippet};
 use clap::{Parser, Subcommand};
@@ -38,6 +40,15 @@ enum Command {
     Build {
         #[arg(long)]
         module: Option<String>,
+    },
+    Init {
+        #[arg(long)]
+        template: Option<String>,
+        #[arg(long)]
+        group: Option<String>,
+        #[arg(long = "package")]
+        package_name: Option<String>,
+        name: Option<String>,
     },
     Fmt {
         #[arg(long)]
@@ -140,6 +151,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Command::Audit { fix, ci } => handle_audit(paths, fix, ci)?,
         Command::Build { module } => handle_build(paths, manager, module.as_deref())?,
+        Command::Init {
+            template,
+            group,
+            package_name,
+            name,
+        } => handle_init(
+            &std::env::current_dir()?,
+            template,
+            group,
+            package_name,
+            name,
+        )?,
         Command::Clean { global } => handle_clean(global, paths)?,
         Command::Fmt { check, module } => handle_fmt(paths, manager, check, module.as_deref())?,
         Command::Lint { module } => handle_lint(paths, manager, module.as_deref())?,
@@ -449,7 +472,11 @@ fn print_format_report(report: &FormatReport, color: bool) {
         report.project.name,
         report.files_scanned,
         report.changed_files.len(),
-        if report.checked { "would change" } else { "changed" }
+        if report.checked {
+            "would change"
+        } else {
+            "changed"
+        }
     );
 
     if report.checked {
@@ -667,7 +694,11 @@ fn compact_preview(value: &str, max_len: usize) -> String {
         return compact.to_owned();
     }
 
-    compact.chars().take(max_len.saturating_sub(3)).collect::<String>() + "..."
+    compact
+        .chars()
+        .take(max_len.saturating_sub(3))
+        .collect::<String>()
+        + "..."
 }
 
 fn handle_run(
@@ -839,6 +870,29 @@ fn print_workspace_tree(
     Ok(())
 }
 
+fn handle_init(
+    cwd: &Path,
+    template: Option<String>,
+    group: Option<String>,
+    package_name: Option<String>,
+    name: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let options = init_templates::InitOptions {
+        template,
+        group,
+        package_name,
+        name,
+    };
+    let output = init_templates::scaffold(cwd, options)?;
+    println!(
+        "created {} template at {} ({} files)",
+        output.template,
+        output.root.display(),
+        output.created_files
+    );
+    Ok(())
+}
+
 fn handle_clean(global: bool, paths: JotPaths) -> Result<(), Box<dyn std::error::Error>> {
     if !global {
         return Err("project-local clean is not implemented yet; use jot clean --global".into());
@@ -968,7 +1022,9 @@ fn write_locked_file(
     if output_path.exists() {
         fs::remove_file(output_path)?;
     }
-    temp_file.persist(output_path).map_err(|error| error.error)?;
+    temp_file
+        .persist(output_path)
+        .map_err(|error| error.error)?;
 
     let _ = lock_file.unlock();
     Ok(())

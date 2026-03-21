@@ -1,0 +1,10 @@
+[project]
+name = "webserver"
+version = "0.1.0"
+main-class = "com.jot.samples.webserver.ServerMain"
+
+[toolchains]
+java = "21"
+
+[test-dependencies]
+junit = "org.junit.jupiter:junit-jupiter:5.11.0"

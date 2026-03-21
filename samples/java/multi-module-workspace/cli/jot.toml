@@ -1,0 +1,10 @@
+[project]
+name = "shopflow-cli"
+version = "1.0.0"
+main-class = "com.jot.samples.workspace.cli.CliMain"
+
+[dependencies]
+domain = { path = "../domain" }
+
+[test-dependencies]
+junit = { catalog = "junit" }
