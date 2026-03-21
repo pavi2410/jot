@@ -1,14 +1,18 @@
 [package]
-name = "jot"
+name = "jot-devtools"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-clap.workspace = true
-jot-builder = { path = "../jot-builder" }
 jot-cache = { path = "../jot-cache" }
 jot-config = { path = "../jot-config" }
-jot-devtools = { path = "../jot-devtools" }
 jot-resolver = { path = "../jot-resolver" }
 jot-toolchain = { path = "../jot-toolchain" }
+quick-xml.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
 toml.workspace = true
+toml_edit.workspace = true

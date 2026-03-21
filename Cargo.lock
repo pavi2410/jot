@@ -776,6 +776,7 @@ dependencies = [
  "jot-builder",
  "jot-cache",
  "jot-config",
+ "jot-devtools",
  "jot-resolver",
  "jot-toolchain",
  "toml",
@@ -809,6 +810,24 @@ version = "0.1.0"
 dependencies = [
  "jot-toolchain",
  "serde",
+ "tempfile",
+ "thiserror 2.0.18",
+ "toml",
+ "toml_edit",
+]
+
+[[package]]
+name = "jot-devtools"
+version = "0.1.0"
+dependencies = [
+ "jot-cache",
+ "jot-config",
+ "jot-resolver",
+ "jot-toolchain",
+ "quick-xml",
+ "reqwest",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "toml",

@@ -14,6 +14,8 @@ struct RawConfig {
     #[serde(rename = "test-dependencies")]
     test_dependencies: Option<std::collections::BTreeMap<String, RawDependencySpec>>,
     toolchains: Option<RawToolchains>,
+    format: Option<RawFormat>,
+    lint: Option<RawLint>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -80,6 +82,36 @@ enum RawDependencySpec {
     },
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct RawFormat {
+    #[serde(rename = "java-style")]
+    java_style: Option<JavaFormatStyle>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RawLint {
+    #[serde(rename = "pmd-ruleset")]
+    pmd_ruleset: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum JavaFormatStyle {
+    #[default]
+    Google,
+    Aosp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FormatConfig {
+    pub java_style: JavaFormatStyle,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct LintConfig {
+    pub pmd_ruleset: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectBuildConfig {
     pub config_path: PathBuf,
@@ -96,6 +128,8 @@ pub struct ProjectBuildConfig {
     pub path_dependencies: Vec<PathBuf>,
     pub test_dependencies: Vec<String>,
     pub toolchain: Option<JavaToolchainRequest>,
+    pub format: FormatConfig,
+    pub lint: LintConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -257,6 +291,8 @@ pub fn load_workspace_build_config(start: &Path) -> Result<Option<WorkspaceBuild
             toolchain: root_toolchain.clone(),
             module_name: Some(module_name.clone()),
             catalog_path: catalog_path_for_root(&root_dir),
+            format: Some(parse_format_config(root_config.format.clone(), None)),
+            lint: Some(parse_lint_config(root_config.lint.clone(), None, &root_dir)),
         };
         let project = load_project_build_config_from_file_with_inheritance(
             &member_config_path,
@@ -371,6 +407,8 @@ fn load_project_build_config_from_file_with_inheritance(
     let inherited_toolchain = inherited.as_ref().and_then(|ctx| ctx.toolchain.clone());
     let inherited_group = inherited.as_ref().and_then(|ctx| ctx.group.clone());
     let inherited_catalog_path = inherited.as_ref().and_then(|ctx| ctx.catalog_path.clone());
+    let inherited_format = inherited.as_ref().and_then(|ctx| ctx.format.clone());
+    let inherited_lint = inherited.as_ref().and_then(|ctx| ctx.lint.clone());
     let module_name = inherited.and_then(|ctx| ctx.module_name);
     let path_dependencies = extract_path_dependencies(config.dependencies.clone(), &project_root)?;
     let catalog_path = inherited_catalog_path.or_else(|| catalog_path_for_root(&project_root));
@@ -395,6 +433,8 @@ fn load_project_build_config_from_file_with_inheritance(
         path_dependencies,
         test_dependencies: extract_dependency_coordinates(config.test_dependencies, catalog_path.as_deref())?,
         toolchain: parse_toolchain_request(config.toolchains).or(inherited_toolchain),
+        format: parse_format_config(config.format, inherited_format),
+        lint: parse_lint_config(config.lint, inherited_lint, &project_root),
     })
 }
 
@@ -411,7 +451,37 @@ fn inherited_workspace_context(start: &Path) -> Result<Option<WorkspaceInheritan
         toolchain: parse_toolchain_request(config.toolchains),
         module_name: None,
         catalog_path: path.parent().and_then(catalog_path_for_root),
+        format: Some(parse_format_config(config.format, None)),
+        lint: Some(parse_lint_config(
+            config.lint,
+            None,
+            path.parent().unwrap_or(start),
+        )),
     }))
+}
+
+fn parse_format_config(raw: Option<RawFormat>, inherited: Option<FormatConfig>) -> FormatConfig {
+    let mut config = inherited.unwrap_or_default();
+    if let Some(raw) = raw
+        && let Some(java_style) = raw.java_style
+    {
+        config.java_style = java_style;
+    }
+    config
+}
+
+fn parse_lint_config(
+    raw: Option<RawLint>,
+    inherited: Option<LintConfig>,
+    config_root: &Path,
+) -> LintConfig {
+    let mut config = inherited.unwrap_or_default();
+    if let Some(raw) = raw
+        && let Some(pmd_ruleset) = raw.pmd_ruleset
+    {
+        config.pmd_ruleset = Some(config_root.join(pmd_ruleset));
+    }
+    config
 }
 
 fn module_name_from_member(member: &str) -> Result<String, ConfigError> {
@@ -682,6 +752,8 @@ struct WorkspaceInheritance {
     toolchain: Option<JavaToolchainRequest>,
     module_name: Option<String>,
     catalog_path: Option<PathBuf>,
+    format: Option<FormatConfig>,
+    lint: Option<LintConfig>,
 }
 
 #[derive(Debug, thiserror::Error)]

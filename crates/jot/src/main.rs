@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use jot_builder::JavaProjectBuilder;
 use jot_cache::JotPaths;
+use jot_devtools::DevTools;
 use jot_config::{
     find_workspace_jot_toml, find_workspace_root_jot_toml, load_workspace_build_config,
     load_workspace_dependency_set, pin_java_toolchain, read_declared_dependencies,
@@ -23,6 +24,22 @@ enum Command {
     Build {
         #[arg(long)]
         module: Option<String>,
+    },
+    Fmt {
+        #[arg(long)]
+        check: bool,
+        #[arg(long)]
+        module: Option<String>,
+    },
+    Lint {
+        #[arg(long)]
+        module: Option<String>,
+    },
+    Audit {
+        #[arg(long)]
+        fix: bool,
+        #[arg(long)]
+        ci: bool,
     },
     Clean {
         #[arg(long)]
@@ -101,8 +118,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let manager = ToolchainManager::new(paths.clone())?;
 
     match cli.command {
+        Command::Audit { fix, ci } => handle_audit(paths, fix, ci)?,
         Command::Build { module } => handle_build(paths, manager, module.as_deref())?,
         Command::Clean { global } => handle_clean(global, paths)?,
+        Command::Fmt { check, module } => handle_fmt(paths, manager, check, module.as_deref())?,
+        Command::Lint { module } => handle_lint(paths, manager, module.as_deref())?,
         Command::Lock {
             dependencies,
             depth,
@@ -262,6 +282,210 @@ fn handle_build(
     for warning in output.fat_jar_warnings {
         eprintln!("warning: {warning}");
     }
+    Ok(())
+}
+
+fn handle_fmt(
+    paths: JotPaths,
+    manager: ToolchainManager,
+    check: bool,
+    module: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let resolver = MavenResolver::new(paths)?;
+    let devtools = DevTools::new(resolver, manager)?;
+    let cwd = std::env::current_dir()?;
+
+    if let Some(workspace) = load_workspace_build_config(&cwd)? {
+        let members = if let Some(module) = module {
+            let member = workspace
+                .members
+                .iter()
+                .find(|candidate| candidate.module_name == module)
+                .ok_or_else(|| format!("unknown workspace module `{module}`"))?;
+            vec![member.project.project_root.clone()]
+        } else {
+            workspace
+                .members
+                .iter()
+                .map(|member| member.project.project_root.clone())
+                .collect::<Vec<_>>()
+        };
+
+        let mut had_changes = false;
+        for member in members {
+            let report = devtools.format(&member, check)?;
+            had_changes |= !report.changed_files.is_empty();
+            println!(
+                "{}: scanned {} Java files, {} {}",
+                report.project.name,
+                report.files_scanned,
+                report.changed_files.len(),
+                if check { "would change" } else { "changed" }
+            );
+            for path in report.changed_files {
+                println!("  {}", path.display());
+            }
+        }
+
+        if check && had_changes {
+            return Err("format check failed".into());
+        }
+        return Ok(());
+    }
+
+    if module.is_some() {
+        return Err("--module can only be used from inside a workspace".into());
+    }
+
+    let report = devtools.format(&cwd, check)?;
+    println!(
+        "scanned {} Java files, {} {}",
+        report.files_scanned,
+        report.changed_files.len(),
+        if check { "would change" } else { "changed" }
+    );
+    let has_changes = !report.changed_files.is_empty();
+    for path in &report.changed_files {
+        println!("{}", path.display());
+    }
+    if check && has_changes {
+        return Err("format check failed".into());
+    }
+    Ok(())
+}
+
+fn handle_lint(
+    paths: JotPaths,
+    manager: ToolchainManager,
+    module: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let resolver = MavenResolver::new(paths)?;
+    let devtools = DevTools::new(resolver, manager)?;
+    let cwd = std::env::current_dir()?;
+
+    if let Some(workspace) = load_workspace_build_config(&cwd)? {
+        let members = if let Some(module) = module {
+            let member = workspace
+                .members
+                .iter()
+                .find(|candidate| candidate.module_name == module)
+                .ok_or_else(|| format!("unknown workspace module `{module}`"))?;
+            vec![member.project.project_root.clone()]
+        } else {
+            workspace
+                .members
+                .iter()
+                .map(|member| member.project.project_root.clone())
+                .collect::<Vec<_>>()
+        };
+
+        let mut violations = 0;
+        for member in members {
+            let report = devtools.lint(&member)?;
+            println!(
+                "{}: scanned {} Java files, {} violations",
+                report.project.name,
+                report.files_scanned,
+                report.violations.len()
+            );
+            for violation in &report.violations {
+                println!(
+                    "{}:{}:{}: {} [{}] {}",
+                    violation.path.display(),
+                    violation.begin_line,
+                    violation.begin_column,
+                    violation.rule,
+                    violation.ruleset,
+                    violation.message
+                );
+            }
+            for error in &report.processing_errors {
+                eprintln!("{}: {}", error.path.display(), error.message);
+            }
+            violations += report.violations.len() + report.processing_errors.len();
+        }
+        if violations > 0 {
+            return Err("lint found violations".into());
+        }
+        return Ok(());
+    }
+
+    if module.is_some() {
+        return Err("--module can only be used from inside a workspace".into());
+    }
+
+    let report = devtools.lint(&cwd)?;
+    println!(
+        "scanned {} Java files, {} violations",
+        report.files_scanned,
+        report.violations.len()
+    );
+    for violation in &report.violations {
+        println!(
+            "{}:{}:{}: {} [{}] {}",
+            violation.path.display(),
+            violation.begin_line,
+            violation.begin_column,
+            violation.rule,
+            violation.ruleset,
+            violation.message
+        );
+    }
+    for error in &report.processing_errors {
+        eprintln!("{}: {}", error.path.display(), error.message);
+    }
+    if !report.violations.is_empty() || !report.processing_errors.is_empty() {
+        return Err("lint found violations".into());
+    }
+    Ok(())
+}
+
+fn handle_audit(
+    paths: JotPaths,
+    fix: bool,
+    ci: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let manager = ToolchainManager::new(paths.clone())?;
+    let resolver = MavenResolver::new(paths)?;
+    let devtools = DevTools::new(resolver, manager)?;
+    let cwd = std::env::current_dir()?;
+    let report = devtools.audit(&cwd, fix)?;
+
+    if report.findings.is_empty() {
+        println!("No vulnerabilities found across {} packages", report.packages_scanned);
+        return Ok(());
+    }
+
+    let mut ci_failure = false;
+    for finding in &report.findings {
+        ci_failure |= ci && finding.severity.is_ci_failure();
+        println!(
+            "{}  {}  {}",
+            finding.severity.label(),
+            finding.vuln_id,
+            finding.package
+        );
+        println!("  {}", finding.summary);
+        if let Some(version) = &finding.fixed_version {
+            println!("  fixed in: {}", version);
+        }
+        if !finding.members.is_empty() {
+            println!("  affected members: {}", finding.members.join(", "));
+        }
+        for chain in &finding.chains {
+            let rendered = chain.iter().map(ToString::to_string).collect::<Vec<_>>().join(" -> ");
+            println!("  chain: {}", rendered);
+        }
+    }
+
+    if fix {
+        println!("updated {} direct dependency declarations", report.fixed_dependencies);
+    }
+
+    if ci_failure {
+        return Err("audit failed CI severity threshold".into());
+    }
+
     Ok(())
 }
 

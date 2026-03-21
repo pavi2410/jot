@@ -4,6 +4,7 @@ members = [
 	"crates/jot-builder",
 	"crates/jot-cache",
 	"crates/jot-config",
+	"crates/jot-devtools",
 	"crates/jot-platform",
 	"crates/jot-resolver",
 	"crates/jot-toolchain",
