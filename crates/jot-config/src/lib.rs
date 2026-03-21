@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use jot_toolchain::{JavaToolchainRequest, JdkVendor};
 use serde::Deserialize;
+use toml::Value as TomlValue;
 use toml_edit::{DocumentMut, Item, Table, Value, value};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -32,6 +33,25 @@ struct RawProject {
 struct RawWorkspace {
     members: Vec<String>,
     group: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RawCatalog {
+    versions: Option<std::collections::BTreeMap<String, String>>,
+    libraries: Option<std::collections::BTreeMap<String, RawCatalogLibrary>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RawCatalogLibrary {
+    module: String,
+    version: Option<RawCatalogVersion>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum RawCatalogVersion {
+    Literal(String),
+    Detailed { r#ref: String },
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -221,6 +241,7 @@ pub fn load_workspace_build_config(start: &Path) -> Result<Option<WorkspaceBuild
             group: workspace.group.clone(),
             toolchain: root_toolchain.clone(),
             module_name: Some(module_name.clone()),
+            catalog_path: catalog_path_for_root(&root_dir),
         };
         let project = load_project_build_config_from_file_with_inheritance(
             &member_config_path,
@@ -303,8 +324,10 @@ fn load_project_build_config_from_file_with_inheritance(
         .collect();
     let inherited_toolchain = inherited.as_ref().and_then(|ctx| ctx.toolchain.clone());
     let inherited_group = inherited.as_ref().and_then(|ctx| ctx.group.clone());
+    let inherited_catalog_path = inherited.as_ref().and_then(|ctx| ctx.catalog_path.clone());
     let module_name = inherited.and_then(|ctx| ctx.module_name);
     let path_dependencies = extract_path_dependencies(config.dependencies.clone(), &project_root)?;
+    let catalog_path = inherited_catalog_path.or_else(|| catalog_path_for_root(&project_root));
 
     Ok(ProjectBuildConfig {
         config_path: config_path.clone(),
@@ -322,9 +345,9 @@ fn load_project_build_config_from_file_with_inheritance(
         source_dirs,
         test_source_dirs,
         resource_dir: project_root.join("src/main/resources"),
-        dependencies: extract_dependency_coordinates(config.dependencies)?,
+        dependencies: extract_dependency_coordinates(config.dependencies, catalog_path.as_deref())?,
         path_dependencies,
-        test_dependencies: extract_dependency_coordinates(config.test_dependencies)?,
+        test_dependencies: extract_dependency_coordinates(config.test_dependencies, catalog_path.as_deref())?,
         toolchain: parse_toolchain_request(config.toolchains).or(inherited_toolchain),
     })
 }
@@ -334,13 +357,14 @@ fn inherited_workspace_context(start: &Path) -> Result<Option<WorkspaceInheritan
         return Ok(None);
     };
 
-    let content = fs::read_to_string(path)?;
+    let content = fs::read_to_string(&path)?;
     let config: RawConfig = toml::from_str(&content)?;
     let workspace = config.workspace;
     Ok(Some(WorkspaceInheritance {
         group: workspace.and_then(|ws| ws.group),
         toolchain: parse_toolchain_request(config.toolchains),
         module_name: None,
+        catalog_path: path.parent().and_then(catalog_path_for_root),
     }))
 }
 
@@ -358,9 +382,13 @@ pub fn read_declared_dependencies(start: &Path) -> Result<Vec<String>, ConfigErr
         return Ok(Vec::new());
     };
 
-    let content = fs::read_to_string(path)?;
+    let content = fs::read_to_string(&path)?;
     let config: RawConfig = toml::from_str(&content)?;
-    extract_dependency_coordinates(config.dependencies)
+    let inherited = inherited_workspace_context(path.parent().unwrap_or(start))?;
+    let catalog_path = inherited
+        .and_then(|ctx| ctx.catalog_path)
+        .or_else(|| path.parent().and_then(catalog_path_for_root));
+    extract_dependency_coordinates(config.dependencies, catalog_path.as_deref())
 }
 
 pub fn pin_java_toolchain(path: &Path, request: &JavaToolchainRequest) -> Result<(), ConfigError> {
@@ -405,8 +433,10 @@ fn parse_toolchain_request(
 
 fn extract_dependency_coordinates(
     dependencies: Option<std::collections::BTreeMap<String, RawDependencySpec>>,
+    catalog_path: Option<&Path>,
 ) -> Result<Vec<String>, ConfigError> {
     let mut result = Vec::new();
+    let catalog = load_catalog(catalog_path)?;
 
     for (name, spec) in dependencies.unwrap_or_default() {
         match spec {
@@ -418,12 +448,9 @@ fn extract_dependency_coordinates(
                 path: Some(_), ..
             } => {}
             RawDependencySpec::Detailed {
-                catalog: Some(_), ..
+                catalog: Some(alias), ..
             } => {
-                return Err(ConfigError::UnsupportedDependencyDeclaration {
-                    name,
-                    reason: "catalog-based dependencies are not supported yet".to_owned(),
-                });
+                result.push(resolve_catalog_dependency(&name, &alias, catalog.as_ref())?);
             }
             RawDependencySpec::Detailed { .. } => {
                 return Err(ConfigError::UnsupportedDependencyDeclaration {
@@ -435,6 +462,62 @@ fn extract_dependency_coordinates(
     }
 
     Ok(result)
+}
+
+fn catalog_path_for_root(root: &Path) -> Option<PathBuf> {
+    let path = root.join("libs.versions.toml");
+    path.is_file().then_some(path)
+}
+
+fn load_catalog(catalog_path: Option<&Path>) -> Result<Option<RawCatalog>, ConfigError> {
+    let Some(path) = catalog_path else {
+        return Ok(None);
+    };
+
+    let content = fs::read_to_string(path)?;
+    let value = content.parse::<TomlValue>()?;
+    let catalog = value.try_into::<RawCatalog>()?;
+    Ok(Some(catalog))
+}
+
+fn resolve_catalog_dependency(
+    dependency_name: &str,
+    alias: &str,
+    catalog: Option<&RawCatalog>,
+) -> Result<String, ConfigError> {
+    let catalog = catalog.ok_or_else(|| ConfigError::MissingCatalogFile {
+        dependency: dependency_name.to_owned(),
+    })?;
+    let library = catalog
+        .libraries
+        .as_ref()
+        .and_then(|libraries| libraries.get(alias))
+        .ok_or_else(|| ConfigError::MissingCatalogEntry {
+            dependency: dependency_name.to_owned(),
+            alias: alias.to_owned(),
+        })?;
+
+    let version = match library.version.as_ref() {
+        Some(RawCatalogVersion::Literal(version)) => Some(version.clone()),
+        Some(RawCatalogVersion::Detailed { r#ref }) => Some(
+            catalog
+                .versions
+                .as_ref()
+                .and_then(|versions| versions.get(r#ref))
+                .cloned()
+                .ok_or_else(|| ConfigError::MissingCatalogVersion {
+                    dependency: dependency_name.to_owned(),
+                    alias: alias.to_owned(),
+                    version_ref: r#ref.clone(),
+                })?,
+        ),
+        None => None,
+    };
+
+    Ok(match version {
+        Some(version) => format!("{}:{}", library.module, version),
+        None => library.module.clone(),
+    })
 }
 
 fn extract_path_dependencies(
@@ -552,6 +635,7 @@ struct WorkspaceInheritance {
     group: Option<String>,
     toolchain: Option<JavaToolchainRequest>,
     module_name: Option<String>,
+    catalog_path: Option<PathBuf>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -572,6 +656,16 @@ pub enum ConfigError {
     EditToml(#[from] toml_edit::TomlError),
     #[error("unsupported dependency declaration for `{name}`: {reason}")]
     UnsupportedDependencyDeclaration { name: String, reason: String },
+    #[error("dependency `{dependency}` uses catalog syntax but no libs.versions.toml was found")]
+    MissingCatalogFile { dependency: String },
+    #[error("dependency `{dependency}` references missing catalog alias `{alias}`")]
+    MissingCatalogEntry { dependency: String, alias: String },
+    #[error("dependency `{dependency}` alias `{alias}` references missing version `{version_ref}`")]
+    MissingCatalogVersion {
+        dependency: String,
+        alias: String,
+        version_ref: String,
+    },
     #[error("missing [workspace] section in {0}")]
     MissingWorkspaceSection(PathBuf),
     #[error("invalid [workspace] config in {path}: {reason}")]
@@ -697,19 +791,22 @@ mod tests {
     }
 
     #[test]
-    fn rejects_catalog_dependencies_for_lock_until_supported() {
+    fn resolves_catalog_dependencies_from_project_root_catalog() {
         let temp = tempdir().expect("tempdir");
         let config_path = temp.path().join("jot.toml");
+        fs::write(
+            temp.path().join("libs.versions.toml"),
+            "[versions]\njunit = \"5.11.0\"\n\n[libraries]\njunit = { module = \"org.junit.jupiter:junit-jupiter\", version.ref = \"junit\" }\n",
+        )
+        .expect("write catalog");
         fs::write(
             &config_path,
             "[dependencies]\njunit = { catalog = \"junit\" }\n",
         )
         .expect("write config");
 
-        let error = read_declared_dependencies(&config_path).expect_err("catalog should fail");
-        assert!(error
-            .to_string()
-            .contains("catalog-based dependencies are not supported yet"));
+        let dependencies = read_declared_dependencies(&config_path).expect("resolve catalog dependency");
+        assert_eq!(dependencies, vec!["org.junit.jupiter:junit-jupiter:5.11.0".to_owned()]);
     }
 
     #[test]
@@ -796,5 +893,32 @@ mod tests {
             .find(|member| member.module_name == "api")
             .expect("api member");
         assert_eq!(api_member.project.path_dependencies, vec![domain.canonicalize().expect("canonical domain")]);
+    }
+
+    #[test]
+    fn resolves_workspace_member_catalog_dependencies_from_root_catalog() {
+        let temp = tempdir().expect("tempdir");
+        let workspace = temp.path().join("workspace");
+        let api = workspace.join("api");
+        fs::create_dir_all(&api).expect("create api");
+
+        fs::write(
+            workspace.join("jot.toml"),
+            "[workspace]\nmembers = [\"api\"]\n\n[toolchains]\njava = \"21\"\n",
+        )
+        .expect("write workspace config");
+        fs::write(
+            workspace.join("libs.versions.toml"),
+            "[versions]\npicocli = \"4.7.6\"\n\n[libraries]\npicocli = { module = \"info.picocli:picocli\", version.ref = \"picocli\" }\n",
+        )
+        .expect("write workspace catalog");
+        fs::write(
+            api.join("jot.toml"),
+            "[project]\nname = \"api\"\nversion = \"1.0.0\"\n\n[dependencies]\npicocli = { catalog = \"picocli\" }\n",
+        )
+        .expect("write api config");
+
+        let config = load_project_build_config(&api).expect("load member config");
+        assert_eq!(config.dependencies, vec!["info.picocli:picocli:4.7.6".to_owned()]);
     }
 }

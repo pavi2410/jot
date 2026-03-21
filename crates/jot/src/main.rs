@@ -50,7 +50,10 @@ enum Command {
         #[arg(last = true)]
         args: Vec<String>,
     },
-    Test,
+    Test {
+        #[arg(long)]
+        module: Option<String>,
+    },
     Java(JavaCommand),
 }
 
@@ -102,7 +105,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         } => handle_lock(&dependencies, depth, &output)?,
         Command::Resolve { dependency, deps } => handle_resolve(&dependency, deps)?,
         Command::Run { module, args } => handle_run(paths, manager, module.as_deref(), &args)?,
-        Command::Test => handle_test(paths, manager)?,
+        Command::Test { module } => handle_test(paths, manager, module.as_deref())?,
         Command::Tree { dependency, depth } => handle_tree(&dependency, depth)?,
         Command::Java(command) => handle_java(command, manager, paths)?,
     }
@@ -274,14 +277,30 @@ fn handle_run(
 fn handle_test(
     paths: JotPaths,
     manager: ToolchainManager,
+    module: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let resolver = MavenResolver::new(paths)?;
     let builder = JavaProjectBuilder::new(resolver, manager);
     let cwd = std::env::current_dir()?;
 
     if let Some(workspace) = load_workspace_build_config(&cwd)? {
-        for member in workspace.members {
-            let output = builder.test(&member.project.project_root)?;
+        let selected = if let Some(module) = module {
+            let member = workspace
+                .members
+                .iter()
+                .find(|candidate| candidate.module_name == module)
+                .ok_or_else(|| format!("unknown workspace module `{module}`"))?;
+            vec![member.project.project_root.clone()]
+        } else {
+            workspace
+                .members
+                .iter()
+                .map(|member| member.project.project_root.clone())
+                .collect::<Vec<_>>()
+        };
+
+        for project_root in selected {
+            let output = builder.test(&project_root)?;
             if output.tests_found {
                 println!("test execution completed for {}", output.project.name);
             } else {
@@ -289,6 +308,10 @@ fn handle_test(
             }
         }
         return Ok(());
+    }
+
+    if module.is_some() {
+        return Err("--module can only be used from inside a workspace".into());
     }
 
     let output = builder.test(&cwd)?;
