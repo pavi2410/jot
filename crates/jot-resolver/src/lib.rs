@@ -137,12 +137,22 @@ impl MavenResolver {
 
     pub fn resolve_coordinate(&self, input: &str) -> Result<MavenCoordinate, ResolverError> {
         let coordinate = MavenCoordinate::parse(input)?;
-        if coordinate.version.is_some() {
+        if let Some(version) = coordinate.version.as_deref() {
+            if is_property_version_expression(version) {
+                return Err(ResolverError::UnsupportedVersionExpression(
+                    coordinate.to_string(),
+                ));
+            }
+
+            if needs_dynamic_version_resolution(version) {
+                let resolved = self.resolve_version_spec(&coordinate, version)?;
+                return Ok(coordinate.with_version(resolved));
+            }
+
             return Ok(coordinate);
         }
 
-        let metadata_xml = self.fetch_metadata_xml(&coordinate)?;
-        let metadata: MavenMetadata = from_str(&metadata_xml)?;
+        let metadata = self.fetch_metadata(&coordinate)?;
         let version = metadata
             .versioning
             .as_ref()
@@ -285,7 +295,7 @@ impl MavenResolver {
                 continue;
             }
 
-            let Some(next_coordinate) = dependency.to_coordinate()? else {
+            let Some(next_coordinate) = self.resolve_dependency_coordinate(&dependency)? else {
                 out.push(TreeEntry {
                     depth,
                     coordinate: MavenCoordinate {
@@ -499,6 +509,56 @@ impl MavenResolver {
         model
     }
 
+    fn resolve_dependency_coordinate(
+        &self,
+        dependency: &ResolvedDependency,
+    ) -> Result<Option<MavenCoordinate>, ResolverError> {
+        let Some(version) = dependency.version.as_deref() else {
+            return Ok(None);
+        };
+
+        if is_property_version_expression(version) {
+            return Ok(None);
+        }
+
+        let coordinate = MavenCoordinate {
+            group: dependency.group.clone(),
+            artifact: dependency.artifact.clone(),
+            version: dependency.version.clone(),
+            classifier: dependency.classifier.clone(),
+        };
+
+        if needs_dynamic_version_resolution(version) {
+            let resolved = self.resolve_version_spec(&coordinate, version)?;
+            return Ok(Some(coordinate.with_version(resolved)));
+        }
+
+        Ok(Some(coordinate))
+    }
+
+    fn resolve_version_spec(
+        &self,
+        coordinate: &MavenCoordinate,
+        version_spec: &str,
+    ) -> Result<String, ResolverError> {
+        let metadata = self.fetch_metadata(coordinate)?;
+        let versioning = metadata
+            .versioning
+            .as_ref()
+            .ok_or_else(|| ResolverError::MissingVersionMetadata(coordinate.to_string()))?;
+
+        resolve_version_from_metadata(versioning, version_spec)
+            .ok_or_else(|| ResolverError::UnsupportedVersionExpression(format!(
+                "{} ({version_spec})",
+                coordinate
+            )))
+    }
+
+    fn fetch_metadata(&self, coordinate: &MavenCoordinate) -> Result<MavenMetadata, ResolverError> {
+        let metadata_xml = self.fetch_metadata_xml(coordinate)?;
+        Ok(from_str(&metadata_xml)?)
+    }
+
     fn parent_to_coordinate(
         &self,
         parent: &MavenParent,
@@ -701,25 +761,6 @@ pub struct ResolvedDependency {
     pub exclusions: BTreeSet<(String, String)>,
 }
 
-impl ResolvedDependency {
-    fn to_coordinate(&self) -> Result<Option<MavenCoordinate>, ResolverError> {
-        let Some(version) = self.version.clone() else {
-            return Ok(None);
-        };
-
-        if is_unresolved_version_expression(&version) {
-            return Ok(None);
-        }
-
-        Ok(Some(MavenCoordinate {
-            group: self.group.clone(),
-            artifact: self.artifact.clone(),
-            version: Some(version),
-            classifier: self.classifier.clone(),
-        }))
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TreeEntry {
     pub depth: usize,
@@ -787,6 +828,123 @@ fn resolve_best_version(versioning: &MavenVersioning) -> Option<String> {
         .and_then(|versions| versions.version.last().cloned())
 }
 
+fn resolve_version_from_metadata(
+    versioning: &MavenVersioning,
+    version_spec: &str,
+) -> Option<String> {
+    if version_spec.eq_ignore_ascii_case("latest") {
+        return versioning
+            .latest
+            .as_ref()
+            .filter(|version| is_stable_maven_version(version))
+            .cloned()
+            .or_else(|| resolve_best_version(versioning));
+    }
+
+    if version_spec.eq_ignore_ascii_case("release") {
+        return resolve_best_version(versioning);
+    }
+
+    let intervals = parse_version_spec(version_spec)?;
+    let versions = versioning.versions.as_ref()?.version.as_slice();
+
+    versions
+        .iter()
+        .rev()
+        .find(|version| is_stable_maven_version(version) && version_matches_any_range(version, &intervals))
+        .cloned()
+        .or_else(|| {
+            versions
+                .iter()
+                .rev()
+                .find(|version| version_matches_any_range(version, &intervals))
+                .cloned()
+        })
+}
+
+fn parse_version_spec(spec: &str) -> Option<Vec<VersionRangeInterval>> {
+    if !needs_dynamic_version_resolution(spec) || is_property_version_expression(spec) {
+        return None;
+    }
+
+    if spec.starts_with('[') || spec.starts_with('(') {
+        return parse_version_ranges(spec);
+    }
+
+    Some(vec![VersionRangeInterval {
+        lower: Some((spec.to_owned(), true)),
+        upper: Some((spec.to_owned(), true)),
+    }])
+}
+
+fn parse_version_ranges(spec: &str) -> Option<Vec<VersionRangeInterval>> {
+    let mut intervals = Vec::new();
+    let mut start = 0;
+    let chars = spec.char_indices().collect::<Vec<_>>();
+
+    while start < spec.len() {
+        let opening = spec[start..].chars().next()?;
+        if opening != '[' && opening != '(' {
+            return None;
+        }
+
+        let mut end = None;
+        for (index, ch) in chars.iter().copied().filter(|(index, _)| *index > start) {
+            if ch == ']' || ch == ')' {
+                end = Some((index, ch));
+                break;
+            }
+        }
+        let (end_index, closing) = end?;
+        let body = &spec[start + 1..end_index];
+        let parts = body.splitn(2, ',').collect::<Vec<_>>();
+        let lower = parts.first().copied().unwrap_or_default().trim();
+        let upper = parts.get(1).copied().unwrap_or(lower).trim();
+
+        let interval = if parts.len() == 1 {
+            VersionRangeInterval {
+                lower: if lower.is_empty() { None } else { Some((lower.to_owned(), opening == '[')) },
+                upper: if lower.is_empty() { None } else { Some((lower.to_owned(), closing == ']')) },
+            }
+        } else {
+            VersionRangeInterval {
+                lower: if lower.is_empty() { None } else { Some((lower.to_owned(), opening == '[')) },
+                upper: if upper.is_empty() { None } else { Some((upper.to_owned(), closing == ']')) },
+            }
+        };
+        intervals.push(interval);
+
+        start = end_index + 1;
+        while spec[start..].starts_with(',') {
+            start += 1;
+            if start >= spec.len() {
+                break;
+            }
+        }
+    }
+
+    if intervals.is_empty() {
+        None
+    } else {
+        Some(intervals)
+    }
+}
+
+fn version_matches_any_range(version: &str, intervals: &[VersionRangeInterval]) -> bool {
+    intervals.iter().any(|interval| interval.matches(version))
+}
+
+fn needs_dynamic_version_resolution(version: &str) -> bool {
+    version.eq_ignore_ascii_case("latest")
+        || version.eq_ignore_ascii_case("release")
+        || version.starts_with('[')
+        || version.starts_with('(')
+}
+
+fn is_property_version_expression(version: &str) -> bool {
+    version.contains("${")
+}
+
 fn is_stable_maven_version(version: &str) -> bool {
     let lowered = version.to_ascii_lowercase();
     !lowered.contains("snapshot")
@@ -797,8 +955,66 @@ fn is_stable_maven_version(version: &str) -> bool {
         && !lowered.contains("m")
 }
 
-fn is_unresolved_version_expression(version: &str) -> bool {
-    version.contains("${") || version.contains('[') || version.contains('(') || version.contains(',')
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct VersionRangeInterval {
+    lower: Option<(String, bool)>,
+    upper: Option<(String, bool)>,
+}
+
+impl VersionRangeInterval {
+    fn matches(&self, version: &str) -> bool {
+        let lower_matches = self.lower.as_ref().is_none_or(|(bound, inclusive)| {
+            if *inclusive {
+                compare_maven_versions(version, bound).is_ge()
+            } else {
+                compare_maven_versions(version, bound).is_gt()
+            }
+        });
+        let upper_matches = self.upper.as_ref().is_none_or(|(bound, inclusive)| {
+            if *inclusive {
+                compare_maven_versions(version, bound).is_le()
+            } else {
+                compare_maven_versions(version, bound).is_lt()
+            }
+        });
+
+        lower_matches && upper_matches
+    }
+}
+
+fn compare_maven_versions(left: &str, right: &str) -> std::cmp::Ordering {
+    let left_parts = tokenize_maven_version(left);
+    let right_parts = tokenize_maven_version(right);
+    let max_len = left_parts.len().max(right_parts.len());
+
+    for index in 0..max_len {
+        let left_part = left_parts.get(index).cloned().unwrap_or(VersionToken::Number(0));
+        let right_part = right_parts.get(index).cloned().unwrap_or(VersionToken::Number(0));
+        let ordering = left_part.cmp(&right_part);
+        if ordering != std::cmp::Ordering::Equal {
+            return ordering;
+        }
+    }
+
+    std::cmp::Ordering::Equal
+}
+
+fn tokenize_maven_version(version: &str) -> Vec<VersionToken> {
+    version
+        .split(['.', '-', '_'])
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            part.parse::<u64>()
+                .map(VersionToken::Number)
+                .unwrap_or_else(|_| VersionToken::Text(part.to_ascii_lowercase()))
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum VersionToken {
+    Number(u64),
+    Text(String),
 }
 
 fn sanitize_for_filename(value: &str) -> String {
@@ -1060,6 +1276,8 @@ pub enum ResolverError {
     MissingVersionForPom(String),
     #[error("cannot compute artifact URL because version is missing for {0}")]
     MissingVersionForArtifact(String),
+    #[error("unsupported or unresolvable version expression: {0}")]
+    UnsupportedVersionExpression(String),
     #[error("invalid parent POM declaration: {0}")]
     InvalidParentPom(String),
     #[error("detected a cycle while resolving POM model: {0}")]
@@ -1079,8 +1297,10 @@ mod tests {
         MavenDistributionManagement, MavenParent, MavenRelocation, relocation_target,
         MavenCoordinate, MavenDependency, MavenProject, MavenVersioning, MavenVersions,
         ResolvedDependency, LockedPackage, dependency_exclusions, is_cache_usable,
-        is_stable_maven_version,
-        is_unresolved_version_expression, interpolate_value, normalize_checksum_response,
+        is_stable_maven_version, needs_dynamic_version_resolution, parse_version_spec,
+        resolve_version_from_metadata, version_matches_any_range,
+        is_property_version_expression, interpolate_value,
+        normalize_checksum_response,
         sha256_file,
         resolve_best_version,
     };
@@ -1145,6 +1365,40 @@ mod tests {
     }
 
     #[test]
+    fn resolves_dynamic_versions_from_metadata() {
+        let versioning = MavenVersioning {
+            latest: Some("2.1.0".into()),
+            release: Some("2.0.0".into()),
+            versions: Some(MavenVersions {
+                version: vec![
+                    "1.0.0".into(),
+                    "1.5.0".into(),
+                    "1.9.9".into(),
+                    "2.0.0-RC1".into(),
+                    "2.0.0".into(),
+                    "2.1.0".into(),
+                ],
+            }),
+        };
+
+        assert_eq!(resolve_version_from_metadata(&versioning, "LATEST").as_deref(), Some("2.1.0"));
+        assert_eq!(resolve_version_from_metadata(&versioning, "RELEASE").as_deref(), Some("2.0.0"));
+        assert_eq!(resolve_version_from_metadata(&versioning, "[1.5,2.0)").as_deref(), Some("1.9.9"));
+        assert_eq!(resolve_version_from_metadata(&versioning, "(,1.0.0]").as_deref(), Some("1.0.0"));
+        assert_eq!(resolve_version_from_metadata(&versioning, "[2.0.0,)").as_deref(), Some("2.1.0"));
+    }
+
+    #[test]
+    fn parses_and_matches_union_ranges() {
+        let intervals = parse_version_spec("(,1.0],[1.2,)").expect("parse ranges");
+        assert!(version_matches_any_range("0.9", &intervals));
+        assert!(!version_matches_any_range("1.1", &intervals));
+        assert!(version_matches_any_range("1.2", &intervals));
+        assert!(needs_dynamic_version_resolution("[1.0,2.0)"));
+        assert!(!needs_dynamic_version_resolution("1.2.3"));
+    }
+
+    #[test]
     fn stable_version_filter_accepts_and_rejects_expected_formats() {
         assert!(is_stable_maven_version("1.2.3"));
         assert!(is_stable_maven_version("1.2.3.Final"));
@@ -1181,11 +1435,11 @@ mod tests {
         }
 
             #[test]
-            fn unresolved_version_expression_detection_matches_expected_cases() {
-                assert!(is_unresolved_version_expression("${junit.version}"));
-                assert!(is_unresolved_version_expression("[1.0,2.0)"));
-                assert!(is_unresolved_version_expression("(,1.4.0]"));
-                assert!(!is_unresolved_version_expression("1.2.3"));
+            fn property_version_expression_detection_matches_expected_cases() {
+                assert!(is_property_version_expression("${junit.version}"));
+                assert!(!is_property_version_expression("[1.0,2.0)"));
+                assert!(!is_property_version_expression("(,1.4.0]"));
+                assert!(!is_property_version_expression("1.2.3"));
             }
 
             #[test]
@@ -1199,14 +1453,7 @@ mod tests {
                     optional: false,
                     exclusions: BTreeSet::new(),
                 };
-                assert_eq!(
-                    literal
-                        .to_coordinate()
-                        .expect("literal version")
-                        .expect("coordinate")
-                        .to_string(),
-                    "org.example:demo:1.0.0:tests"
-                );
+                assert_eq!(literal.classifier.as_deref(), Some("tests"));
 
                 let managed = ResolvedDependency {
                     group: "org.example".into(),
@@ -1217,7 +1464,9 @@ mod tests {
                     optional: false,
                     exclusions: BTreeSet::new(),
                 };
-                assert!(managed.to_coordinate().expect("managed version").is_none());
+                assert!(is_property_version_expression(
+                    managed.version.as_deref().expect("managed version")
+                ));
             }
 
             #[test]
