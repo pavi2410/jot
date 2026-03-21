@@ -2,7 +2,7 @@ use jot_cache::JotPaths;
 use quick_xml::de::from_str;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt::{Display, Formatter};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -237,27 +237,174 @@ impl MavenResolver {
         &self,
         coordinate: &MavenCoordinate,
     ) -> Result<Vec<ResolvedDependency>, ResolverError> {
-        let pom_xml = self.fetch_pom_xml(coordinate)?;
-        let project: MavenProject = from_str(&pom_xml)?;
+        let mut visiting = HashSet::new();
+        let effective = self.build_effective_model(coordinate, &mut visiting)?;
+        Ok(effective.dependencies)
+    }
 
-        let dependencies = project
-            .dependencies
-            .map(|deps| {
-                deps.dependency
-                    .into_iter()
-                    .filter(|dependency| dependency.group_id.is_some() && dependency.artifact_id.is_some())
-                    .map(|dependency| ResolvedDependency {
-                        group: dependency.group_id.unwrap_or_default(),
-                        artifact: dependency.artifact_id.unwrap_or_default(),
-                        version: dependency.version,
-                        scope: dependency.scope,
-                        optional: dependency.optional.unwrap_or(false),
-                    })
-                    .collect::<Vec<_>>()
+    fn build_effective_model(
+        &self,
+        coordinate: &MavenCoordinate,
+        visiting: &mut HashSet<String>,
+    ) -> Result<EffectivePomModel, ResolverError> {
+        let key = coordinate.to_string();
+        if !visiting.insert(key.clone()) {
+            return Err(ResolverError::PomCycleDetected(key));
+        }
+
+        let model = (|| {
+            let pom_xml = self.fetch_pom_xml(coordinate)?;
+            let project: MavenProject = from_str(&pom_xml)?;
+
+            let mut properties = BTreeMap::new();
+            let mut managed_versions = BTreeMap::new();
+
+            if let Some(parent_ref) = project.parent.clone() {
+                let parent_coord = self.parent_to_coordinate(&parent_ref)?;
+                let parent = self.build_effective_model(&parent_coord, visiting)?;
+                properties.extend(parent.properties);
+                managed_versions.extend(parent.managed_versions);
+            }
+
+            let project_group = project
+                .group_id
+                .clone()
+                .or_else(|| project.parent.as_ref().and_then(|parent| parent.group_id.clone()))
+                .unwrap_or_default();
+            let project_version = project
+                .version
+                .clone()
+                .or_else(|| project.parent.as_ref().and_then(|parent| parent.version.clone()))
+                .unwrap_or_default();
+            let project_artifact = project.artifact_id.clone().unwrap_or_default();
+
+            properties.insert("project.groupId".to_owned(), project_group.clone());
+            properties.insert("project.version".to_owned(), project_version.clone());
+            properties.insert("project.artifactId".to_owned(), project_artifact.clone());
+
+            if let Some(raw_properties) = project.properties {
+                for (name, value) in raw_properties.entries {
+                    let interpolated = interpolate_value(&value, &properties);
+                    properties.insert(name, interpolated);
+                }
+            }
+
+            if let Some(management) = project.dependency_management {
+                for dependency in management.dependencies.dependency {
+                    let Some(group) = dependency.group_id.map(|value| interpolate_value(&value, &properties)) else {
+                        continue;
+                    };
+                    let Some(artifact) = dependency.artifact_id.map(|value| interpolate_value(&value, &properties)) else {
+                        continue;
+                    };
+
+                    let scope = dependency
+                        .scope
+                        .as_ref()
+                        .map(|value| interpolate_value(value, &properties));
+                    let packaging = dependency
+                        .packaging
+                        .as_ref()
+                        .map(|value| interpolate_value(value, &properties));
+
+                    if scope.as_deref() == Some("import") && packaging.as_deref() == Some("pom") {
+                        if let Some(version) = dependency
+                            .version
+                            .as_ref()
+                            .map(|value| interpolate_value(value, &properties))
+                        {
+                            let imported = self.build_effective_model(
+                                &MavenCoordinate {
+                                    group: group.clone(),
+                                    artifact: artifact.clone(),
+                                    version: Some(version),
+                                },
+                                visiting,
+                            )?;
+                            for (key, value) in imported.managed_versions {
+                                managed_versions.insert(key, value);
+                            }
+                        }
+                        continue;
+                    }
+
+                    if let Some(version) = dependency.version {
+                        managed_versions.insert(
+                            (group, artifact),
+                            interpolate_value(&version, &properties),
+                        );
+                    }
+                }
+            }
+
+            let dependencies = project
+                .dependencies
+                .map(|deps| {
+                    deps.dependency
+                        .into_iter()
+                        .filter_map(|dependency| {
+                            let group = dependency
+                                .group_id
+                                .as_ref()
+                                .map(|value| interpolate_value(value, &properties))?;
+                            let artifact = dependency
+                                .artifact_id
+                                .as_ref()
+                                .map(|value| interpolate_value(value, &properties))?;
+                            let version = dependency.version.as_ref().map(|value| interpolate_value(value, &properties)).or_else(|| {
+                                managed_versions
+                                    .get(&(group.clone(), artifact.clone()))
+                                    .cloned()
+                            });
+
+                            Some(ResolvedDependency {
+                                group,
+                                artifact,
+                                version,
+                                scope: dependency
+                                    .scope
+                                    .as_ref()
+                                    .map(|value| interpolate_value(value, &properties)),
+                                optional: dependency.optional.unwrap_or(false),
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            Ok::<EffectivePomModel, ResolverError>(EffectivePomModel {
+                properties,
+                managed_versions,
+                dependencies,
             })
-            .unwrap_or_default();
+        })();
 
-        Ok(dependencies)
+        visiting.remove(&key);
+        model
+    }
+
+    fn parent_to_coordinate(
+        &self,
+        parent: &MavenParent,
+    ) -> Result<MavenCoordinate, ResolverError> {
+        let group = parent
+            .group_id
+            .clone()
+            .ok_or_else(|| ResolverError::InvalidParentPom("missing parent groupId".to_owned()))?;
+        let artifact = parent
+            .artifact_id
+            .clone()
+            .ok_or_else(|| ResolverError::InvalidParentPom("missing parent artifactId".to_owned()))?;
+        let version = parent
+            .version
+            .clone()
+            .ok_or_else(|| ResolverError::InvalidParentPom("missing parent version".to_owned()))?;
+
+        Ok(MavenCoordinate {
+            group,
+            artifact,
+            version: Some(version),
+        })
     }
 
     fn fetch_metadata_xml(&self, coordinate: &MavenCoordinate) -> Result<String, ResolverError> {
@@ -360,6 +507,13 @@ pub struct LockedPackage {
     pub version: String,
 }
 
+#[derive(Debug)]
+struct EffectivePomModel {
+    properties: BTreeMap<String, String>,
+    managed_versions: BTreeMap<(String, String), String>,
+    dependencies: Vec<ResolvedDependency>,
+}
+
 fn resolve_best_version(versioning: &MavenVersioning) -> Option<String> {
     if let Some(release) = &versioning.release
         && is_stable_maven_version(release)
@@ -418,6 +572,34 @@ fn sanitize_for_filename(value: &str) -> String {
         .collect()
 }
 
+fn interpolate_value(input: &str, properties: &BTreeMap<String, String>) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut cursor = 0;
+    while let Some(start_offset) = input[cursor..].find("${") {
+        let start = cursor + start_offset;
+        result.push_str(&input[cursor..start]);
+
+        let key_start = start + 2;
+        let Some(end_offset) = input[key_start..].find('}') else {
+            result.push_str(&input[start..]);
+            return result;
+        };
+        let end = key_start + end_offset;
+        let key = &input[key_start..end];
+
+        if let Some(value) = properties.get(key) {
+            result.push_str(value);
+        } else {
+            result.push_str(&input[start..=end]);
+        }
+
+        cursor = end + 1;
+    }
+
+    result.push_str(&input[cursor..]);
+    result
+}
+
 fn is_cache_usable(path: &Path, ttl: Option<Duration>) -> Result<bool, ResolverError> {
     let Some(ttl) = ttl else {
         return Ok(true);
@@ -451,7 +633,36 @@ struct MavenVersions {
 
 #[derive(Debug, Deserialize)]
 struct MavenProject {
+    #[serde(rename = "groupId")]
+    group_id: Option<String>,
+    #[serde(rename = "artifactId")]
+    artifact_id: Option<String>,
+    version: Option<String>,
+    parent: Option<MavenParent>,
+    properties: Option<MavenProperties>,
+    #[serde(rename = "dependencyManagement")]
+    dependency_management: Option<MavenDependencyManagement>,
     dependencies: Option<MavenDependencies>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct MavenParent {
+    #[serde(rename = "groupId")]
+    group_id: Option<String>,
+    #[serde(rename = "artifactId")]
+    artifact_id: Option<String>,
+    version: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MavenProperties {
+    #[serde(flatten)]
+    entries: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MavenDependencyManagement {
+    dependencies: MavenDependencies,
 }
 
 #[derive(Debug, Deserialize)]
@@ -467,6 +678,8 @@ struct MavenDependency {
     #[serde(rename = "artifactId")]
     artifact_id: Option<String>,
     version: Option<String>,
+    #[serde(rename = "type")]
+    packaging: Option<String>,
     scope: Option<String>,
     optional: Option<bool>,
 }
@@ -487,18 +700,23 @@ pub enum ResolverError {
     MissingVersionMetadata(String),
     #[error("cannot compute POM URL because version is missing for {0}")]
     MissingVersionForPom(String),
+    #[error("invalid parent POM declaration: {0}")]
+    InvalidParentPom(String),
+    #[error("detected a cycle while resolving POM model: {0}")]
+    PomCycleDetected(String),
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        Lockfile,
+        Lockfile, MavenDependencies, MavenDependencyManagement, MavenParent,
         MavenCoordinate, MavenDependency, MavenProject, MavenVersioning, MavenVersions,
         ResolvedDependency, LockedPackage, is_cache_usable, is_stable_maven_version,
-        is_unresolved_version_expression,
+        is_unresolved_version_expression, interpolate_value,
         resolve_best_version,
     };
     use quick_xml::de::from_str;
+    use std::collections::BTreeMap;
     use std::fs;
     use std::time::Duration;
     use tempfile::tempdir;
@@ -658,5 +876,69 @@ mod tests {
 
                 assert_eq!(lockfile.package[0].group, "b.group");
                 assert_eq!(lockfile.package[1].group, "a.group");
+            }
+
+            #[test]
+            fn interpolation_replaces_known_properties_and_keeps_unknown() {
+                let mut properties = BTreeMap::new();
+                properties.insert("junit.version".to_owned(), "5.11.0".to_owned());
+
+                assert_eq!(
+                    interpolate_value("org.junit:junit-bom:${junit.version}", &properties),
+                    "org.junit:junit-bom:5.11.0"
+                );
+                assert_eq!(
+                    interpolate_value("${missing.value}", &properties),
+                    "${missing.value}"
+                );
+            }
+
+            #[test]
+            fn managed_versions_fill_dependency_versions() {
+                let project = MavenProject {
+                    group_id: Some("org.example".to_owned()),
+                    artifact_id: Some("demo".to_owned()),
+                    version: Some("1.0.0".to_owned()),
+                    parent: Some(MavenParent {
+                        group_id: Some("org.example".to_owned()),
+                        artifact_id: Some("parent".to_owned()),
+                        version: Some("1.0.0".to_owned()),
+                    }),
+                    properties: None,
+                    dependency_management: Some(MavenDependencyManagement {
+                        dependencies: MavenDependencies {
+                            dependency: vec![MavenDependency {
+                                group_id: Some("org.slf4j".to_owned()),
+                                artifact_id: Some("slf4j-api".to_owned()),
+                                version: Some("2.0.16".to_owned()),
+                                packaging: None,
+                                scope: None,
+                                optional: None,
+                            }],
+                        },
+                    }),
+                    dependencies: Some(MavenDependencies {
+                        dependency: vec![MavenDependency {
+                            group_id: Some("org.slf4j".to_owned()),
+                            artifact_id: Some("slf4j-api".to_owned()),
+                            version: None,
+                            packaging: None,
+                            scope: None,
+                            optional: None,
+                        }],
+                    }),
+                };
+
+                assert_eq!(
+                    project
+                        .dependency_management
+                        .as_ref()
+                        .expect("management")
+                        .dependencies
+                        .dependency[0]
+                        .version
+                        .as_deref(),
+                    Some("2.0.16")
+                );
             }
 }
