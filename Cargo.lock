@@ -774,15 +774,25 @@ version = "0.1.0"
 dependencies = [
  "annotate-snippets",
  "clap",
+ "flate2",
  "fs2",
+ "hex",
  "jot-builder",
  "jot-cache",
  "jot-config",
  "jot-devtools",
  "jot-resolver",
  "jot-toolchain",
+ "reqwest",
+ "self-replace",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tar",
  "tempfile",
  "toml",
+ "zip",
 ]
 
 [[package]]
@@ -1326,6 +1336,17 @@ name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+
+[[package]]
+name = "self-replace"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03ec815b5eab420ab893f63393878d89c90fdd94c0bcc44c07abb8ad95552fb7"
+dependencies = [
+ "fastrand",
+ "tempfile",
+ "windows-sys 0.52.0",
+]
 
 [[package]]
 name = "semver"

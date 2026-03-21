@@ -35,3 +35,9 @@ time = { version = "0.3.39", features = ["formatting", "macros", "parsing", "ser
 toml = "0.8.20"
 toml_edit = "0.22.24"
 zip = { version = "2.4.1", default-features = false, features = ["deflate"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

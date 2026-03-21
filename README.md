@@ -33,6 +33,20 @@ jot build
 jot run
 ```
 
+## Install
+
+Install from GitHub Releases:
+
+1. Download the binary for your platform from the latest release.
+2. Move it into a directory on your `PATH`.
+3. Confirm install:
+
+```bash
+jot --version
+```
+
+After first install, use `jot self update` and `jot self uninstall` for lifecycle management.
+
 ## Java Samples
 
 Runnable sample projects live in `samples/java`:
@@ -78,6 +92,8 @@ jot init --template java-workspace my-workspace
 - `jot java list`
 - `jot java pin <version> [--vendor <vendor>] [--workspace]`
 - `jot clean --global`
+- `jot self update [--version <x.y.z>] [--check] [-y]`
+- `jot self uninstall [-y]`
 
 ## Offline Mode
 

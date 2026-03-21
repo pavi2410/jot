@@ -62,6 +62,13 @@ Committed runnable samples are available under `samples/java/`:
 
 ## Common Workflows
 
+### Install
+
+- Download the release binary for your platform from GitHub Releases.
+- Place the binary in a directory on your `PATH`.
+- Verify installation: `jot --version`
+- Use `jot self update` and `jot self uninstall` after first install.
+
 ### Init
 
 - Minimal app: `jot init --template java-minimal my-app`
@@ -96,6 +103,13 @@ Committed runnable samples are available under `samples/java/`:
 - Lint: `jot lint`
 - Audit vulnerabilities: `jot audit`
 - Auto-fix direct vulnerable coords (when possible): `jot audit --fix`
+
+### Self Management
+
+- Check update availability: `jot self update --check`
+- Update to latest: `jot self update -y`
+- Update to a pinned release: `jot self update --version 0.1.0 -y`
+- Uninstall current jot binary: `jot self uninstall -y`
 
 ## Offline Mode
 
