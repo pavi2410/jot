@@ -138,18 +138,11 @@ impl ToolchainManager {
         options: InstallOptions,
     ) -> Result<InstalledJdk, ToolchainError> {
         let vendor = request.vendor().unwrap_or(JdkVendor::Adoptium);
-        let _install_lock = InstallLock::acquire(
-            &self.paths,
-            vendor,
-            request.version(),
-            &self.platform,
-        )?;
+        let _install_lock =
+            InstallLock::acquire(&self.paths, vendor, request.version(), &self.platform)?;
 
-        let resolve_progress = spinner(&format!(
-            "Resolving JDK {} ({})",
-            request.version(),
-            vendor
-        ));
+        let resolve_progress =
+            spinner(&format!("Resolving JDK {} ({})", request.version(), vendor));
         let asset = self.resolve_latest_asset(request.version(), vendor)?;
         resolve_progress.finish_with_message(format!(
             "Resolved {} {} for {}",
@@ -274,11 +267,14 @@ impl ToolchainManager {
             vendor = vendor.as_adoptium_vendor(),
         );
         let assets: Vec<AdoptiumAsset> = self.client.get(url).send()?.error_for_status()?.json()?;
-        let asset = assets.into_iter().next().ok_or(ToolchainError::NoMatchingAsset {
-            version: feature_version.to_owned(),
-            platform: self.platform,
-            vendor,
-        })?;
+        let asset = assets
+            .into_iter()
+            .next()
+            .ok_or(ToolchainError::NoMatchingAsset {
+                version: feature_version.to_owned(),
+                platform: self.platform,
+                vendor,
+            })?;
 
         let cache_entry = ResolveCacheEntry {
             fetched_at: OffsetDateTime::now_utc(),
@@ -306,7 +302,11 @@ impl ToolchainManager {
 
         let bytes = fs::read(path)?;
         let entry: ResolveCacheEntry = serde_json::from_slice(&bytes)?;
-        if is_cache_fresh(entry.fetched_at, OffsetDateTime::now_utc(), Self::RESOLVE_CACHE_TTL) {
+        if is_cache_fresh(
+            entry.fetched_at,
+            OffsetDateTime::now_utc(),
+            Self::RESOLVE_CACHE_TTL,
+        ) {
             return Ok(Some(entry));
         }
 
@@ -407,9 +407,16 @@ impl ToolchainManager {
         Ok(())
     }
 
-    fn extract_archive(&self, archive_path: &Path, destination: &Path) -> Result<(), ToolchainError> {
+    fn extract_archive(
+        &self,
+        archive_path: &Path,
+        destination: &Path,
+    ) -> Result<(), ToolchainError> {
         let file = fs::File::open(archive_path)?;
-        let file_name = archive_path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+        let file_name = archive_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
 
         if file_name.ends_with(".zip") {
             let mut archive = ZipArchive::new(file)?;
@@ -424,7 +431,9 @@ impl ToolchainManager {
             return Ok(());
         }
 
-        Err(ToolchainError::UnsupportedArchive(archive_path.to_path_buf()))
+        Err(ToolchainError::UnsupportedArchive(
+            archive_path.to_path_buf(),
+        ))
     }
 
     fn read_installation(path: &Path) -> Result<InstalledJdk, ToolchainError> {
@@ -444,7 +453,8 @@ impl InstallLock {
         version: &str,
         platform: &Platform,
     ) -> Result<Self, ToolchainError> {
-        let lock_path = paths.install_lock_path(&vendor.to_string(), version, &platform.to_string());
+        let lock_path =
+            paths.install_lock_path(&vendor.to_string(), version, &platform.to_string());
         let file = OpenOptions::new()
             .create(true)
             .read(true)
@@ -604,10 +614,15 @@ pub enum ToolchainError {
     #[error("failed to normalize PATH entries: {0}")]
     JoinPaths(#[source] std::env::JoinPathsError),
     #[error("failed to acquire install lock at {path}: {source}")]
-    LockAcquisition { path: PathBuf, source: std::io::Error },
+    LockAcquisition {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     #[error("archive extraction failed: {0}")]
     Zip(#[from] zip::result::ZipError),
-    #[error("failed to resolve an Adoptium JDK for version {version}, vendor {vendor}, platform {platform}")]
+    #[error(
+        "failed to resolve an Adoptium JDK for version {version}, vendor {vendor}, platform {platform}"
+    )]
     NoMatchingAsset {
         version: String,
         platform: Platform,

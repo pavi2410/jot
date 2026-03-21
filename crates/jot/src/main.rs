@@ -3,12 +3,12 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use jot_builder::JavaProjectBuilder;
 use jot_cache::JotPaths;
-use jot_devtools::DevTools;
 use jot_config::{
     find_workspace_jot_toml, find_workspace_root_jot_toml, load_workspace_build_config,
     load_workspace_dependency_set, pin_java_toolchain, read_declared_dependencies,
     read_toolchain_request,
 };
+use jot_devtools::DevTools;
 use jot_resolver::{MavenResolver, TreeEntry};
 use jot_toolchain::{InstallOptions, JavaToolchainRequest, JdkVendor, ToolchainManager};
 
@@ -440,11 +440,7 @@ fn handle_lint(
     Ok(())
 }
 
-fn handle_audit(
-    paths: JotPaths,
-    fix: bool,
-    ci: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn handle_audit(paths: JotPaths, fix: bool, ci: bool) -> Result<(), Box<dyn std::error::Error>> {
     let manager = ToolchainManager::new(paths.clone())?;
     let resolver = MavenResolver::new(paths)?;
     let devtools = DevTools::new(resolver, manager)?;
@@ -452,7 +448,10 @@ fn handle_audit(
     let report = devtools.audit(&cwd, fix)?;
 
     if report.findings.is_empty() {
-        println!("No vulnerabilities found across {} packages", report.packages_scanned);
+        println!(
+            "No vulnerabilities found across {} packages",
+            report.packages_scanned
+        );
         return Ok(());
     }
 
@@ -473,13 +472,20 @@ fn handle_audit(
             println!("  affected members: {}", finding.members.join(", "));
         }
         for chain in &finding.chains {
-            let rendered = chain.iter().map(ToString::to_string).collect::<Vec<_>>().join(" -> ");
+            let rendered = chain
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(" -> ");
             println!("  chain: {}", rendered);
         }
     }
 
     if fix {
-        println!("updated {} direct dependency declarations", report.fixed_dependencies);
+        println!(
+            "updated {} direct dependency declarations",
+            report.fixed_dependencies
+        );
     }
 
     if ci_failure {
@@ -619,7 +625,10 @@ fn print_workspace_tree(
     let workspace = load_workspace_dependency_set(start)?
         .ok_or("--workspace requires running inside a workspace")?;
     if let Some(selected) = module
-        && !workspace.members.iter().any(|member| member.module_name == selected)
+        && !workspace
+            .members
+            .iter()
+            .any(|member| member.module_name == selected)
     {
         return Err(format!("unknown workspace module `{selected}`").into());
     }
@@ -734,10 +743,7 @@ fn handle_java(
             } else {
                 nearest_project_file(&cwd)?
             };
-            pin_java_toolchain(
-                &config_path,
-                &JavaToolchainRequest { version, vendor },
-            )?;
+            pin_java_toolchain(&config_path, &JavaToolchainRequest { version, vendor })?;
             println!("updated {}", config_path.display());
         }
     }
@@ -753,6 +759,7 @@ fn nearest_project_file(start: &PathBuf) -> Result<PathBuf, Box<dyn std::error::
 
 fn workspace_project_file(start: &PathBuf) -> Result<PathBuf, Box<dyn std::error::Error>> {
     find_workspace_jot_toml(start)?.ok_or_else(|| {
-        "could not find a workspace jot.toml in the current directory or any parent directory".into()
+        "could not find a workspace jot.toml in the current directory or any parent directory"
+            .into()
     })
 }

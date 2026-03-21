@@ -166,7 +166,8 @@ pub fn find_jot_toml(start: &Path) -> Result<Option<PathBuf>, ConfigError> {
     let mut current = if start.is_dir() {
         start.to_path_buf()
     } else {
-        start.parent()
+        start
+            .parent()
             .ok_or_else(|| ConfigError::InvalidStartPath(start.to_path_buf()))?
             .to_path_buf()
     };
@@ -187,7 +188,8 @@ pub fn find_workspace_jot_toml(start: &Path) -> Result<Option<PathBuf>, ConfigEr
     let mut current = if start.is_dir() {
         start.to_path_buf()
     } else {
-        start.parent()
+        start
+            .parent()
             .ok_or_else(|| ConfigError::InvalidStartPath(start.to_path_buf()))?
             .to_path_buf()
     };
@@ -209,7 +211,8 @@ pub fn find_workspace_root_jot_toml(start: &Path) -> Result<Option<PathBuf>, Con
     let mut current = if start.is_dir() {
         start.to_path_buf()
     } else {
-        start.parent()
+        start
+            .parent()
             .ok_or_else(|| ConfigError::InvalidStartPath(start.to_path_buf()))?
             .to_path_buf()
     };
@@ -249,7 +252,9 @@ pub fn load_project_build_config(start: &Path) -> Result<ProjectBuildConfig, Con
     load_project_build_config_from_file(&config_path)
 }
 
-pub fn load_workspace_build_config(start: &Path) -> Result<Option<WorkspaceBuildConfig>, ConfigError> {
+pub fn load_workspace_build_config(
+    start: &Path,
+) -> Result<Option<WorkspaceBuildConfig>, ConfigError> {
     let Some(workspace_config_path) = find_workspace_root_jot_toml(start)? else {
         return Ok(None);
     };
@@ -368,7 +373,9 @@ pub fn load_workspace_dependency_set(
     }))
 }
 
-fn load_project_build_config_from_file(config_path: &Path) -> Result<ProjectBuildConfig, ConfigError> {
+fn load_project_build_config_from_file(
+    config_path: &Path,
+) -> Result<ProjectBuildConfig, ConfigError> {
     let inherited = inherited_workspace_context(
         config_path
             .parent()
@@ -431,7 +438,10 @@ fn load_project_build_config_from_file_with_inheritance(
         resource_dir: project_root.join("src/main/resources"),
         dependencies: extract_dependency_coordinates(config.dependencies, catalog_path.as_deref())?,
         path_dependencies,
-        test_dependencies: extract_dependency_coordinates(config.test_dependencies, catalog_path.as_deref())?,
+        test_dependencies: extract_dependency_coordinates(
+            config.test_dependencies,
+            catalog_path.as_deref(),
+        )?,
         toolchain: parse_toolchain_request(config.toolchains).or(inherited_toolchain),
         format: parse_format_config(config.format, inherited_format),
         lint: parse_lint_config(config.lint, inherited_lint, &project_root),
@@ -511,7 +521,9 @@ pub fn pin_java_toolchain(path: &Path, request: &JavaToolchainRequest) -> Result
     let content = fs::read_to_string(path)?;
     let mut document = content.parse::<DocumentMut>()?;
 
-    let toolchains = document.entry("toolchains").or_insert(Item::Table(Table::new()));
+    let toolchains = document
+        .entry("toolchains")
+        .or_insert(Item::Table(Table::new()));
     if !toolchains.is_table() {
         *toolchains = Item::Table(Table::new());
     }
@@ -531,19 +543,14 @@ pub fn pin_java_toolchain(path: &Path, request: &JavaToolchainRequest) -> Result
     Ok(())
 }
 
-fn parse_toolchain_request(
-    toolchains: Option<RawToolchains>,
-) -> Option<JavaToolchainRequest> {
+fn parse_toolchain_request(toolchains: Option<RawToolchains>) -> Option<JavaToolchainRequest> {
     let toolchains = toolchains?;
     toolchains.java.map(|java| match java {
         RawJavaToolchain::Version(version) => JavaToolchainRequest {
             version,
             vendor: None,
         },
-        RawJavaToolchain::Detailed { version, vendor } => JavaToolchainRequest {
-            version,
-            vendor,
-        },
+        RawJavaToolchain::Detailed { version, vendor } => JavaToolchainRequest { version, vendor },
     })
 }
 
@@ -558,13 +565,13 @@ fn extract_dependency_coordinates(
         match spec {
             RawDependencySpec::Coords(coords) => result.push(coords),
             RawDependencySpec::Detailed {
-                coords: Some(coords), ..
+                coords: Some(coords),
+                ..
             } => result.push(coords),
+            RawDependencySpec::Detailed { path: Some(_), .. } => {}
             RawDependencySpec::Detailed {
-                path: Some(_), ..
-            } => {}
-            RawDependencySpec::Detailed {
-                catalog: Some(alias), ..
+                catalog: Some(alias),
+                ..
             } => {
                 result.push(resolve_catalog_dependency(&name, &alias, catalog.as_ref())?);
             }
@@ -683,12 +690,13 @@ fn extract_path_dependencies(
     Ok(result)
 }
 
-fn detect_workspace_path_cycles(
-    members: &[WorkspaceMemberBuildConfig],
-) -> Result<(), ConfigError> {
+fn detect_workspace_path_cycles(members: &[WorkspaceMemberBuildConfig]) -> Result<(), ConfigError> {
     let mut by_root = std::collections::BTreeMap::new();
     for member in members {
-        by_root.insert(member.project.project_root.clone(), member.module_name.clone());
+        by_root.insert(
+            member.project.project_root.clone(),
+            member.module_name.clone(),
+        );
     }
 
     #[derive(Clone, Copy, PartialEq, Eq)]
@@ -707,7 +715,9 @@ fn detect_workspace_path_cycles(
             Some(Mark::Done) => return Ok(()),
             Some(Mark::Visiting) => {
                 stack.push(module.to_owned());
-                return Err(ConfigError::WorkspacePathDependencyCycle(stack.join(" -> ")));
+                return Err(ConfigError::WorkspacePathDependencyCycle(
+                    stack.join(" -> "),
+                ));
             }
             None => {}
         }
@@ -809,10 +819,9 @@ pub enum ConfigError {
 #[cfg(test)]
 mod tests {
     use super::{
-        JavaToolchainRequest, find_jot_toml, find_workspace_jot_toml,
-        find_workspace_root_jot_toml, load_project_build_config, load_workspace_build_config,
-        load_workspace_dependency_set, pin_java_toolchain, read_declared_dependencies,
-        read_toolchain_request,
+        JavaToolchainRequest, find_jot_toml, find_workspace_jot_toml, find_workspace_root_jot_toml,
+        load_project_build_config, load_workspace_build_config, load_workspace_dependency_set,
+        pin_java_toolchain, read_declared_dependencies, read_toolchain_request,
     };
     use jot_toolchain::JdkVendor;
     use std::fs;
@@ -837,8 +846,11 @@ mod tests {
         let member = workspace.join("member");
         let nested = member.join("src");
         fs::create_dir_all(&nested).expect("create dirs");
-        fs::write(workspace.join("jot.toml"), "[workspace]\nmembers = [\"member\"]\n")
-            .expect("write workspace config");
+        fs::write(
+            workspace.join("jot.toml"),
+            "[workspace]\nmembers = [\"member\"]\n",
+        )
+        .expect("write workspace config");
         fs::write(member.join("jot.toml"), "[project]\nname = \"member\"\n")
             .expect("write member config");
 
@@ -924,8 +936,12 @@ mod tests {
         )
         .expect("write config");
 
-        let dependencies = read_declared_dependencies(&config_path).expect("resolve catalog dependency");
-        assert_eq!(dependencies, vec!["org.junit.jupiter:junit-jupiter:5.11.0".to_owned()]);
+        let dependencies =
+            read_declared_dependencies(&config_path).expect("resolve catalog dependency");
+        assert_eq!(
+            dependencies,
+            vec!["org.junit.jupiter:junit-jupiter:5.11.0".to_owned()]
+        );
     }
 
     #[test]
@@ -945,9 +961,15 @@ mod tests {
         assert_eq!(config.module_name, None);
         assert_eq!(config.main_class.as_deref(), Some("dev.demo.Main"));
         assert_eq!(config.source_dirs, vec![temp.path().join("src/main/java")]);
-        assert_eq!(config.test_source_dirs, vec![temp.path().join("src/test/java")]);
+        assert_eq!(
+            config.test_source_dirs,
+            vec![temp.path().join("src/test/java")]
+        );
         assert_eq!(config.resource_dir, temp.path().join("src/main/resources"));
-        assert_eq!(config.dependencies, vec!["org.slf4j:slf4j-api:2.0.16".to_owned()]);
+        assert_eq!(
+            config.dependencies,
+            vec!["org.slf4j:slf4j-api:2.0.16".to_owned()]
+        );
         assert_eq!(config.path_dependencies, Vec::<std::path::PathBuf>::new());
         assert_eq!(config.test_dependencies, Vec::<String>::new());
         assert_eq!(config.toolchain.expect("toolchain").version, "21");
@@ -1011,7 +1033,10 @@ mod tests {
             .iter()
             .find(|member| member.module_name == "api")
             .expect("api member");
-        assert_eq!(api_member.project.path_dependencies, vec![domain.canonicalize().expect("canonical domain")]);
+        assert_eq!(
+            api_member.project.path_dependencies,
+            vec![domain.canonicalize().expect("canonical domain")]
+        );
     }
 
     #[test]
@@ -1038,7 +1063,10 @@ mod tests {
         .expect("write api config");
 
         let config = load_project_build_config(&api).expect("load member config");
-        assert_eq!(config.dependencies, vec!["info.picocli:picocli:4.7.6".to_owned()]);
+        assert_eq!(
+            config.dependencies,
+            vec!["info.picocli:picocli:4.7.6".to_owned()]
+        );
     }
 
     #[test]

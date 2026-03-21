@@ -135,7 +135,8 @@ mod tests {
 
         fs::write(paths.jdks_dir().join("installed.json"), "jdk").expect("write jdk metadata");
         fs::write(paths.downloads_dir().join("archive.tar.gz"), "jar").expect("write archive");
-        fs::write(paths.resolve_cache_dir().join("asset.json"), "cache").expect("write resolve cache");
+        fs::write(paths.resolve_cache_dir().join("asset.json"), "cache")
+            .expect("write resolve cache");
         fs::write(paths.locks_dir().join("install.lock"), "lock").expect("write lock file");
 
         let summary = paths.clear_global_cache().expect("clear cache");
@@ -147,9 +148,25 @@ mod tests {
         assert!(paths.downloads_dir().is_dir());
         assert!(paths.resolve_cache_dir().is_dir());
         assert!(paths.locks_dir().is_dir());
-        assert_eq!(fs::read_dir(paths.jdks_dir()).expect("read jdks").count(), 0);
-        assert_eq!(fs::read_dir(paths.downloads_dir()).expect("read downloads").count(), 0);
-        assert_eq!(fs::read_dir(paths.resolve_cache_dir()).expect("read resolve cache").count(), 0);
-        assert_eq!(fs::read_dir(paths.locks_dir()).expect("read locks").count(), 0);
+        assert_eq!(
+            fs::read_dir(paths.jdks_dir()).expect("read jdks").count(),
+            0
+        );
+        assert_eq!(
+            fs::read_dir(paths.downloads_dir())
+                .expect("read downloads")
+                .count(),
+            0
+        );
+        assert_eq!(
+            fs::read_dir(paths.resolve_cache_dir())
+                .expect("read resolve cache")
+                .count(),
+            0
+        );
+        assert_eq!(
+            fs::read_dir(paths.locks_dir()).expect("read locks").count(),
+            0
+        );
     }
 }
