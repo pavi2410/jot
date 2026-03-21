@@ -774,12 +774,14 @@ version = "0.1.0"
 dependencies = [
  "annotate-snippets",
  "clap",
+ "fs2",
  "jot-builder",
  "jot-cache",
  "jot-config",
  "jot-devtools",
  "jot-resolver",
  "jot-toolchain",
+ "tempfile",
  "toml",
 ]
 
@@ -821,6 +823,7 @@ dependencies = [
 name = "jot-devtools"
 version = "0.1.0"
 dependencies = [
+ "fs2",
  "indicatif",
  "jot-cache",
  "jot-config",
@@ -848,6 +851,7 @@ dependencies = [
 name = "jot-resolver"
 version = "0.1.0"
 dependencies = [
+ "fs2",
  "hex",
  "jot-cache",
  "quick-xml",

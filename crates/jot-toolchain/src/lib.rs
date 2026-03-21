@@ -118,6 +118,7 @@ pub struct ToolchainManager {
     client: Client,
     paths: JotPaths,
     platform: Platform,
+    offline: bool,
 }
 
 impl ToolchainManager {
@@ -129,6 +130,7 @@ impl ToolchainManager {
             client,
             paths,
             platform: Platform::current()?,
+            offline: offline_mode_enabled(),
         })
     }
 
@@ -260,6 +262,18 @@ impl ToolchainManager {
             return Ok(cached.asset);
         }
 
+        if self.offline {
+            if let Some(cached) = self.read_resolve_cache_any(&cache_path)? {
+                return Ok(cached.asset);
+            }
+            return Err(ToolchainError::OfflineResolveCacheMiss {
+                version: feature_version.to_owned(),
+                platform: self.platform,
+                vendor,
+                cache_path,
+            });
+        }
+
         let url = format!(
             "https://api.adoptium.net/v3/assets/latest/{feature_version}/hotspot?release_type=ga&os={os}&architecture={arch}&image_type=jdk&vendor={vendor}",
             os = self.platform.os.as_adoptium(),
@@ -296,12 +310,9 @@ impl ToolchainManager {
     }
 
     fn read_resolve_cache(&self, path: &Path) -> Result<Option<ResolveCacheEntry>, ToolchainError> {
-        if !path.is_file() {
+        let Some(entry) = self.read_resolve_cache_any(path)? else {
             return Ok(None);
-        }
-
-        let bytes = fs::read(path)?;
-        let entry: ResolveCacheEntry = serde_json::from_slice(&bytes)?;
+        };
         if is_cache_fresh(
             entry.fetched_at,
             OffsetDateTime::now_utc(),
@@ -313,7 +324,25 @@ impl ToolchainManager {
         Ok(None)
     }
 
+    fn read_resolve_cache_any(
+        &self,
+        path: &Path,
+    ) -> Result<Option<ResolveCacheEntry>, ToolchainError> {
+        if !path.is_file() {
+            return Ok(None);
+        }
+
+        let bytes = fs::read(path)?;
+        Ok(Some(serde_json::from_slice(&bytes)?))
+    }
+
     fn download(&self, url: &str, destination: &Path) -> Result<(), ToolchainError> {
+        if self.offline {
+            return Err(ToolchainError::OfflineDownloadRequired {
+                url: url.to_owned(),
+            });
+        }
+
         let mut response = self.client.get(url).send()?.error_for_status()?;
         let total_bytes = response.content_length();
         let progress = download_bar(
@@ -371,10 +400,23 @@ impl ToolchainManager {
             match self.verify_checksum(destination, checksum) {
                 Ok(_) => return Ok(()),
                 Err(ToolchainError::ChecksumMismatch { .. }) => {
+                    if self.offline {
+                        return Err(ToolchainError::OfflineArchiveMissing {
+                            path: destination.to_path_buf(),
+                            url: url.to_owned(),
+                        });
+                    }
                     fs::remove_file(destination)?;
                 }
                 Err(other) => return Err(other),
             }
+        }
+
+        if self.offline {
+            return Err(ToolchainError::OfflineArchiveMissing {
+                path: destination.to_path_buf(),
+                url: url.to_owned(),
+            });
         }
 
         self.download(url, destination)?;
@@ -556,6 +598,12 @@ fn is_cache_fresh(fetched_at: OffsetDateTime, now: OffsetDateTime, ttl: Duration
     age.whole_seconds() <= ttl.as_secs() as i64
 }
 
+fn offline_mode_enabled() -> bool {
+    std::env::var("JOT_OFFLINE")
+        .ok()
+        .is_some_and(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+}
+
 fn java_binary_path(java_home: &Path) -> PathBuf {
     binary_path(java_home, "java")
 }
@@ -640,6 +688,23 @@ pub enum ToolchainError {
     ExtractedArchiveMissingHome(PathBuf),
     #[error("installed path {0} could not be made relative to the extraction directory")]
     StripPrefix(#[from] std::path::StripPrefixError),
+    #[error(
+        "offline mode is enabled and no cached JDK metadata was found for version {version} ({vendor}) on {platform}; run once online to populate {cache_path}",
+        cache_path = .cache_path.display()
+    )]
+    OfflineResolveCacheMiss {
+        version: String,
+        platform: Platform,
+        vendor: JdkVendor,
+        cache_path: PathBuf,
+    },
+    #[error(
+        "offline mode is enabled and archive cache is missing/invalid at {path}; run once online to fetch {url}",
+        path = .path.display()
+    )]
+    OfflineArchiveMissing { path: PathBuf, url: String },
+    #[error("offline mode is enabled and would need to download {url}")]
+    OfflineDownloadRequired { url: String },
 }
 
 #[cfg(test)]

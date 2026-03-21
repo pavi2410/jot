@@ -1,4 +1,5 @@
 use jot_cache::JotPaths;
+use fs2::FileExt;
 use quick_xml::de::from_str;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
@@ -6,6 +7,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt::{Display, Formatter};
 use std::fs;
+use std::fs::OpenOptions;
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -131,6 +133,7 @@ impl Display for MavenCoordinate {
 pub struct MavenResolver {
     client: Client,
     paths: JotPaths,
+    offline: bool,
 }
 
 impl MavenResolver {
@@ -140,6 +143,7 @@ impl MavenResolver {
         Ok(Self {
             client: Client::builder().build()?,
             paths,
+            offline: offline_mode_enabled(),
         })
     }
 
@@ -678,13 +682,38 @@ impl MavenResolver {
         cache_path: &Path,
         ttl: Option<Duration>,
     ) -> Result<String, ResolverError> {
+        if cache_path.is_file() && (self.offline || is_cache_usable(cache_path, ttl)?) {
+            return Ok(fs::read_to_string(cache_path)?);
+        }
+
+        if self.offline {
+            return Err(ResolverError::OfflineCacheMiss {
+                url: url.to_owned(),
+                cache_path: cache_path.to_path_buf(),
+            });
+        }
+
+        let _lock = CacheWriteLock::acquire(&self.cache_lock_path(cache_path))?;
         if cache_path.is_file() && is_cache_usable(cache_path, ttl)? {
             return Ok(fs::read_to_string(cache_path)?);
         }
 
         let body = self.client.get(url).send()?.error_for_status()?.text()?;
-        fs::write(cache_path, &body)?;
+        write_text_atomic(cache_path, &body)?;
         Ok(body)
+    }
+
+    fn cache_lock_path(&self, target: &Path) -> PathBuf {
+        self.paths.locks_dir().join(format!(
+            "resolver-{}.lock",
+            sanitize_for_filename(&target.to_string_lossy())
+        ))
+    }
+
+    fn artifact_lock_path(&self, coordinate: &MavenCoordinate) -> PathBuf {
+        self.paths
+            .locks_dir()
+            .join(format!("artifact-{}.lock", sanitize_for_filename(&coordinate.to_string())))
     }
 
     fn metadata_cache_path(&self, coordinate: &MavenCoordinate) -> PathBuf {
@@ -757,18 +786,33 @@ impl MavenResolver {
         coordinate: &MavenCoordinate,
     ) -> Result<String, ResolverError> {
         let artifact_path = self.artifact_cache_path(coordinate)?;
-        let expected_checksum = self.fetch_artifact_checksum(coordinate)?;
+        let _lock = CacheWriteLock::acquire(&self.artifact_lock_path(coordinate))?;
 
         if artifact_path.is_file() {
             let actual_checksum = sha256_file(&artifact_path)?;
+            if self.offline {
+                return Ok(actual_checksum);
+            }
+
+            let expected_checksum = self.fetch_artifact_checksum(coordinate)?;
             if expected_checksum
                 .as_ref()
                 .is_none_or(|expected| expected == &actual_checksum)
             {
                 return Ok(actual_checksum);
             }
+
             fs::remove_file(&artifact_path)?;
         }
+
+        if self.offline {
+            return Err(ResolverError::OfflineArtifactMissing {
+                coordinate: coordinate.to_string(),
+                path: artifact_path,
+            });
+        }
+
+        let expected_checksum = self.fetch_artifact_checksum(coordinate)?;
 
         self.download_artifact(coordinate, &artifact_path)?;
         let actual_checksum = sha256_file(&artifact_path)?;
@@ -794,6 +838,14 @@ impl MavenResolver {
         let checksum_url = coordinate.jar_sha256_url()?;
         let cache_path = self.artifact_checksum_cache_path(coordinate)?;
 
+        if self.offline {
+            if cache_path.is_file() {
+                let body = fs::read_to_string(cache_path)?;
+                return Ok(normalize_checksum_response(&body));
+            }
+            return Ok(None);
+        }
+
         match self.fetch_text_with_cache(&checksum_url, &cache_path, None) {
             Ok(body) => Ok(normalize_checksum_response(&body)),
             Err(ResolverError::Http(error))
@@ -810,6 +862,12 @@ impl MavenResolver {
         coordinate: &MavenCoordinate,
         destination: &Path,
     ) -> Result<(), ResolverError> {
+        if self.offline {
+            return Err(ResolverError::OfflineDownloadRequired(
+                coordinate.to_string(),
+            ));
+        }
+
         let url = coordinate.jar_url()?;
         let mut response = self.client.get(url).send()?.error_for_status()?;
         let mut temp_file = NamedTempFile::new_in(self.paths.downloads_dir())?;
@@ -832,6 +890,59 @@ impl MavenResolver {
             .map_err(|error| ResolverError::Io(error.error))?;
         Ok(())
     }
+}
+
+struct CacheWriteLock {
+    file: fs::File,
+}
+
+impl CacheWriteLock {
+    fn acquire(path: &Path) -> Result<Self, ResolverError> {
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(path)?;
+        file.lock_exclusive()
+            .map_err(|source| ResolverError::LockAcquisition {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        Ok(Self { file })
+    }
+}
+
+impl Drop for CacheWriteLock {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
+
+fn write_text_atomic(path: &Path, body: &str) -> Result<(), ResolverError> {
+    let parent = path.parent().ok_or_else(|| {
+        ResolverError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("path {} has no parent directory", path.display()),
+        ))
+    })?;
+    let mut temp_file = NamedTempFile::new_in(parent)?;
+    temp_file.write_all(body.as_bytes())?;
+    temp_file.flush()?;
+
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+
+    temp_file
+        .persist(path)
+        .map_err(|error| ResolverError::Io(error.error))?;
+    Ok(())
+}
+
+fn offline_mode_enabled() -> bool {
+    std::env::var("JOT_OFFLINE")
+        .ok()
+        .is_some_and(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1400,6 +1511,23 @@ pub enum ResolverError {
         coordinate: String,
         expected: String,
         actual: String,
+    },
+    #[error(
+        "offline mode is enabled and required cache entry is missing for {url}; run once online to populate {cache_path}",
+        cache_path = .cache_path.display()
+    )]
+    OfflineCacheMiss { url: String, cache_path: PathBuf },
+    #[error(
+        "offline mode is enabled and artifact {coordinate} is not cached at {path}; run once online to download it",
+        path = .path.display()
+    )]
+    OfflineArtifactMissing { coordinate: String, path: PathBuf },
+    #[error("offline mode is enabled and would need to download artifact {0}")]
+    OfflineDownloadRequired(String),
+    #[error("failed to acquire cache lock at {path}: {source}")]
+    LockAcquisition {
+        path: PathBuf,
+        source: std::io::Error,
     },
 }
 

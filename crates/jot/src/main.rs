@@ -1,11 +1,14 @@
 use std::collections::BTreeMap;
 use std::fs;
+use std::fs::OpenOptions;
 use std::io::IsTerminal;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use annotate_snippets::renderer::DecorStyle;
 use annotate_snippets::{AnnotationKind, Level, Renderer, Snippet};
 use clap::{Parser, Subcommand};
+use fs2::FileExt;
 use jot_builder::JavaProjectBuilder;
 use jot_cache::JotPaths;
 use jot_config::{
@@ -19,10 +22,13 @@ use jot_devtools::{
 };
 use jot_resolver::{MavenResolver, TreeEntry};
 use jot_toolchain::{InstallOptions, JavaToolchainRequest, JdkVendor, ToolchainManager};
+use tempfile::NamedTempFile;
 
 #[derive(Debug, Parser)]
 #[command(name = "jot", version, about = "A JVM toolchain manager")]
 struct Cli {
+    #[arg(long, global = true)]
+    offline: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -121,6 +127,12 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
+    if cli.offline {
+        // Safe here because jot is single-process CLI setup before any worker threads spawn.
+        unsafe {
+            std::env::set_var("JOT_OFFLINE", "1");
+        }
+    }
     let paths = JotPaths::new()?;
     paths.ensure_exists()?;
     let manager = ToolchainManager::new(paths.clone())?;
@@ -177,7 +189,7 @@ fn handle_lock(
 
     let paths = JotPaths::new()?;
     paths.ensure_exists()?;
-    let resolver = MavenResolver::new(paths)?;
+    let resolver = MavenResolver::new(paths.clone())?;
     let lockfile = resolver.resolve_lockfile(&resolved_inputs, depth)?;
     let content = toml::to_string_pretty(&lockfile)?;
     let output_path = if dependencies.is_empty() && output == &PathBuf::from("jot.lock") {
@@ -188,7 +200,7 @@ fn handle_lock(
     } else {
         output.clone()
     };
-    std::fs::write(&output_path, content)?;
+    write_locked_file(&paths, &output_path, content.as_bytes())?;
     println!("wrote {}", output_path.display());
     Ok(())
 }
@@ -925,4 +937,49 @@ fn workspace_project_file(start: &PathBuf) -> Result<PathBuf, Box<dyn std::error
         "could not find a workspace jot.toml in the current directory or any parent directory"
             .into()
     })
+}
+
+fn write_locked_file(
+    paths: &JotPaths,
+    output_path: &Path,
+    content: &[u8],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let lock_path = paths.locks_dir().join(format!(
+        "file-{}.lock",
+        sanitize_for_filename(&output_path.to_string_lossy())
+    ));
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)?;
+    lock_file.lock_exclusive()?;
+
+    let parent = output_path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("path {} has no parent directory", output_path.display()),
+        )
+    })?;
+    let mut temp_file = NamedTempFile::new_in(parent)?;
+    temp_file.write_all(content)?;
+    temp_file.flush()?;
+
+    if output_path.exists() {
+        fs::remove_file(output_path)?;
+    }
+    temp_file.persist(output_path).map_err(|error| error.error)?;
+
+    let _ = lock_file.unlock();
+    Ok(())
+}
+
+fn sanitize_for_filename(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' => ch,
+            _ => '_',
+        })
+        .collect()
 }

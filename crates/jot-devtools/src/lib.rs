@@ -1,10 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ffi::OsString;
 use std::fs;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
+use fs2::FileExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use jot_config::{
     JavaFormatStyle, ProjectBuildConfig, find_jot_toml, find_workspace_root_jot_toml,
@@ -820,7 +823,12 @@ fn rewrite_lockfile(
         .map_err(|error| DevToolsError::AuditInvariant(error.to_string()))?;
     let resolver = MavenResolver::new(paths)?;
     let lockfile = resolver.resolve_lockfile(inputs, DEFAULT_RESOLVE_DEPTH)?;
-    fs::write(output_path, toml::to_string_pretty(&lockfile)?)?;
+    write_locked_file(
+        output_path,
+        toml::to_string_pretty(&lockfile)?.as_bytes(),
+        &jot_cache::JotPaths::new()
+            .map_err(|error| DevToolsError::AuditInvariant(error.to_string()))?,
+    )?;
     Ok(())
 }
 
@@ -880,6 +888,47 @@ fn update_dependency_item(
     };
     inline.insert("coords", toml_edit::Value::from(updated));
     1
+}
+
+fn write_locked_file(output_path: &Path, content: &[u8], paths: &jot_cache::JotPaths) -> Result<(), DevToolsError> {
+    let lock_path = paths.locks_dir().join(format!(
+        "file-{}.lock",
+        sanitize_for_filename(&output_path.to_string_lossy())
+    ));
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)?;
+    lock_file
+        .lock_exclusive()
+        .map_err(|error| DevToolsError::AuditInvariant(error.to_string()))?;
+
+    let parent = output_path.parent().ok_or_else(|| {
+        DevToolsError::AuditInvariant(format!("path {} has no parent directory", output_path.display()))
+    })?;
+    let mut temp_file = NamedTempFile::new_in(parent)?;
+    temp_file.write_all(content)?;
+    temp_file.flush()?;
+    if output_path.exists() {
+        fs::remove_file(output_path)?;
+    }
+    temp_file
+        .persist(output_path)
+        .map_err(|error| DevToolsError::Io(error.error))?;
+
+    let _ = lock_file.unlock();
+    Ok(())
+}
+
+fn sanitize_for_filename(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' => ch,
+            _ => '_',
+        })
+        .collect()
 }
 
 fn rewrite_coordinate(

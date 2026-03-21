@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+fs2.workspace = true
 hex.workspace = true
 jot-cache = { path = "../jot-cache" }
 quick-xml.workspace = true
