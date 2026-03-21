@@ -15,6 +15,7 @@ pub struct MavenCoordinate {
     pub group: String,
     pub artifact: String,
     pub version: Option<String>,
+    pub classifier: Option<String>,
 }
 
 impl MavenCoordinate {
@@ -25,11 +26,19 @@ impl MavenCoordinate {
                 group: (*group).to_owned(),
                 artifact: (*artifact).to_owned(),
                 version: None,
+                classifier: None,
             }),
             [group, artifact, version] => Ok(Self {
                 group: (*group).to_owned(),
                 artifact: (*artifact).to_owned(),
                 version: Some((*version).to_owned()),
+                classifier: None,
+            }),
+            [group, artifact, version, classifier] => Ok(Self {
+                group: (*group).to_owned(),
+                artifact: (*artifact).to_owned(),
+                version: Some((*version).to_owned()),
+                classifier: Some((*classifier).to_owned()),
             }),
             _ => Err(ResolverError::InvalidCoordinate(input.to_owned())),
         }
@@ -40,6 +49,7 @@ impl MavenCoordinate {
             group: self.group.clone(),
             artifact: self.artifact.clone(),
             version: Some(version),
+            classifier: self.classifier.clone(),
         }
     }
 
@@ -66,10 +76,14 @@ impl MavenCoordinate {
 
 impl Display for MavenCoordinate {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        if let Some(version) = &self.version {
-            write!(formatter, "{}:{}:{}", self.group, self.artifact, version)
-        } else {
-            write!(formatter, "{}:{}", self.group, self.artifact)
+        match (&self.version, &self.classifier) {
+            (Some(version), Some(classifier)) => write!(
+                formatter,
+                "{}:{}:{}:{}",
+                self.group, self.artifact, version, classifier
+            ),
+            (Some(version), None) => write!(formatter, "{}:{}:{}", self.group, self.artifact, version),
+            (None, _) => write!(formatter, "{}:{}", self.group, self.artifact),
         }
     }
 }
@@ -178,6 +192,7 @@ impl MavenResolver {
                     group: coordinate.group,
                     artifact: coordinate.artifact,
                     version: coordinate.version.expect("locked package version"),
+                    classifier: coordinate.classifier,
                 })
                 .collect(),
         })
@@ -210,6 +225,7 @@ impl MavenResolver {
                         group: dependency.group,
                         artifact: dependency.artifact,
                         version: dependency.version,
+                        classifier: dependency.classifier,
                     },
                     scope,
                     optional,
@@ -225,6 +241,7 @@ impl MavenResolver {
                         group: dependency.group,
                         artifact: dependency.artifact,
                         version: dependency.version,
+                        classifier: dependency.classifier,
                     },
                     scope,
                     optional,
@@ -240,6 +257,7 @@ impl MavenResolver {
                         group: dependency.group,
                         artifact: dependency.artifact,
                         version: dependency.version,
+                        classifier: dependency.classifier,
                     },
                     scope,
                     optional,
@@ -306,6 +324,10 @@ impl MavenResolver {
             let pom_xml = self.fetch_pom_xml(coordinate)?;
             let project: MavenProject = from_str(&pom_xml)?;
 
+            if let Some(relocated) = relocation_target(&project, coordinate) {
+                return self.build_effective_model(&relocated, visiting);
+            }
+
             let mut properties = BTreeMap::new();
             let mut managed_versions = BTreeMap::new();
 
@@ -368,6 +390,10 @@ impl MavenResolver {
                                     group: group.clone(),
                                     artifact: artifact.clone(),
                                     version: Some(version),
+                                    classifier: dependency
+                                        .classifier
+                                        .as_ref()
+                                        .map(|value| interpolate_value(value, &properties)),
                                 },
                                 visiting,
                             )?;
@@ -411,6 +437,10 @@ impl MavenResolver {
                                 group,
                                 artifact,
                                 version,
+                                classifier: dependency
+                                    .classifier
+                                    .as_ref()
+                                    .map(|value| interpolate_value(value, &properties)),
                                 scope: dependency
                                     .scope
                                     .as_ref()
@@ -455,6 +485,7 @@ impl MavenResolver {
             group,
             artifact,
             version: Some(version),
+            classifier: None,
         })
     }
 
@@ -513,6 +544,7 @@ pub struct ResolvedDependency {
     pub group: String,
     pub artifact: String,
     pub version: Option<String>,
+    pub classifier: Option<String>,
     pub scope: Option<String>,
     pub optional: bool,
     pub exclusions: BTreeSet<(String, String)>,
@@ -532,6 +564,7 @@ impl ResolvedDependency {
             group: self.group.clone(),
             artifact: self.artifact.clone(),
             version: Some(version),
+            classifier: self.classifier.clone(),
         }))
     }
 }
@@ -557,6 +590,8 @@ pub struct LockedPackage {
     pub group: String,
     pub artifact: String,
     pub version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub classifier: Option<String>,
 }
 
 #[derive(Debug)]
@@ -679,6 +714,47 @@ fn dependency_exclusions(
         .unwrap_or_default()
 }
 
+fn relocation_target(project: &MavenProject, coordinate: &MavenCoordinate) -> Option<MavenCoordinate> {
+    let relocation = project
+        .distribution_management
+        .as_ref()?
+        .relocation
+        .as_ref()?;
+
+    let group = relocation
+        .group_id
+        .clone()
+        .or_else(|| project.group_id.clone())
+        .unwrap_or_else(|| coordinate.group.clone());
+    let artifact = relocation
+        .artifact_id
+        .clone()
+        .or_else(|| project.artifact_id.clone())
+        .unwrap_or_else(|| coordinate.artifact.clone());
+    let version = relocation
+        .version
+        .clone()
+        .or_else(|| project.version.clone())
+        .or_else(|| coordinate.version.clone());
+    let classifier = relocation
+        .classifier
+        .clone()
+        .or_else(|| coordinate.classifier.clone());
+
+    let relocated = MavenCoordinate {
+        group,
+        artifact,
+        version,
+        classifier,
+    };
+
+    if &relocated == coordinate {
+        None
+    } else {
+        Some(relocated)
+    }
+}
+
 fn is_cache_usable(path: &Path, ttl: Option<Duration>) -> Result<bool, ResolverError> {
     let Some(ttl) = ttl else {
         return Ok(true);
@@ -721,6 +797,8 @@ struct MavenProject {
     properties: Option<MavenProperties>,
     #[serde(rename = "dependencyManagement")]
     dependency_management: Option<MavenDependencyManagement>,
+    #[serde(rename = "distributionManagement")]
+    distribution_management: Option<MavenDistributionManagement>,
     dependencies: Option<MavenDependencies>,
 }
 
@@ -745,6 +823,21 @@ struct MavenDependencyManagement {
 }
 
 #[derive(Debug, Deserialize)]
+struct MavenDistributionManagement {
+    relocation: Option<MavenRelocation>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MavenRelocation {
+    #[serde(rename = "groupId")]
+    group_id: Option<String>,
+    #[serde(rename = "artifactId")]
+    artifact_id: Option<String>,
+    version: Option<String>,
+    classifier: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct MavenDependencies {
     #[serde(default)]
     dependency: Vec<MavenDependency>,
@@ -759,6 +852,7 @@ struct MavenDependency {
     version: Option<String>,
     #[serde(rename = "type")]
     packaging: Option<String>,
+    classifier: Option<String>,
     scope: Option<String>,
     optional: Option<bool>,
     exclusions: Option<MavenExclusions>,
@@ -780,7 +874,7 @@ struct MavenExclusion {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ResolverError {
-    #[error("invalid Maven coordinate {0}; expected group:artifact or group:artifact:version")]
+    #[error("invalid Maven coordinate {0}; expected group:artifact, group:artifact:version, or group:artifact:version:classifier")]
     InvalidCoordinate(String),
     #[error("cache error: {0}")]
     Cache(#[from] jot_cache::CacheError),
@@ -804,7 +898,7 @@ pub enum ResolverError {
 mod tests {
     use super::{
         Lockfile, MavenDependencies, MavenDependencyManagement, MavenExclusion, MavenExclusions,
-        MavenParent,
+        MavenDistributionManagement, MavenParent, MavenRelocation, relocation_target,
         MavenCoordinate, MavenDependency, MavenProject, MavenVersioning, MavenVersions,
         ResolvedDependency, LockedPackage, dependency_exclusions, is_cache_usable,
         is_stable_maven_version,
@@ -823,9 +917,15 @@ mod tests {
         assert_eq!(simple.group, "org.junit.jupiter");
         assert_eq!(simple.artifact, "junit-jupiter");
         assert_eq!(simple.version, None);
+        assert_eq!(simple.classifier, None);
 
         let pinned = MavenCoordinate::parse("org.junit.jupiter:junit-jupiter:5.11.0").expect("parse");
         assert_eq!(pinned.version.as_deref(), Some("5.11.0"));
+
+        let classified = MavenCoordinate::parse("org.junit.jupiter:junit-jupiter:5.11.0:sources")
+            .expect("parse classified coordinate");
+        assert_eq!(classified.classifier.as_deref(), Some("sources"));
+        assert_eq!(classified.to_string(), "org.junit.jupiter:junit-jupiter:5.11.0:sources");
     }
 
     #[test]
@@ -915,6 +1015,7 @@ mod tests {
                     group: "org.example".into(),
                     artifact: "demo".into(),
                     version: Some("1.0.0".into()),
+                    classifier: Some("tests".into()),
                     scope: None,
                     optional: false,
                     exclusions: BTreeSet::new(),
@@ -925,13 +1026,14 @@ mod tests {
                         .expect("literal version")
                         .expect("coordinate")
                         .to_string(),
-                    "org.example:demo:1.0.0"
+                    "org.example:demo:1.0.0:tests"
                 );
 
                 let managed = ResolvedDependency {
                     group: "org.example".into(),
                     artifact: "demo".into(),
                     version: Some("${demo.version}".into()),
+                    classifier: None,
                     scope: None,
                     optional: false,
                     exclusions: BTreeSet::new(),
@@ -957,17 +1059,20 @@ mod tests {
                         group: "org.example".into(),
                         artifact: "demo".into(),
                         version: Some("1.0.0".into()),
+                        classifier: None,
                     }],
                     package: vec![
                         LockedPackage {
                             group: "b.group".into(),
                             artifact: "beta".into(),
                             version: "1.0.0".into(),
+                            classifier: None,
                         },
                         LockedPackage {
                             group: "a.group".into(),
                             artifact: "alpha".into(),
                             version: "2.0.0".into(),
+                            classifier: Some("sources".into()),
                         },
                     ],
                 };
@@ -1010,18 +1115,21 @@ mod tests {
                                 artifact_id: Some("slf4j-api".to_owned()),
                                 version: Some("2.0.16".to_owned()),
                                 packaging: None,
+                                classifier: None,
                                 scope: None,
                                 optional: None,
                                 exclusions: None,
                             }],
                         },
                     }),
+                    distribution_management: None,
                     dependencies: Some(MavenDependencies {
                         dependency: vec![MavenDependency {
                             group_id: Some("org.slf4j".to_owned()),
                             artifact_id: Some("slf4j-api".to_owned()),
                             version: None,
                             packaging: None,
+                            classifier: Some("tests".to_owned()),
                             scope: None,
                             optional: None,
                             exclusions: None,
@@ -1049,6 +1157,7 @@ mod tests {
                     artifact_id: Some("consumer".to_owned()),
                     version: Some("1.0.0".to_owned()),
                     packaging: None,
+                    classifier: None,
                     scope: None,
                     optional: None,
                     exclusions: Some(MavenExclusions {
@@ -1065,5 +1174,39 @@ mod tests {
 
                 let exclusions = dependency_exclusions(&dependency, &properties);
                 assert!(exclusions.contains(&("org.slf4j".to_owned(), "slf4j-api".to_owned())));
+            }
+
+            #[test]
+            fn relocation_target_uses_relocation_fields_with_coordinate_fallbacks() {
+                let project = MavenProject {
+                    group_id: Some("legacy.group".to_owned()),
+                    artifact_id: Some("legacy-artifact".to_owned()),
+                    version: Some("1.0.0".to_owned()),
+                    parent: None,
+                    properties: None,
+                    dependency_management: None,
+                    distribution_management: Some(MavenDistributionManagement {
+                        relocation: Some(MavenRelocation {
+                            group_id: Some("modern.group".to_owned()),
+                            artifact_id: Some("modern-artifact".to_owned()),
+                            version: Some("2.0.0".to_owned()),
+                            classifier: Some("sources".to_owned()),
+                        }),
+                    }),
+                    dependencies: None,
+                };
+
+                let resolved = relocation_target(
+                    &project,
+                    &MavenCoordinate {
+                        group: "legacy.group".to_owned(),
+                        artifact: "legacy-artifact".to_owned(),
+                        version: Some("1.0.0".to_owned()),
+                        classifier: None,
+                    },
+                )
+                .expect("relocation target");
+
+                assert_eq!(resolved.to_string(), "modern.group:modern-artifact:2.0.0:sources");
             }
 }
