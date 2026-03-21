@@ -1,0 +1,38 @@
+name: Feature Request
+description: Suggest an improvement for jot
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What pain are you trying to solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority bucket
+      options:
+        - P0 bug-fix blocker
+        - P1 high impact
+        - P2 medium impact
+        - P3 nice to have
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context

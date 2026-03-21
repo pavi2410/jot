@@ -1,0 +1,62 @@
+name: Bug Report
+description: Report a jot failure or regression
+labels: [bug]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - dependency-resolution
+        - workspace-graph
+        - compilation
+        - toolchain
+        - fmt-lint-audit
+        - cli-ux
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: Exact command that failed
+      placeholder: jot build --module api
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and full output
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant config
+      description: Include jot.toml and libs.versions.toml snippets
+
+  - type: input
+    id: version
+    attributes:
+      label: jot version
+      placeholder: jot --version
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: macOS 15 / Ubuntu 24.04 / Windows 11
+    validations:
+      required: true
