@@ -3,11 +3,12 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
+use indicatif::{ProgressBar, ProgressStyle};
 use jot_config::{
-    find_jot_toml, find_workspace_root_jot_toml, load_project_build_config,
-    load_workspace_build_config, load_workspace_dependency_set, JavaFormatStyle,
-    ProjectBuildConfig,
+    JavaFormatStyle, ProjectBuildConfig, find_jot_toml, find_workspace_root_jot_toml,
+    load_project_build_config, load_workspace_build_config, load_workspace_dependency_set,
 };
 use jot_resolver::{MavenCoordinate, MavenResolver, TreeEntry};
 use jot_toolchain::ToolchainManager;
@@ -15,11 +16,20 @@ use quick_xml::de::from_str;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use tempfile::NamedTempFile;
-use toml_edit::{value, DocumentMut, Item};
+use toml_edit::{DocumentMut, Item, value};
 
 const DEFAULT_RESOLVE_DEPTH: usize = 8;
-const GOOGLE_JAVA_FORMAT_COORD: &str = "com.google.googlejavaformat:google-java-format:1.24.0";
+const GOOGLE_JAVA_FORMAT_COORD: &str =
+    "com.google.googlejavaformat:google-java-format:1.24.0:all-deps";
 const GOOGLE_JAVA_FORMAT_MAIN_CLASS: &str = "com.google.googlejavaformat.java.Main";
+const GOOGLE_JAVA_FORMAT_EXPORTS: &[&str] = &[
+    "jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED",
+    "jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED",
+    "jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED",
+    "jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED",
+    "jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED",
+    "jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED",
+];
 const PMD_CLI_COORD: &str = "net.sourceforge.pmd:pmd-cli:7.14.0";
 const PMD_JAVA_COORD: &str = "net.sourceforge.pmd:pmd-java:7.14.0";
 const PMD_MAIN_CLASS: &str = "net.sourceforge.pmd.cli.PmdCli";
@@ -44,11 +54,17 @@ pub struct DevTools {
 }
 
 impl DevTools {
-    pub fn new(resolver: MavenResolver, toolchains: ToolchainManager) -> Result<Self, DevToolsError> {
+    pub fn new(
+        resolver: MavenResolver,
+        toolchains: ToolchainManager,
+    ) -> Result<Self, DevToolsError> {
         Ok(Self {
             resolver,
             toolchains,
-            osv: Client::builder().build()?,
+            osv: Client::builder()
+                .connect_timeout(Duration::from_secs(5))
+                .timeout(Duration::from_secs(20))
+                .build()?,
         })
     }
 
@@ -59,9 +75,19 @@ impl DevTools {
             .clone()
             .ok_or_else(|| DevToolsError::MissingJavaToolchain(project.config_path.clone()))?;
         let installed_jdk = self.toolchains.ensure_installed(&toolchain)?;
-        let formatter_classpath = self.resolve_tool_classpath(&[GOOGLE_JAVA_FORMAT_COORD])?;
+        let resolve_progress = spinner("Resolving google-java-format runtime");
+        let formatter_classpath = vec![self.resolve_exact_tool_artifact(GOOGLE_JAVA_FORMAT_COORD)?];
+        resolve_progress.finish_with_message("Resolved google-java-format runtime");
         let java_files = collect_java_files(&project);
         let mut changed_files = Vec::new();
+        let progress = count_bar(
+            java_files.len(),
+            if check {
+                "Checking Java formatting"
+            } else {
+                "Formatting Java files"
+            },
+        );
 
         for file in &java_files {
             let original = fs::read_to_string(file)?;
@@ -77,7 +103,13 @@ impl DevTools {
                     fs::write(file, formatted)?;
                 }
             }
+            progress.inc(1);
         }
+        progress.finish_with_message(format!(
+            "{} {} Java files",
+            if check { "Checked" } else { "Processed" },
+            java_files.len()
+        ));
 
         Ok(FormatReport {
             project,
@@ -104,7 +136,9 @@ impl DevTools {
             });
         }
 
+        let resolve_progress = spinner("Resolving PMD runtime");
         let classpath = self.resolve_tool_classpath(&[PMD_CLI_COORD, PMD_JAVA_COORD])?;
+        resolve_progress.finish_with_message("Resolved PMD runtime");
         let file_list = write_path_list(&java_files)?;
         let report = NamedTempFile::new()?;
         let mut bundled_ruleset = None;
@@ -137,7 +171,10 @@ impl DevTools {
             .arg("--relativize-paths-with")
             .arg(&project.project_root);
 
+        let lint_progress = spinner(&format!("Running PMD on {} Java files", java_files.len()));
         let output = command.output()?;
+        lint_progress
+            .finish_with_message(format!("PMD completed for {} Java files", java_files.len()));
         drop(bundled_ruleset);
         let status = output.status.code().unwrap_or(1);
         if !matches!(status, 0 | 4) {
@@ -162,17 +199,19 @@ impl DevTools {
                 .into_iter()
                 .flat_map(|file| {
                     let name = PathBuf::from(file.name);
-                    file.violations.into_iter().map(move |violation| LintViolation {
-                        path: name.clone(),
-                        begin_line: violation.begin_line,
-                        end_line: violation.end_line,
-                        begin_column: violation.begin_column,
-                        end_column: violation.end_column,
-                        rule: violation.rule,
-                        ruleset: violation.ruleset,
-                        priority: violation.priority,
-                        message: violation.message.trim().to_owned(),
-                    })
+                    file.violations
+                        .into_iter()
+                        .map(move |violation| LintViolation {
+                            path: name.clone(),
+                            begin_line: violation.begin_line,
+                            end_line: violation.end_line,
+                            begin_column: violation.begin_column,
+                            end_column: violation.end_column,
+                            rule: violation.rule,
+                            ruleset: violation.ruleset,
+                            priority: violation.priority,
+                            message: violation.message.trim().to_owned(),
+                        })
                 })
                 .collect(),
             processing_errors: parsed
@@ -187,13 +226,19 @@ impl DevTools {
     }
 
     pub fn audit(&self, start: &Path, fix: bool) -> Result<AuditReport, DevToolsError> {
-        let context = AuditContext::load(start, &self.resolver)?;
+        let resolve_progress = spinner("Resolving dependency graph for audit");
+        let context = AuditContext::load(start, &self.resolver, Some(&resolve_progress))?;
+        resolve_progress.finish_with_message(format!(
+            "Resolved dependency graph for {} packages",
+            context.packages.len()
+        ));
         let mut vulnerability_ids = HashSet::new();
         let mut package_ids = Vec::new();
         for package in context.packages.values() {
             package_ids.push(package.coordinate.clone());
         }
 
+        let batch_progress = spinner(&format!("Querying OSV for {} packages", package_ids.len()));
         let response: OsvBatchResponse = self
             .osv
             .post("https://api.osv.dev/v1/querybatch")
@@ -212,6 +257,10 @@ impl DevTools {
             .send()?
             .error_for_status()?
             .json()?;
+        batch_progress.finish_with_message(format!(
+            "Received OSV batch results for {} packages",
+            package_ids.len()
+        ));
 
         let mut package_to_vulns = BTreeMap::<String, Vec<String>>::new();
         for (index, result) in response.results.into_iter().enumerate() {
@@ -228,6 +277,8 @@ impl DevTools {
         }
 
         let mut vuln_details = HashMap::<String, OsvVulnerability>::new();
+        let detail_count = vulnerability_ids.len();
+        let detail_progress = count_bar(detail_count, "Fetching vulnerability details");
         for vuln_id in vulnerability_ids {
             let detail = self
                 .osv
@@ -236,7 +287,10 @@ impl DevTools {
                 .error_for_status()?
                 .json::<OsvVulnerability>()?;
             vuln_details.insert(vuln_id, detail);
+            detail_progress.inc(1);
         }
+        detail_progress
+            .finish_with_message(format!("Fetched {} vulnerability records", detail_count));
 
         let mut findings = Vec::new();
         for (package_key, vuln_ids) in package_to_vulns {
@@ -253,7 +307,10 @@ impl DevTools {
                     vuln_id: detail.id.clone(),
                     package: package.coordinate.clone(),
                     fixed_version: fixed_version_for(detail, &package.coordinate),
-                    summary: detail.summary.clone().unwrap_or_else(|| "No summary provided".to_owned()),
+                    summary: detail
+                        .summary
+                        .clone()
+                        .unwrap_or_else(|| "No summary provided".to_owned()),
                     members: package.members.iter().cloned().collect(),
                     chains: package.chains.clone(),
                 });
@@ -269,7 +326,11 @@ impl DevTools {
         });
 
         let fixed_dependencies = if fix {
-            apply_audit_fixes(start, &context, &findings)?
+            let fix_progress = spinner("Applying vulnerability fixes");
+            let fixed = apply_audit_fixes(start, &context, &findings)?;
+            fix_progress
+                .finish_with_message(format!("Updated {} direct dependency declarations", fixed));
+            fixed
         } else {
             0
         };
@@ -286,7 +347,10 @@ impl DevTools {
         let mut classpath = self
             .resolver
             .resolve_artifacts(
-                &coordinates.iter().map(|value| (*value).to_owned()).collect::<Vec<_>>(),
+                &coordinates
+                    .iter()
+                    .map(|value| (*value).to_owned())
+                    .collect::<Vec<_>>(),
                 DEFAULT_RESOLVE_DEPTH,
             )?
             .into_iter()
@@ -297,6 +361,12 @@ impl DevTools {
         Ok(classpath)
     }
 
+    fn resolve_exact_tool_artifact(&self, coordinate: &str) -> Result<PathBuf, DevToolsError> {
+        let coordinate = MavenCoordinate::parse(coordinate)?;
+        let resolved = self.resolver.resolve_coordinate(&coordinate.to_string())?;
+        Ok(self.resolver.cache_artifact(&resolved)?)
+    }
+
     fn run_formatter(
         &self,
         java_binary: &Path,
@@ -305,6 +375,9 @@ impl DevTools {
         file: &Path,
     ) -> Result<String, DevToolsError> {
         let mut command = Command::new(java_binary);
+        for export in GOOGLE_JAVA_FORMAT_EXPORTS {
+            command.arg("--add-exports").arg(export);
+        }
         command
             .arg("-cp")
             .arg(join_classpath(classpath)?)
@@ -321,7 +394,7 @@ impl DevTools {
                 stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
             });
         }
-        Ok(String::from_utf8(output.stdout)? )
+        Ok(String::from_utf8(output.stdout)?)
     }
 }
 
@@ -448,7 +521,11 @@ struct AuditPackageContext {
 }
 
 impl AuditContext {
-    fn load(start: &Path, resolver: &MavenResolver) -> Result<Self, DevToolsError> {
+    fn load(
+        start: &Path,
+        resolver: &MavenResolver,
+        progress: Option<&ProgressBar>,
+    ) -> Result<Self, DevToolsError> {
         if let Some(workspace) = load_workspace_dependency_set(start)? {
             let mut root_to_members = BTreeMap::<String, BTreeSet<String>>::new();
             for member in &workspace.members {
@@ -459,16 +536,25 @@ impl AuditContext {
                         .insert(member.module_name.clone());
                 }
             }
-            let packages = collect_audit_packages(resolver, &workspace.external_dependencies, &root_to_members)?;
+            let packages = collect_audit_packages(
+                resolver,
+                &workspace.external_dependencies,
+                &root_to_members,
+                progress,
+            )?;
             return Ok(Self {
                 root_dir: workspace.root_dir,
                 packages,
             });
         }
 
-        let config_path = find_jot_toml(start)?.ok_or_else(|| DevToolsError::AuditInvariant("could not find jot.toml".to_owned()))?;
+        let config_path = find_jot_toml(start)?
+            .ok_or_else(|| DevToolsError::AuditInvariant("could not find jot.toml".to_owned()))?;
         let project = load_project_build_config(start)?;
-        let project_name = project.module_name.clone().unwrap_or_else(|| project.name.clone());
+        let project_name = project
+            .module_name
+            .clone()
+            .unwrap_or_else(|| project.name.clone());
         let mut root_to_members = BTreeMap::<String, BTreeSet<String>>::new();
         for dependency in &project.dependencies {
             root_to_members
@@ -478,7 +564,12 @@ impl AuditContext {
         }
         Ok(Self {
             root_dir: config_path.parent().unwrap_or(start).to_path_buf(),
-            packages: collect_audit_packages(resolver, &project.dependencies, &root_to_members)?,
+            packages: collect_audit_packages(
+                resolver,
+                &project.dependencies,
+                &root_to_members,
+                progress,
+            )?,
         })
     }
 }
@@ -487,10 +578,14 @@ fn collect_audit_packages(
     resolver: &MavenResolver,
     roots: &[String],
     root_to_members: &BTreeMap<String, BTreeSet<String>>,
+    progress: Option<&ProgressBar>,
 ) -> Result<BTreeMap<String, AuditPackageContext>, DevToolsError> {
     let mut packages = BTreeMap::<String, AuditPackageContext>::new();
 
     for root in roots {
+        if let Some(progress) = progress {
+            progress.set_message(format!("Resolving dependency graph for audit: {root}"));
+        }
         let entries = resolver.resolve_dependency_tree(root, DEFAULT_RESOLVE_DEPTH)?;
         let root_members = root_to_members.get(root).cloned().unwrap_or_default();
         let mut chain = Vec::<MavenCoordinate>::new();
@@ -561,6 +656,29 @@ fn write_path_list(paths: &[PathBuf]) -> Result<NamedTempFile, DevToolsError> {
     Ok(file)
 }
 
+fn spinner(message: &str) -> ProgressBar {
+    let progress = ProgressBar::new_spinner();
+    progress.set_style(
+        ProgressStyle::with_template("{spinner:.green} {msg}")
+            .expect("valid spinner template")
+            .tick_strings(&["-", "\\", "|", "/"]),
+    );
+    progress.enable_steady_tick(std::time::Duration::from_millis(100));
+    progress.set_message(message.to_owned());
+    progress
+}
+
+fn count_bar(total: usize, message: &str) -> ProgressBar {
+    let progress = ProgressBar::new(total as u64);
+    progress.set_style(
+        ProgressStyle::with_template("{spinner:.green} {msg} [{bar:40.cyan/blue}] {pos}/{len}")
+            .expect("valid progress bar template")
+            .progress_chars("=> "),
+    );
+    progress.set_message(message.to_owned());
+    progress
+}
+
 fn apply_audit_fixes(
     start: &Path,
     _context: &AuditContext,
@@ -573,7 +691,10 @@ fn apply_audit_fixes(
             continue;
         };
         by_package
-            .entry((finding.package.group.clone(), finding.package.artifact.clone()))
+            .entry((
+                finding.package.group.clone(),
+                finding.package.artifact.clone(),
+            ))
             .or_insert_with(|| version.clone());
     }
 
@@ -593,11 +714,17 @@ fn apply_audit_fixes(
         return Ok(fixed);
     }
 
-    let config_path = find_jot_toml(start)?.ok_or_else(|| DevToolsError::AuditInvariant("could not find jot.toml".to_owned()))?;
+    let config_path = find_jot_toml(start)?
+        .ok_or_else(|| DevToolsError::AuditInvariant("could not find jot.toml".to_owned()))?;
     fixed += update_project_dependencies(&config_path, &by_package)?;
     let project = load_project_build_config(start)?;
     let lockfile = project.project_root.join("jot.lock");
-    rewrite_lockfile(start, &project.project_root, &project.dependencies, &lockfile)?;
+    rewrite_lockfile(
+        start,
+        &project.project_root,
+        &project.dependencies,
+        &lockfile,
+    )?;
     Ok(fixed)
 }
 
@@ -607,12 +734,13 @@ fn rewrite_lockfile(
     inputs: &[String],
     output_path: &Path,
 ) -> Result<(), DevToolsError> {
-    let config_path = find_workspace_root_jot_toml(start)?
-        .or_else(|| find_jot_toml(start).ok().flatten());
+    let config_path =
+        find_workspace_root_jot_toml(start)?.or_else(|| find_jot_toml(start).ok().flatten());
     let Some(_root_config) = config_path else {
         return Ok(());
     };
-    let paths = jot_cache::JotPaths::new().map_err(|error| DevToolsError::AuditInvariant(error.to_string()))?;
+    let paths = jot_cache::JotPaths::new()
+        .map_err(|error| DevToolsError::AuditInvariant(error.to_string()))?;
     let resolver = MavenResolver::new(paths)?;
     let lockfile = resolver.resolve_lockfile(inputs, DEFAULT_RESOLVE_DEPTH)?;
     fs::write(output_path, toml::to_string_pretty(&lockfile)?)?;
@@ -634,7 +762,10 @@ fn update_project_dependencies(
         let Some(table) = document.get_mut(section).and_then(Item::as_table_like_mut) else {
             continue;
         };
-        let keys = table.iter().map(|(key, _)| key.to_owned()).collect::<Vec<_>>();
+        let keys = table
+            .iter()
+            .map(|(key, _)| key.to_owned())
+            .collect::<Vec<_>>();
         for key in keys {
             let Some(item) = table.get_mut(&key) else {
                 continue;
@@ -692,11 +823,17 @@ fn severity_for_vulnerability(vuln: &OsvVulnerability) -> AuditSeverity {
     if let Some(severity) = vuln
         .affected
         .iter()
-        .find_map(|item| item.ecosystem_specific.as_ref().and_then(|value| value.severity.clone()))
+        .find_map(|item| {
+            item.ecosystem_specific
+                .as_ref()
+                .and_then(|value| value.severity.clone())
+        })
         .or_else(|| {
-            vuln.affected
-                .iter()
-                .find_map(|item| item.database_specific.as_ref().and_then(|value| value.severity.clone()))
+            vuln.affected.iter().find_map(|item| {
+                item.database_specific
+                    .as_ref()
+                    .and_then(|value| value.severity.clone())
+            })
         })
     {
         return parse_severity(&severity);
@@ -852,7 +989,7 @@ struct OsvSeverityHolder {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_severity, rewrite_coordinate, AuditSeverity, DEFAULT_PMD_RULESET};
+    use super::{AuditSeverity, DEFAULT_PMD_RULESET, parse_severity, rewrite_coordinate};
     use std::collections::BTreeMap;
 
     #[test]

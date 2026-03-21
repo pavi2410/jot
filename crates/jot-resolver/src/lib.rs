@@ -8,8 +8,8 @@ use std::fmt::{Display, Formatter};
 use std::fs;
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use tempfile::NamedTempFile;
 use std::time::Duration;
+use tempfile::NamedTempFile;
 
 const MAVEN_CENTRAL: &str = "https://repo1.maven.org/maven2";
 
@@ -23,8 +23,8 @@ pub struct MavenCoordinate {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedArtifact {
-	pub coordinate: MavenCoordinate,
-	pub path: PathBuf,
+    pub coordinate: MavenCoordinate,
+    pub path: PathBuf,
 }
 
 impl MavenCoordinate {
@@ -119,7 +119,9 @@ impl Display for MavenCoordinate {
                 "{}:{}:{}:{}",
                 self.group, self.artifact, version, classifier
             ),
-            (Some(version), None) => write!(formatter, "{}:{}:{}", self.group, self.artifact, version),
+            (Some(version), None) => {
+                write!(formatter, "{}:{}:{}", self.group, self.artifact, version)
+            }
             (None, _) => write!(formatter, "{}:{}", self.group, self.artifact),
         }
     }
@@ -260,7 +262,11 @@ impl MavenResolver {
             let root = self.resolve_coordinate(input)?;
             packages.insert(root);
 
-            for entry in self.resolve_dependency_tree(input, max_depth)?.into_iter().skip(1) {
+            for entry in self
+                .resolve_dependency_tree(input, max_depth)?
+                .into_iter()
+                .skip(1)
+            {
                 if entry.note.is_some() || entry.coordinate.version.is_none() {
                     continue;
                 }
@@ -302,6 +308,22 @@ impl MavenResolver {
         for dependency in dependencies {
             let scope = dependency.scope.clone();
             let optional = dependency.optional;
+
+            if !include_classpath_scope(scope.as_deref()) {
+                out.push(TreeEntry {
+                    depth,
+                    coordinate: MavenCoordinate {
+                        group: dependency.group,
+                        artifact: dependency.artifact,
+                        version: dependency.version,
+                        classifier: dependency.classifier,
+                    },
+                    scope,
+                    optional,
+                    note: Some("scope omitted".to_owned()),
+                });
+                continue;
+            }
 
             if inherited_exclusions
                 .contains(&(dependency.group.clone(), dependency.artifact.clone()))
@@ -428,12 +450,22 @@ impl MavenResolver {
             let project_group = project
                 .group_id
                 .clone()
-                .or_else(|| project.parent.as_ref().and_then(|parent| parent.group_id.clone()))
+                .or_else(|| {
+                    project
+                        .parent
+                        .as_ref()
+                        .and_then(|parent| parent.group_id.clone())
+                })
                 .unwrap_or_default();
             let project_version = project
                 .version
                 .clone()
-                .or_else(|| project.parent.as_ref().and_then(|parent| parent.version.clone()))
+                .or_else(|| {
+                    project
+                        .parent
+                        .as_ref()
+                        .and_then(|parent| parent.version.clone())
+                })
                 .unwrap_or_default();
             let project_artifact = project.artifact_id.clone().unwrap_or_default();
 
@@ -450,10 +482,16 @@ impl MavenResolver {
 
             if let Some(management) = project.dependency_management {
                 for dependency in management.dependencies.dependency {
-                    let Some(group) = dependency.group_id.map(|value| interpolate_value(&value, &properties)) else {
+                    let Some(group) = dependency
+                        .group_id
+                        .map(|value| interpolate_value(&value, &properties))
+                    else {
                         continue;
                     };
-                    let Some(artifact) = dependency.artifact_id.map(|value| interpolate_value(&value, &properties)) else {
+                    let Some(artifact) = dependency
+                        .artifact_id
+                        .map(|value| interpolate_value(&value, &properties))
+                    else {
                         continue;
                     };
 
@@ -492,10 +530,8 @@ impl MavenResolver {
                     }
 
                     if let Some(version) = dependency.version {
-                        managed_versions.insert(
-                            (group, artifact),
-                            interpolate_value(&version, &properties),
-                        );
+                        managed_versions
+                            .insert((group, artifact), interpolate_value(&version, &properties));
                     }
                 }
             }
@@ -514,11 +550,15 @@ impl MavenResolver {
                                 .artifact_id
                                 .as_ref()
                                 .map(|value| interpolate_value(value, &properties))?;
-                            let version = dependency.version.as_ref().map(|value| interpolate_value(value, &properties)).or_else(|| {
-                                managed_versions
-                                    .get(&(group.clone(), artifact.clone()))
-                                    .cloned()
-                            });
+                            let version = dependency
+                                .version
+                                .as_ref()
+                                .map(|value| interpolate_value(value, &properties))
+                                .or_else(|| {
+                                    managed_versions
+                                        .get(&(group.clone(), artifact.clone()))
+                                        .cloned()
+                                });
 
                             Some(ResolvedDependency {
                                 group,
@@ -589,11 +629,9 @@ impl MavenResolver {
             .as_ref()
             .ok_or_else(|| ResolverError::MissingVersionMetadata(coordinate.to_string()))?;
 
-        resolve_version_from_metadata(versioning, version_spec)
-            .ok_or_else(|| ResolverError::UnsupportedVersionExpression(format!(
-                "{} ({version_spec})",
-                coordinate
-            )))
+        resolve_version_from_metadata(versioning, version_spec).ok_or_else(|| {
+            ResolverError::UnsupportedVersionExpression(format!("{} ({version_spec})", coordinate))
+        })
     }
 
     fn fetch_metadata(&self, coordinate: &MavenCoordinate) -> Result<MavenMetadata, ResolverError> {
@@ -601,18 +639,14 @@ impl MavenResolver {
         Ok(from_str(&metadata_xml)?)
     }
 
-    fn parent_to_coordinate(
-        &self,
-        parent: &MavenParent,
-    ) -> Result<MavenCoordinate, ResolverError> {
+    fn parent_to_coordinate(&self, parent: &MavenParent) -> Result<MavenCoordinate, ResolverError> {
         let group = parent
             .group_id
             .clone()
             .ok_or_else(|| ResolverError::InvalidParentPom("missing parent groupId".to_owned()))?;
-        let artifact = parent
-            .artifact_id
-            .clone()
-            .ok_or_else(|| ResolverError::InvalidParentPom("missing parent artifactId".to_owned()))?;
+        let artifact = parent.artifact_id.clone().ok_or_else(|| {
+            ResolverError::InvalidParentPom("missing parent artifactId".to_owned())
+        })?;
         let version = parent
             .version
             .clone()
@@ -718,13 +752,19 @@ impl MavenResolver {
         )))
     }
 
-    fn cache_artifact_and_hash(&self, coordinate: &MavenCoordinate) -> Result<String, ResolverError> {
+    fn cache_artifact_and_hash(
+        &self,
+        coordinate: &MavenCoordinate,
+    ) -> Result<String, ResolverError> {
         let artifact_path = self.artifact_cache_path(coordinate)?;
         let expected_checksum = self.fetch_artifact_checksum(coordinate)?;
 
         if artifact_path.is_file() {
             let actual_checksum = sha256_file(&artifact_path)?;
-            if expected_checksum.as_ref().is_none_or(|expected| expected == &actual_checksum) {
+            if expected_checksum
+                .as_ref()
+                .is_none_or(|expected| expected == &actual_checksum)
+            {
                 return Ok(actual_checksum);
             }
             fs::remove_file(&artifact_path)?;
@@ -756,7 +796,9 @@ impl MavenResolver {
 
         match self.fetch_text_with_cache(&checksum_url, &cache_path, None) {
             Ok(body) => Ok(normalize_checksum_response(&body)),
-            Err(ResolverError::Http(error)) if error.status() == Some(reqwest::StatusCode::NOT_FOUND) => {
+            Err(ResolverError::Http(error))
+                if error.status() == Some(reqwest::StatusCode::NOT_FOUND) =>
+            {
                 Ok(None)
             }
             Err(error) => Err(error),
@@ -849,18 +891,14 @@ fn resolve_best_version(versioning: &MavenVersioning) -> Option<String> {
         return Some(latest.clone());
     }
 
-    if let Some(stable) = versioning
-        .versions
-        .as_ref()
-        .and_then(|versions| {
-            versions
-                .version
-                .iter()
-                .rev()
-                .find(|version| is_stable_maven_version(version))
-                .cloned()
-        })
-    {
+    if let Some(stable) = versioning.versions.as_ref().and_then(|versions| {
+        versions
+            .version
+            .iter()
+            .rev()
+            .find(|version| is_stable_maven_version(version))
+            .cloned()
+    }) {
         return Some(stable);
     }
 
@@ -893,7 +931,9 @@ fn resolve_version_from_metadata(
     versions
         .iter()
         .rev()
-        .find(|version| is_stable_maven_version(version) && version_matches_any_range(version, &intervals))
+        .find(|version| {
+            is_stable_maven_version(version) && version_matches_any_range(version, &intervals)
+        })
         .cloned()
         .or_else(|| {
             versions
@@ -945,13 +985,29 @@ fn parse_version_ranges(spec: &str) -> Option<Vec<VersionRangeInterval>> {
 
         let interval = if parts.len() == 1 {
             VersionRangeInterval {
-                lower: if lower.is_empty() { None } else { Some((lower.to_owned(), opening == '[')) },
-                upper: if lower.is_empty() { None } else { Some((lower.to_owned(), closing == ']')) },
+                lower: if lower.is_empty() {
+                    None
+                } else {
+                    Some((lower.to_owned(), opening == '['))
+                },
+                upper: if lower.is_empty() {
+                    None
+                } else {
+                    Some((lower.to_owned(), closing == ']'))
+                },
             }
         } else {
             VersionRangeInterval {
-                lower: if lower.is_empty() { None } else { Some((lower.to_owned(), opening == '[')) },
-                upper: if upper.is_empty() { None } else { Some((upper.to_owned(), closing == ']')) },
+                lower: if lower.is_empty() {
+                    None
+                } else {
+                    Some((lower.to_owned(), opening == '['))
+                },
+                upper: if upper.is_empty() {
+                    None
+                } else {
+                    Some((upper.to_owned(), closing == ']'))
+                },
             }
         };
         intervals.push(interval);
@@ -998,7 +1054,7 @@ fn is_stable_maven_version(version: &str) -> bool {
 }
 
 fn include_classpath_scope(scope: Option<&str>) -> bool {
-	!matches!(scope, Some("test" | "provided" | "import"))
+    !matches!(scope, Some("test" | "provided" | "import"))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1034,8 +1090,14 @@ fn compare_maven_versions(left: &str, right: &str) -> std::cmp::Ordering {
     let max_len = left_parts.len().max(right_parts.len());
 
     for index in 0..max_len {
-        let left_part = left_parts.get(index).cloned().unwrap_or(VersionToken::Number(0));
-        let right_part = right_parts.get(index).cloned().unwrap_or(VersionToken::Number(0));
+        let left_part = left_parts
+            .get(index)
+            .cloned()
+            .unwrap_or(VersionToken::Number(0));
+        let right_part = right_parts
+            .get(index)
+            .cloned()
+            .unwrap_or(VersionToken::Number(0));
         let ordering = left_part.cmp(&right_part);
         if ordering != std::cmp::Ordering::Equal {
             return ordering;
@@ -1128,7 +1190,10 @@ fn dependency_exclusions(
         .unwrap_or_default()
 }
 
-fn relocation_target(project: &MavenProject, coordinate: &MavenCoordinate) -> Option<MavenCoordinate> {
+fn relocation_target(
+    project: &MavenProject,
+    coordinate: &MavenCoordinate,
+) -> Option<MavenCoordinate> {
     let relocation = project
         .distribution_management
         .as_ref()?
@@ -1306,7 +1371,9 @@ struct MavenExclusion {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ResolverError {
-    #[error("invalid Maven coordinate {0}; expected group:artifact, group:artifact:version, or group:artifact:version:classifier")]
+    #[error(
+        "invalid Maven coordinate {0}; expected group:artifact, group:artifact:version, or group:artifact:version:classifier"
+    )]
     InvalidCoordinate(String),
     #[error("cache error: {0}")]
     Cache(#[from] jot_cache::CacheError),
@@ -1339,16 +1406,14 @@ pub enum ResolverError {
 #[cfg(test)]
 mod tests {
     use super::{
-        Lockfile, MavenDependencies, MavenDependencyManagement, MavenExclusion, MavenExclusions,
-        MavenDistributionManagement, MavenParent, MavenRelocation, relocation_target,
-        MavenCoordinate, MavenDependency, MavenProject, MavenVersioning, MavenVersions,
-        ResolvedDependency, LockedPackage, dependency_exclusions, is_cache_usable,
-        is_stable_maven_version, needs_dynamic_version_resolution, parse_version_spec,
-        resolve_version_from_metadata, version_matches_any_range,
-        is_property_version_expression, interpolate_value,
-        normalize_checksum_response,
-        sha256_file,
-        resolve_best_version,
+        LockedPackage, Lockfile, MavenCoordinate, MavenDependencies, MavenDependency,
+        MavenDependencyManagement, MavenDistributionManagement, MavenExclusion, MavenExclusions,
+        MavenParent, MavenProject, MavenRelocation, MavenVersioning, MavenVersions,
+        ResolvedDependency, dependency_exclusions, include_classpath_scope, interpolate_value,
+        is_cache_usable, is_property_version_expression, is_stable_maven_version,
+        needs_dynamic_version_resolution, normalize_checksum_response, parse_version_spec,
+        relocation_target, resolve_best_version, resolve_version_from_metadata, sha256_file,
+        version_matches_any_range,
     };
     use quick_xml::de::from_str;
     use std::collections::{BTreeMap, BTreeSet};
@@ -1364,13 +1429,17 @@ mod tests {
         assert_eq!(simple.version, None);
         assert_eq!(simple.classifier, None);
 
-        let pinned = MavenCoordinate::parse("org.junit.jupiter:junit-jupiter:5.11.0").expect("parse");
+        let pinned =
+            MavenCoordinate::parse("org.junit.jupiter:junit-jupiter:5.11.0").expect("parse");
         assert_eq!(pinned.version.as_deref(), Some("5.11.0"));
 
         let classified = MavenCoordinate::parse("org.junit.jupiter:junit-jupiter:5.11.0:sources")
             .expect("parse classified coordinate");
         assert_eq!(classified.classifier.as_deref(), Some("sources"));
-        assert_eq!(classified.to_string(), "org.junit.jupiter:junit-jupiter:5.11.0:sources");
+        assert_eq!(
+            classified.to_string(),
+            "org.junit.jupiter:junit-jupiter:5.11.0:sources"
+        );
     }
 
     #[test]
@@ -1382,7 +1451,10 @@ mod tests {
                 version: vec!["1.0.0".into(), "1.9.0".into()],
             }),
         };
-        assert_eq!(resolve_best_version(&with_release).as_deref(), Some("1.9.0"));
+        assert_eq!(
+            resolve_best_version(&with_release).as_deref(),
+            Some("1.9.0")
+        );
 
         let with_latest = MavenVersioning {
             latest: Some("2.0.0".into()),
@@ -1398,7 +1470,10 @@ mod tests {
                 version: vec!["1.0.0".into(), "1.1.0".into(), "1.2.0".into()],
             }),
         };
-        assert_eq!(resolve_best_version(&with_versions).as_deref(), Some("1.2.0"));
+        assert_eq!(
+            resolve_best_version(&with_versions).as_deref(),
+            Some("1.2.0")
+        );
 
         let prefers_stable = MavenVersioning {
             latest: Some("2.0.0-RC1".into()),
@@ -1407,7 +1482,20 @@ mod tests {
                 version: vec!["1.9.9".into(), "2.0.0-M1".into(), "2.0.0-RC1".into()],
             }),
         };
-        assert_eq!(resolve_best_version(&prefers_stable).as_deref(), Some("1.9.9"));
+        assert_eq!(
+            resolve_best_version(&prefers_stable).as_deref(),
+            Some("1.9.9")
+        );
+    }
+
+    #[test]
+    fn include_classpath_scope_excludes_test_provided_and_import() {
+        assert!(include_classpath_scope(None));
+        assert!(include_classpath_scope(Some("compile")));
+        assert!(include_classpath_scope(Some("runtime")));
+        assert!(!include_classpath_scope(Some("test")));
+        assert!(!include_classpath_scope(Some("provided")));
+        assert!(!include_classpath_scope(Some("import")));
     }
 
     #[test]
@@ -1427,11 +1515,26 @@ mod tests {
             }),
         };
 
-        assert_eq!(resolve_version_from_metadata(&versioning, "LATEST").as_deref(), Some("2.1.0"));
-        assert_eq!(resolve_version_from_metadata(&versioning, "RELEASE").as_deref(), Some("2.0.0"));
-        assert_eq!(resolve_version_from_metadata(&versioning, "[1.5,2.0)").as_deref(), Some("1.9.9"));
-        assert_eq!(resolve_version_from_metadata(&versioning, "(,1.0.0]").as_deref(), Some("1.0.0"));
-        assert_eq!(resolve_version_from_metadata(&versioning, "[2.0.0,)").as_deref(), Some("2.1.0"));
+        assert_eq!(
+            resolve_version_from_metadata(&versioning, "LATEST").as_deref(),
+            Some("2.1.0")
+        );
+        assert_eq!(
+            resolve_version_from_metadata(&versioning, "RELEASE").as_deref(),
+            Some("2.0.0")
+        );
+        assert_eq!(
+            resolve_version_from_metadata(&versioning, "[1.5,2.0)").as_deref(),
+            Some("1.9.9")
+        );
+        assert_eq!(
+            resolve_version_from_metadata(&versioning, "(,1.0.0]").as_deref(),
+            Some("1.0.0")
+        );
+        assert_eq!(
+            resolve_version_from_metadata(&versioning, "[2.0.0,)").as_deref(),
+            Some("2.1.0")
+        );
     }
 
     #[test]
@@ -1453,9 +1556,9 @@ mod tests {
         assert!(!is_stable_maven_version("2.0.0-RC1"));
     }
 
-        #[test]
-        fn parses_maven_dependencies_block_from_pom_xml() {
-                let xml = r#"
+    #[test]
+    fn parses_maven_dependencies_block_from_pom_xml() {
+        let xml = r#"
                         <project>
                             <dependencies>
                                 <dependency>
@@ -1469,242 +1572,245 @@ mod tests {
                         </project>
                 "#;
 
-                let project: MavenProject = from_str(xml).expect("parse pom");
-                let dependencies = project.dependencies.expect("dependencies").dependency;
-                assert_eq!(dependencies.len(), 1);
-                let first: &MavenDependency = &dependencies[0];
-                assert_eq!(first.group_id.as_deref(), Some("org.junit.jupiter"));
-                assert_eq!(first.artifact_id.as_deref(), Some("junit-jupiter-api"));
-                assert_eq!(first.version.as_deref(), Some("5.11.0"));
-                assert_eq!(first.scope.as_deref(), Some("test"));
-                assert_eq!(first.optional, Some(false));
-        }
+        let project: MavenProject = from_str(xml).expect("parse pom");
+        let dependencies = project.dependencies.expect("dependencies").dependency;
+        assert_eq!(dependencies.len(), 1);
+        let first: &MavenDependency = &dependencies[0];
+        assert_eq!(first.group_id.as_deref(), Some("org.junit.jupiter"));
+        assert_eq!(first.artifact_id.as_deref(), Some("junit-jupiter-api"));
+        assert_eq!(first.version.as_deref(), Some("5.11.0"));
+        assert_eq!(first.scope.as_deref(), Some("test"));
+        assert_eq!(first.optional, Some(false));
+    }
 
-            #[test]
-            fn property_version_expression_detection_matches_expected_cases() {
-                assert!(is_property_version_expression("${junit.version}"));
-                assert!(!is_property_version_expression("[1.0,2.0)"));
-                assert!(!is_property_version_expression("(,1.4.0]"));
-                assert!(!is_property_version_expression("1.2.3"));
-            }
+    #[test]
+    fn property_version_expression_detection_matches_expected_cases() {
+        assert!(is_property_version_expression("${junit.version}"));
+        assert!(!is_property_version_expression("[1.0,2.0)"));
+        assert!(!is_property_version_expression("(,1.4.0]"));
+        assert!(!is_property_version_expression("1.2.3"));
+    }
 
-            #[test]
-            fn dependency_to_coordinate_requires_literal_version() {
-                let literal = ResolvedDependency {
-                    group: "org.example".into(),
-                    artifact: "demo".into(),
-                    version: Some("1.0.0".into()),
-                    classifier: Some("tests".into()),
-                    scope: None,
-                    optional: false,
-                    exclusions: BTreeSet::new(),
-                };
-                assert_eq!(literal.classifier.as_deref(), Some("tests"));
+    #[test]
+    fn dependency_to_coordinate_requires_literal_version() {
+        let literal = ResolvedDependency {
+            group: "org.example".into(),
+            artifact: "demo".into(),
+            version: Some("1.0.0".into()),
+            classifier: Some("tests".into()),
+            scope: None,
+            optional: false,
+            exclusions: BTreeSet::new(),
+        };
+        assert_eq!(literal.classifier.as_deref(), Some("tests"));
 
-                let managed = ResolvedDependency {
-                    group: "org.example".into(),
-                    artifact: "demo".into(),
-                    version: Some("${demo.version}".into()),
+        let managed = ResolvedDependency {
+            group: "org.example".into(),
+            artifact: "demo".into(),
+            version: Some("${demo.version}".into()),
+            classifier: None,
+            scope: None,
+            optional: false,
+            exclusions: BTreeSet::new(),
+        };
+        assert!(is_property_version_expression(
+            managed.version.as_deref().expect("managed version")
+        ));
+    }
+
+    #[test]
+    fn cache_usability_respects_file_age_when_ttl_is_present() {
+        let temp = tempdir().expect("tempdir");
+        let file_path = temp.path().join("metadata.xml");
+        fs::write(&file_path, "<metadata />").expect("write metadata");
+
+        assert!(is_cache_usable(&file_path, Some(Duration::from_secs(60))).expect("fresh cache"));
+        assert!(is_cache_usable(&file_path, None).expect("ttl-free cache"));
+    }
+
+    #[test]
+    fn lockfile_packages_are_deterministic_and_deduplicated() {
+        let lockfile = Lockfile {
+            version: 1,
+            roots: vec![MavenCoordinate {
+                group: "org.example".into(),
+                artifact: "demo".into(),
+                version: Some("1.0.0".into()),
+                classifier: None,
+            }],
+            package: vec![
+                LockedPackage {
+                    group: "b.group".into(),
+                    artifact: "beta".into(),
+                    version: "1.0.0".into(),
                     classifier: None,
-                    scope: None,
-                    optional: false,
-                    exclusions: BTreeSet::new(),
-                };
-                assert!(is_property_version_expression(
-                    managed.version.as_deref().expect("managed version")
-                ));
-            }
+                    sha256: "abc123".into(),
+                },
+                LockedPackage {
+                    group: "a.group".into(),
+                    artifact: "alpha".into(),
+                    version: "2.0.0".into(),
+                    classifier: Some("sources".into()),
+                    sha256: "def456".into(),
+                },
+            ],
+        };
 
-            #[test]
-            fn cache_usability_respects_file_age_when_ttl_is_present() {
-                let temp = tempdir().expect("tempdir");
-                let file_path = temp.path().join("metadata.xml");
-                fs::write(&file_path, "<metadata />").expect("write metadata");
+        assert_eq!(lockfile.package[0].group, "b.group");
+        assert_eq!(lockfile.package[1].group, "a.group");
+    }
 
-                assert!(is_cache_usable(&file_path, Some(Duration::from_secs(60))).expect("fresh cache"));
-                assert!(is_cache_usable(&file_path, None).expect("ttl-free cache"));
-            }
+    #[test]
+    fn interpolation_replaces_known_properties_and_keeps_unknown() {
+        let mut properties = BTreeMap::new();
+        properties.insert("junit.version".to_owned(), "5.11.0".to_owned());
 
-            #[test]
-            fn lockfile_packages_are_deterministic_and_deduplicated() {
-                let lockfile = Lockfile {
-                    version: 1,
-                    roots: vec![MavenCoordinate {
-                        group: "org.example".into(),
-                        artifact: "demo".into(),
-                        version: Some("1.0.0".into()),
+        assert_eq!(
+            interpolate_value("org.junit:junit-bom:${junit.version}", &properties),
+            "org.junit:junit-bom:5.11.0"
+        );
+        assert_eq!(
+            interpolate_value("${missing.value}", &properties),
+            "${missing.value}"
+        );
+    }
+
+    #[test]
+    fn managed_versions_fill_dependency_versions() {
+        let project = MavenProject {
+            group_id: Some("org.example".to_owned()),
+            artifact_id: Some("demo".to_owned()),
+            version: Some("1.0.0".to_owned()),
+            parent: Some(MavenParent {
+                group_id: Some("org.example".to_owned()),
+                artifact_id: Some("parent".to_owned()),
+                version: Some("1.0.0".to_owned()),
+            }),
+            properties: None,
+            dependency_management: Some(MavenDependencyManagement {
+                dependencies: MavenDependencies {
+                    dependency: vec![MavenDependency {
+                        group_id: Some("org.slf4j".to_owned()),
+                        artifact_id: Some("slf4j-api".to_owned()),
+                        version: Some("2.0.16".to_owned()),
+                        packaging: None,
                         classifier: None,
+                        scope: None,
+                        optional: None,
+                        exclusions: None,
                     }],
-                    package: vec![
-                        LockedPackage {
-                            group: "b.group".into(),
-                            artifact: "beta".into(),
-                            version: "1.0.0".into(),
-                            classifier: None,
-                            sha256: "abc123".into(),
-                        },
-                        LockedPackage {
-                            group: "a.group".into(),
-                            artifact: "alpha".into(),
-                            version: "2.0.0".into(),
-                            classifier: Some("sources".into()),
-                            sha256: "def456".into(),
-                        },
-                    ],
-                };
-
-                assert_eq!(lockfile.package[0].group, "b.group");
-                assert_eq!(lockfile.package[1].group, "a.group");
-            }
-
-            #[test]
-            fn interpolation_replaces_known_properties_and_keeps_unknown() {
-                let mut properties = BTreeMap::new();
-                properties.insert("junit.version".to_owned(), "5.11.0".to_owned());
-
-                assert_eq!(
-                    interpolate_value("org.junit:junit-bom:${junit.version}", &properties),
-                    "org.junit:junit-bom:5.11.0"
-                );
-                assert_eq!(
-                    interpolate_value("${missing.value}", &properties),
-                    "${missing.value}"
-                );
-            }
-
-            #[test]
-            fn managed_versions_fill_dependency_versions() {
-                let project = MavenProject {
-                    group_id: Some("org.example".to_owned()),
-                    artifact_id: Some("demo".to_owned()),
-                    version: Some("1.0.0".to_owned()),
-                    parent: Some(MavenParent {
-                        group_id: Some("org.example".to_owned()),
-                        artifact_id: Some("parent".to_owned()),
-                        version: Some("1.0.0".to_owned()),
-                    }),
-                    properties: None,
-                    dependency_management: Some(MavenDependencyManagement {
-                        dependencies: MavenDependencies {
-                            dependency: vec![MavenDependency {
-                                group_id: Some("org.slf4j".to_owned()),
-                                artifact_id: Some("slf4j-api".to_owned()),
-                                version: Some("2.0.16".to_owned()),
-                                packaging: None,
-                                classifier: None,
-                                scope: None,
-                                optional: None,
-                                exclusions: None,
-                            }],
-                        },
-                    }),
-                    distribution_management: None,
-                    dependencies: Some(MavenDependencies {
-                        dependency: vec![MavenDependency {
-                            group_id: Some("org.slf4j".to_owned()),
-                            artifact_id: Some("slf4j-api".to_owned()),
-                            version: None,
-                            packaging: None,
-                            classifier: Some("tests".to_owned()),
-                            scope: None,
-                            optional: None,
-                            exclusions: None,
-                        }],
-                    }),
-                };
-
-                assert_eq!(
-                    project
-                        .dependency_management
-                        .as_ref()
-                        .expect("management")
-                        .dependencies
-                        .dependency[0]
-                        .version
-                        .as_deref(),
-                    Some("2.0.16")
-                );
-            }
-
-            #[test]
-            fn parses_dependency_exclusions_and_interpolates_values() {
-                let dependency = MavenDependency {
-                    group_id: Some("org.example".to_owned()),
-                    artifact_id: Some("consumer".to_owned()),
-                    version: Some("1.0.0".to_owned()),
+                },
+            }),
+            distribution_management: None,
+            dependencies: Some(MavenDependencies {
+                dependency: vec![MavenDependency {
+                    group_id: Some("org.slf4j".to_owned()),
+                    artifact_id: Some("slf4j-api".to_owned()),
+                    version: None,
                     packaging: None,
-                    classifier: None,
+                    classifier: Some("tests".to_owned()),
                     scope: None,
                     optional: None,
-                    exclusions: Some(MavenExclusions {
-                        exclusion: vec![MavenExclusion {
-                            group_id: Some("${excluded.group}".to_owned()),
-                            artifact_id: Some("${excluded.artifact}".to_owned()),
-                        }],
-                    }),
-                };
+                    exclusions: None,
+                }],
+            }),
+        };
 
-                let mut properties = BTreeMap::new();
-                properties.insert("excluded.group".to_owned(), "org.slf4j".to_owned());
-                properties.insert("excluded.artifact".to_owned(), "slf4j-api".to_owned());
+        assert_eq!(
+            project
+                .dependency_management
+                .as_ref()
+                .expect("management")
+                .dependencies
+                .dependency[0]
+                .version
+                .as_deref(),
+            Some("2.0.16")
+        );
+    }
 
-                let exclusions = dependency_exclusions(&dependency, &properties);
-                assert!(exclusions.contains(&("org.slf4j".to_owned(), "slf4j-api".to_owned())));
-            }
+    #[test]
+    fn parses_dependency_exclusions_and_interpolates_values() {
+        let dependency = MavenDependency {
+            group_id: Some("org.example".to_owned()),
+            artifact_id: Some("consumer".to_owned()),
+            version: Some("1.0.0".to_owned()),
+            packaging: None,
+            classifier: None,
+            scope: None,
+            optional: None,
+            exclusions: Some(MavenExclusions {
+                exclusion: vec![MavenExclusion {
+                    group_id: Some("${excluded.group}".to_owned()),
+                    artifact_id: Some("${excluded.artifact}".to_owned()),
+                }],
+            }),
+        };
 
-            #[test]
-            fn normalizes_checksum_sidecar_contents() {
-                assert_eq!(
-                    normalize_checksum_response("ABCDEF0123456789  demo.jar\n"),
-                    Some("abcdef0123456789".to_owned())
-                );
-                assert_eq!(normalize_checksum_response(""), None);
-            }
+        let mut properties = BTreeMap::new();
+        properties.insert("excluded.group".to_owned(), "org.slf4j".to_owned());
+        properties.insert("excluded.artifact".to_owned(), "slf4j-api".to_owned());
 
-            #[test]
-            fn sha256_file_hashes_contents() {
-                let temp = tempdir().expect("tempdir");
-                let file_path = temp.path().join("demo.jar");
-                fs::write(&file_path, b"hello world").expect("write artifact");
+        let exclusions = dependency_exclusions(&dependency, &properties);
+        assert!(exclusions.contains(&("org.slf4j".to_owned(), "slf4j-api".to_owned())));
+    }
 
-                let checksum = sha256_file(&file_path).expect("sha256");
-                assert_eq!(
-                    checksum,
-                    "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
-                );
-            }
+    #[test]
+    fn normalizes_checksum_sidecar_contents() {
+        assert_eq!(
+            normalize_checksum_response("ABCDEF0123456789  demo.jar\n"),
+            Some("abcdef0123456789".to_owned())
+        );
+        assert_eq!(normalize_checksum_response(""), None);
+    }
 
-            #[test]
-            fn relocation_target_uses_relocation_fields_with_coordinate_fallbacks() {
-                let project = MavenProject {
-                    group_id: Some("legacy.group".to_owned()),
-                    artifact_id: Some("legacy-artifact".to_owned()),
-                    version: Some("1.0.0".to_owned()),
-                    parent: None,
-                    properties: None,
-                    dependency_management: None,
-                    distribution_management: Some(MavenDistributionManagement {
-                        relocation: Some(MavenRelocation {
-                            group_id: Some("modern.group".to_owned()),
-                            artifact_id: Some("modern-artifact".to_owned()),
-                            version: Some("2.0.0".to_owned()),
-                            classifier: Some("sources".to_owned()),
-                        }),
-                    }),
-                    dependencies: None,
-                };
+    #[test]
+    fn sha256_file_hashes_contents() {
+        let temp = tempdir().expect("tempdir");
+        let file_path = temp.path().join("demo.jar");
+        fs::write(&file_path, b"hello world").expect("write artifact");
 
-                let resolved = relocation_target(
-                    &project,
-                    &MavenCoordinate {
-                        group: "legacy.group".to_owned(),
-                        artifact: "legacy-artifact".to_owned(),
-                        version: Some("1.0.0".to_owned()),
-                        classifier: None,
-                    },
-                )
-                .expect("relocation target");
+        let checksum = sha256_file(&file_path).expect("sha256");
+        assert_eq!(
+            checksum,
+            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+        );
+    }
 
-                assert_eq!(resolved.to_string(), "modern.group:modern-artifact:2.0.0:sources");
-            }
+    #[test]
+    fn relocation_target_uses_relocation_fields_with_coordinate_fallbacks() {
+        let project = MavenProject {
+            group_id: Some("legacy.group".to_owned()),
+            artifact_id: Some("legacy-artifact".to_owned()),
+            version: Some("1.0.0".to_owned()),
+            parent: None,
+            properties: None,
+            dependency_management: None,
+            distribution_management: Some(MavenDistributionManagement {
+                relocation: Some(MavenRelocation {
+                    group_id: Some("modern.group".to_owned()),
+                    artifact_id: Some("modern-artifact".to_owned()),
+                    version: Some("2.0.0".to_owned()),
+                    classifier: Some("sources".to_owned()),
+                }),
+            }),
+            dependencies: None,
+        };
+
+        let resolved = relocation_target(
+            &project,
+            &MavenCoordinate {
+                group: "legacy.group".to_owned(),
+                artifact: "legacy-artifact".to_owned(),
+                version: Some("1.0.0".to_owned()),
+                classifier: None,
+            },
+        )
+        .expect("relocation target");
+
+        assert_eq!(
+            resolved.to_string(),
+            "modern.group:modern-artifact:2.0.0:sources"
+        );
+    }
 }
