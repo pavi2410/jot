@@ -1,3 +1,5 @@
+use annotate_snippets::renderer::DecorStyle;
+use annotate_snippets::{AnnotationKind, Level, Renderer, Snippet};
 use std::ffi::OsString;
 use std::fs;
 use std::io::IsTerminal;
@@ -257,31 +259,59 @@ fn format_javac_stderr(raw: &str, color: bool) -> String {
 		return raw.to_owned();
 	}
 
-	let mut output = String::new();
-	output.push_str(&style("javac diagnostics", Style::Bold, color));
-	output.push('\n');
+	let renderer = if color {
+		Renderer::styled().decor_style(DecorStyle::Unicode)
+	} else {
+		Renderer::plain()
+	};
 
+	let mut output = String::from("javac diagnostics\n");
 	for diagnostic in diagnostics {
-		let severity_style = match diagnostic.severity {
-			DiagnosticSeverity::Error => Style::RedBold,
-			DiagnosticSeverity::Warning => Style::YellowBold,
-		};
-		output.push_str(&format!(
-			"{} {}:{}\n",
-			style(diagnostic.severity.as_str(), severity_style, color),
-			style(&diagnostic.path, Style::Cyan, color),
-			diagnostic.line
-		));
-		output.push_str(&format!("  {}\n", diagnostic.message));
-		if let Some(source_line) = diagnostic.source_line.as_ref() {
-			output.push_str(&format!("  {}\n", source_line));
-		}
-		if let Some(caret_line) = diagnostic.caret_line.as_ref() {
-			output.push_str(&format!("  {}\n", style(caret_line, Style::Green, color)));
-		}
+		output.push_str(&render_diagnostic(&renderer, &diagnostic));
+		output.push('\n');
 	}
 
 	output.trim_end().to_owned()
+}
+
+fn render_diagnostic(renderer: &Renderer, diagnostic: &JavacDiagnostic) -> String {
+	let level = match diagnostic.severity {
+		DiagnosticSeverity::Error => Level::ERROR,
+		DiagnosticSeverity::Warning => Level::WARNING,
+	};
+
+	if let Some(source_line) = diagnostic.source_line.as_ref() {
+		let (span_start, span_end) = diagnostic
+			.caret_line
+			.as_ref()
+			.and_then(|line| caret_span(line))
+			.unwrap_or((0, 0));
+		let snippet = Snippet::source(source_line)
+			.line_start(diagnostic.line)
+			.path(&diagnostic.path)
+			.annotation(
+				AnnotationKind::Primary
+					.span(span_start..span_end)
+					.label(&diagnostic.message),
+			);
+		renderer
+			.render(&[level.primary_title(&diagnostic.message).element(snippet)])
+			.to_string()
+	} else {
+		let snippet = Snippet::source("")
+			.line_start(diagnostic.line)
+			.path(&diagnostic.path)
+			.annotation(AnnotationKind::Primary.span(0..0).label(&diagnostic.message));
+		renderer
+			.render(&[level.primary_title(&diagnostic.message).element(snippet)])
+			.to_string()
+	}
+}
+
+fn caret_span(line: &str) -> Option<(usize, usize)> {
+	let start = line.find('^')?;
+	let end_exclusive = line.rfind('^').map(|end| end + 1).unwrap_or(start + 1);
+	Some((start, end_exclusive))
 }
 
 fn parse_javac_diagnostics(raw: &str) -> Vec<JavacDiagnostic> {
@@ -354,15 +384,6 @@ enum DiagnosticSeverity {
 	Warning,
 }
 
-impl DiagnosticSeverity {
-	fn as_str(self) -> &'static str {
-		match self {
-			Self::Error => "error",
-			Self::Warning => "warning",
-		}
-	}
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct JavacDiagnostic {
 	path: String,
@@ -371,30 +392,6 @@ struct JavacDiagnostic {
 	message: String,
 	source_line: Option<String>,
 	caret_line: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Style {
-	Bold,
-	RedBold,
-	YellowBold,
-	Cyan,
-	Green,
-}
-
-fn style(value: &str, style: Style, color: bool) -> String {
-	if !color {
-		return value.to_owned();
-	}
-
-	let code = match style {
-		Style::Bold => "1",
-		Style::RedBold => "1;31",
-		Style::YellowBold => "1;33",
-		Style::Cyan => "36",
-		Style::Green => "32",
-	};
-	format!("\x1b[{code}m{value}\x1b[0m")
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -424,7 +421,8 @@ pub enum BuildError {
 #[cfg(test)]
 mod tests {
 	use super::{
-		collect_java_sources, format_javac_stderr, java_release_flag, parse_javac_diagnostics,
+		caret_span, collect_java_sources, format_javac_stderr, java_release_flag,
+		parse_javac_diagnostics,
 	};
 	use std::fs;
 	use tempfile::tempdir;
@@ -466,8 +464,16 @@ mod tests {
 		let raw = "src/main/java/demo/Main.java:7: error: ';' expected\n        System.out.println(\"oops\")\n                                  ^\n";
 		let formatted = format_javac_stderr(raw, false);
 		assert!(formatted.contains("javac diagnostics"));
-		assert!(formatted.contains("error src/main/java/demo/Main.java:7"));
-		assert!(formatted.contains("';' expected"));
+		assert!(formatted.contains("error: ';' expected"));
+		assert!(formatted.contains("src/main/java/demo/Main.java"));
+		assert!(formatted.contains("^"));
 		assert!(!formatted.contains("\u{1b}["));
+	}
+
+	#[test]
+	fn maps_caret_line_to_span() {
+		assert_eq!(caret_span("   ^^"), Some((3, 5)));
+		assert_eq!(caret_span("  ^"), Some((2, 3)));
+		assert_eq!(caret_span("none"), None);
 	}
 }

@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+annotate-snippets = "0.12.13"
 jot-config = { path = "../jot-config" }
 jot-resolver = { path = "../jot-resolver" }
 jot-toolchain = { path = "../jot-toolchain" }
