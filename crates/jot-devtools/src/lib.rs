@@ -80,6 +80,7 @@ impl DevTools {
         resolve_progress.finish_with_message("Resolved google-java-format runtime");
         let java_files = collect_java_files(&project);
         let mut changed_files = Vec::new();
+        let mut issues = Vec::new();
         let progress = count_bar(
             java_files.len(),
             if check {
@@ -99,6 +100,9 @@ impl DevTools {
             )?;
             if formatted != original {
                 changed_files.push(file.clone());
+                if check {
+                    issues.push(describe_format_issue(file, &original, &formatted));
+                }
                 if !check {
                     fs::write(file, formatted)?;
                 }
@@ -116,6 +120,7 @@ impl DevTools {
             checked: check,
             files_scanned: java_files.len(),
             changed_files,
+            issues,
         })
     }
 
@@ -404,6 +409,16 @@ pub struct FormatReport {
     pub checked: bool,
     pub files_scanned: usize,
     pub changed_files: Vec<PathBuf>,
+    pub issues: Vec<FormatIssue>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FormatIssue {
+    pub path: PathBuf,
+    pub line: usize,
+    pub column: usize,
+    pub actual_line: String,
+    pub expected_line: String,
 }
 
 #[derive(Debug)]
@@ -474,6 +489,20 @@ impl AuditSeverity {
 
     pub fn is_ci_failure(self) -> bool {
         matches!(self, Self::High | Self::Critical)
+    }
+
+    fn from_cvss_score(score: f64) -> Self {
+        if score >= 9.0 {
+            Self::Critical
+        } else if score >= 7.0 {
+            Self::High
+        } else if score >= 4.0 {
+            Self::Moderate
+        } else if score > 0.0 {
+            Self::Low
+        } else {
+            Self::Unknown
+        }
     }
 }
 
@@ -679,6 +708,54 @@ fn count_bar(total: usize, message: &str) -> ProgressBar {
     progress
 }
 
+fn describe_format_issue(file: &Path, original: &str, formatted: &str) -> FormatIssue {
+    let original_lines = original.lines().collect::<Vec<_>>();
+    let formatted_lines = formatted.lines().collect::<Vec<_>>();
+    let max_lines = original_lines.len().max(formatted_lines.len());
+
+    for index in 0..max_lines {
+        let actual = original_lines.get(index).copied().unwrap_or("");
+        let expected = formatted_lines.get(index).copied().unwrap_or("");
+        if actual != expected {
+            return FormatIssue {
+                path: file.to_path_buf(),
+                line: index + 1,
+                column: first_differing_column(actual, expected),
+                actual_line: if actual.is_empty() {
+                    expected.to_owned()
+                } else {
+                    actual.to_owned()
+                },
+                expected_line: expected.to_owned(),
+            };
+        }
+    }
+
+    FormatIssue {
+        path: file.to_path_buf(),
+        line: 1,
+        column: 1,
+        actual_line: original_lines.first().copied().unwrap_or("").to_owned(),
+        expected_line: formatted_lines.first().copied().unwrap_or("").to_owned(),
+    }
+}
+
+fn first_differing_column(left: &str, right: &str) -> usize {
+    let mut left_chars = left.chars();
+    let mut right_chars = right.chars();
+    let mut column = 1;
+
+    loop {
+        match (left_chars.next(), right_chars.next()) {
+            (Some(left_char), Some(right_char)) if left_char == right_char => {
+                column += 1;
+            }
+            (Some(_), Some(_)) | (Some(_), None) | (None, Some(_)) => return column,
+            (None, None) => return 1,
+        }
+    }
+}
+
 fn apply_audit_fixes(
     start: &Path,
     _context: &AuditContext,
@@ -820,26 +897,51 @@ fn rewrite_coordinate(
 }
 
 fn severity_for_vulnerability(vuln: &OsvVulnerability) -> AuditSeverity {
-    if let Some(severity) = vuln
-        .affected
-        .iter()
-        .find_map(|item| {
-            item.ecosystem_specific
-                .as_ref()
-                .and_then(|value| value.severity.clone())
-        })
-        .or_else(|| {
-            vuln.affected.iter().find_map(|item| {
-                item.database_specific
-                    .as_ref()
-                    .and_then(|value| value.severity.clone())
-            })
-        })
-    {
-        return parse_severity(&severity);
+    let mut severity = AuditSeverity::Unknown;
+
+    for candidate in &vuln.severity {
+        severity = severity.max(parse_osv_severity(candidate));
     }
 
-    AuditSeverity::Unknown
+    if let Some(candidate) = vuln
+        .ecosystem_specific
+        .as_ref()
+        .and_then(|value| value.severity.as_deref())
+    {
+        severity = severity.max(parse_severity(candidate));
+    }
+
+    if let Some(candidate) = vuln
+        .database_specific
+        .as_ref()
+        .and_then(|value| value.severity.as_deref())
+    {
+        severity = severity.max(parse_severity(candidate));
+    }
+
+    for affected in &vuln.affected {
+        for candidate in &affected.severity {
+            severity = severity.max(parse_osv_severity(candidate));
+        }
+
+        if let Some(candidate) = affected
+            .ecosystem_specific
+            .as_ref()
+            .and_then(|value| value.severity.as_deref())
+        {
+            severity = severity.max(parse_severity(candidate));
+        }
+
+        if let Some(candidate) = affected
+            .database_specific
+            .as_ref()
+            .and_then(|value| value.severity.as_deref())
+        {
+            severity = severity.max(parse_severity(candidate));
+        }
+    }
+
+    severity
 }
 
 fn parse_severity(input: &str) -> AuditSeverity {
@@ -850,6 +952,144 @@ fn parse_severity(input: &str) -> AuditSeverity {
         "CRITICAL" => AuditSeverity::Critical,
         _ => AuditSeverity::Unknown,
     }
+}
+
+fn parse_osv_severity(severity: &OsvSeverity) -> AuditSeverity {
+    if let Some(score) = parse_cvss_score(&severity.score, severity.kind.as_deref()) {
+        return AuditSeverity::from_cvss_score(score);
+    }
+
+    parse_severity(&severity.score)
+}
+
+fn parse_cvss_score(value: &str, kind: Option<&str>) -> Option<f64> {
+    let trimmed = value.trim();
+    if let Ok(score) = trimmed.parse::<f64>() {
+        return Some(score);
+    }
+
+    let is_v3 = kind
+        .map(|candidate| candidate.eq_ignore_ascii_case("CVSS_V3"))
+        .unwrap_or_else(|| trimmed.starts_with("CVSS:3."));
+
+    if is_v3 {
+        return parse_cvss_v3_vector(trimmed);
+    }
+
+    None
+}
+
+fn parse_cvss_v3_vector(vector: &str) -> Option<f64> {
+    let mut attack_vector = None;
+    let mut attack_complexity = None;
+    let mut privileges_required = None;
+    let mut user_interaction = None;
+    let mut scope = None;
+    let mut confidentiality = None;
+    let mut integrity = None;
+    let mut availability = None;
+
+    for component in vector.split('/') {
+        if component.starts_with("CVSS:") {
+            continue;
+        }
+        let (metric, value) = component.split_once(':')?;
+        match metric {
+            "AV" => attack_vector = Some(cvss_attack_vector(value)?),
+            "AC" => attack_complexity = Some(cvss_attack_complexity(value)?),
+            "PR" => privileges_required = Some(value.to_owned()),
+            "UI" => user_interaction = Some(cvss_user_interaction(value)?),
+            "S" => scope = Some(value.to_owned()),
+            "C" => confidentiality = Some(cvss_impact(value)?),
+            "I" => integrity = Some(cvss_impact(value)?),
+            "A" => availability = Some(cvss_impact(value)?),
+            _ => {}
+        }
+    }
+
+    let scope = scope?;
+    let attack_vector = attack_vector?;
+    let attack_complexity = attack_complexity?;
+    let user_interaction = user_interaction?;
+    let confidentiality = confidentiality?;
+    let integrity = integrity?;
+    let availability = availability?;
+    let privileges_required = cvss_privileges_required(privileges_required?.as_str(), &scope)?;
+
+    let impact_sub_score = 1.0
+        - (1.0 - confidentiality) * (1.0 - integrity) * (1.0 - availability);
+    let impact = if scope == "U" {
+        6.42 * impact_sub_score
+    } else {
+        7.52 * (impact_sub_score - 0.029) - 3.25 * (impact_sub_score - 0.02).powf(15.0)
+    };
+
+    if impact <= 0.0 {
+        return Some(0.0);
+    }
+
+    let exploitability = 8.22
+        * attack_vector
+        * attack_complexity
+        * privileges_required
+        * user_interaction;
+    let score = if scope == "U" {
+        (impact + exploitability).min(10.0)
+    } else {
+        (1.08 * (impact + exploitability)).min(10.0)
+    };
+
+    Some(round_up_cvss(score))
+}
+
+fn cvss_attack_vector(value: &str) -> Option<f64> {
+    match value {
+        "N" => Some(0.85),
+        "A" => Some(0.62),
+        "L" => Some(0.55),
+        "P" => Some(0.20),
+        _ => None,
+    }
+}
+
+fn cvss_attack_complexity(value: &str) -> Option<f64> {
+    match value {
+        "L" => Some(0.77),
+        "H" => Some(0.44),
+        _ => None,
+    }
+}
+
+fn cvss_privileges_required(value: &str, scope: &str) -> Option<f64> {
+    match (value, scope) {
+        ("N", _) => Some(0.85),
+        ("L", "U") => Some(0.62),
+        ("L", "C") => Some(0.68),
+        ("H", "U") => Some(0.27),
+        ("H", "C") => Some(0.50),
+        _ => None,
+    }
+}
+
+fn cvss_user_interaction(value: &str) -> Option<f64> {
+    match value {
+        "N" => Some(0.85),
+        "R" => Some(0.62),
+        _ => None,
+    }
+}
+
+fn cvss_impact(value: &str) -> Option<f64> {
+    match value {
+        "H" => Some(0.56),
+        "L" => Some(0.22),
+        "N" => Some(0.0),
+        _ => None,
+    }
+}
+
+fn round_up_cvss(score: f64) -> f64 {
+    ((score * 10.0) - 1e-10).ceil() / 10.0
 }
 
 fn fixed_version_for(vuln: &OsvVulnerability, package: &MavenCoordinate) -> Option<String> {
@@ -954,6 +1194,10 @@ struct OsvVulnerability {
     id: String,
     summary: Option<String>,
     #[serde(default)]
+    severity: Vec<OsvSeverity>,
+    ecosystem_specific: Option<OsvSeverityHolder>,
+    database_specific: Option<OsvSeverityHolder>,
+    #[serde(default)]
     affected: Vec<OsvAffected>,
 }
 
@@ -962,8 +1206,17 @@ struct OsvAffected {
     package: Option<OsvAffectedPackage>,
     #[serde(default)]
     ranges: Vec<OsvAffectedRange>,
+    #[serde(default)]
+    severity: Vec<OsvSeverity>,
     ecosystem_specific: Option<OsvSeverityHolder>,
     database_specific: Option<OsvSeverityHolder>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OsvSeverity {
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    score: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -989,7 +1242,10 @@ struct OsvSeverityHolder {
 
 #[cfg(test)]
 mod tests {
-    use super::{AuditSeverity, DEFAULT_PMD_RULESET, parse_severity, rewrite_coordinate};
+    use super::{
+        AuditSeverity, DEFAULT_PMD_RULESET, OsvVulnerability, parse_cvss_score, parse_severity,
+        rewrite_coordinate, severity_for_vulnerability,
+    };
     use std::collections::BTreeMap;
 
     #[test]
@@ -1015,6 +1271,51 @@ mod tests {
         assert_eq!(parse_severity("high"), AuditSeverity::High);
         assert_eq!(parse_severity("critical"), AuditSeverity::Critical);
         assert_eq!(parse_severity("medium"), AuditSeverity::Moderate);
+    }
+
+    #[test]
+    fn parses_cvss_v3_vectors() {
+        let score = parse_cvss_score(
+            "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+            Some("CVSS_V3"),
+        )
+        .expect("cvss vector should parse");
+        assert_eq!(score, 10.0);
+    }
+
+    #[test]
+    fn derives_severity_from_top_level_osv_scores() {
+        let vulnerability: OsvVulnerability = serde_json::from_str(
+            r#"{
+                "id": "CVE-2021-44228",
+                "summary": "Log4Shell",
+                "severity": [
+                    {
+                        "type": "CVSS_V3",
+                        "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"
+                    }
+                ]
+            }"#,
+        )
+        .expect("valid osv payload");
+
+        assert_eq!(severity_for_vulnerability(&vulnerability), AuditSeverity::Critical);
+    }
+
+    #[test]
+    fn derives_severity_from_top_level_database_specific_field() {
+        let vulnerability: OsvVulnerability = serde_json::from_str(
+            r#"{
+                "id": "GHSA-25qh-j22f-pwp8",
+                "summary": "logback-core issue",
+                "database_specific": {
+                    "severity": "MODERATE"
+                }
+            }"#,
+        )
+        .expect("valid osv payload");
+
+        assert_eq!(severity_for_vulnerability(&vulnerability), AuditSeverity::Moderate);
     }
 
     #[test]

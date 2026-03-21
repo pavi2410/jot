@@ -1,5 +1,10 @@
-use std::path::PathBuf;
+use std::collections::BTreeMap;
+use std::fs;
+use std::io::IsTerminal;
+use std::path::{Path, PathBuf};
 
+use annotate_snippets::renderer::DecorStyle;
+use annotate_snippets::{AnnotationKind, Level, Renderer, Snippet};
 use clap::{Parser, Subcommand};
 use jot_builder::JavaProjectBuilder;
 use jot_cache::JotPaths;
@@ -8,7 +13,10 @@ use jot_config::{
     load_workspace_dependency_set, pin_java_toolchain, read_declared_dependencies,
     read_toolchain_request,
 };
-use jot_devtools::DevTools;
+use jot_devtools::{
+    AuditFinding, AuditReport, AuditSeverity, DevTools, FormatIssue, FormatReport,
+    LintProcessingError, LintReport, LintViolation,
+};
 use jot_resolver::{MavenResolver, TreeEntry};
 use jot_toolchain::{InstallOptions, JavaToolchainRequest, JdkVendor, ToolchainManager};
 
@@ -294,6 +302,7 @@ fn handle_fmt(
     let resolver = MavenResolver::new(paths)?;
     let devtools = DevTools::new(resolver, manager)?;
     let cwd = std::env::current_dir()?;
+    let color = std::io::stderr().is_terminal();
 
     if let Some(workspace) = load_workspace_build_config(&cwd)? {
         let members = if let Some(module) = module {
@@ -315,16 +324,7 @@ fn handle_fmt(
         for member in members {
             let report = devtools.format(&member, check)?;
             had_changes |= !report.changed_files.is_empty();
-            println!(
-                "{}: scanned {} Java files, {} {}",
-                report.project.name,
-                report.files_scanned,
-                report.changed_files.len(),
-                if check { "would change" } else { "changed" }
-            );
-            for path in report.changed_files {
-                println!("  {}", path.display());
-            }
+            print_format_report(&report, color);
         }
 
         if check && had_changes {
@@ -338,16 +338,8 @@ fn handle_fmt(
     }
 
     let report = devtools.format(&cwd, check)?;
-    println!(
-        "scanned {} Java files, {} {}",
-        report.files_scanned,
-        report.changed_files.len(),
-        if check { "would change" } else { "changed" }
-    );
+    print_format_report(&report, color);
     let has_changes = !report.changed_files.is_empty();
-    for path in &report.changed_files {
-        println!("{}", path.display());
-    }
     if check && has_changes {
         return Err("format check failed".into());
     }
@@ -362,6 +354,7 @@ fn handle_lint(
     let resolver = MavenResolver::new(paths)?;
     let devtools = DevTools::new(resolver, manager)?;
     let cwd = std::env::current_dir()?;
+    let color = std::io::stderr().is_terminal();
 
     if let Some(workspace) = load_workspace_build_config(&cwd)? {
         let members = if let Some(module) = module {
@@ -382,26 +375,7 @@ fn handle_lint(
         let mut violations = 0;
         for member in members {
             let report = devtools.lint(&member)?;
-            println!(
-                "{}: scanned {} Java files, {} violations",
-                report.project.name,
-                report.files_scanned,
-                report.violations.len()
-            );
-            for violation in &report.violations {
-                println!(
-                    "{}:{}:{}: {} [{}] {}",
-                    violation.path.display(),
-                    violation.begin_line,
-                    violation.begin_column,
-                    violation.rule,
-                    violation.ruleset,
-                    violation.message
-                );
-            }
-            for error in &report.processing_errors {
-                eprintln!("{}: {}", error.path.display(), error.message);
-            }
+            print_lint_report(&report, color);
             violations += report.violations.len() + report.processing_errors.len();
         }
         if violations > 0 {
@@ -415,25 +389,7 @@ fn handle_lint(
     }
 
     let report = devtools.lint(&cwd)?;
-    println!(
-        "scanned {} Java files, {} violations",
-        report.files_scanned,
-        report.violations.len()
-    );
-    for violation in &report.violations {
-        println!(
-            "{}:{}:{}: {} [{}] {}",
-            violation.path.display(),
-            violation.begin_line,
-            violation.begin_column,
-            violation.rule,
-            violation.ruleset,
-            violation.message
-        );
-    }
-    for error in &report.processing_errors {
-        eprintln!("{}: {}", error.path.display(), error.message);
-    }
+    print_lint_report(&report, color);
     if !report.violations.is_empty() || !report.processing_errors.is_empty() {
         return Err("lint found violations".into());
     }
@@ -455,31 +411,11 @@ fn handle_audit(paths: JotPaths, fix: bool, ci: bool) -> Result<(), Box<dyn std:
         return Ok(());
     }
 
-    let mut ci_failure = false;
-    for finding in &report.findings {
-        ci_failure |= ci && finding.severity.is_ci_failure();
-        println!(
-            "{}  {}  {}",
-            finding.severity.label(),
-            finding.vuln_id,
-            finding.package
-        );
-        println!("  {}", finding.summary);
-        if let Some(version) = &finding.fixed_version {
-            println!("  fixed in: {}", version);
-        }
-        if !finding.members.is_empty() {
-            println!("  affected members: {}", finding.members.join(", "));
-        }
-        for chain in &finding.chains {
-            let rendered = chain
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(" -> ");
-            println!("  chain: {}", rendered);
-        }
-    }
+    let ci_failure = report
+        .findings
+        .iter()
+        .any(|finding| ci && finding.severity.is_ci_failure());
+    print_audit_report(&report, ci, std::io::stdout().is_terminal());
 
     if fix {
         println!(
@@ -493,6 +429,233 @@ fn handle_audit(paths: JotPaths, fix: bool, ci: bool) -> Result<(), Box<dyn std:
     }
 
     Ok(())
+}
+
+fn print_format_report(report: &FormatReport, color: bool) {
+    println!(
+        "{}: scanned {} Java files, {} {}",
+        report.project.name,
+        report.files_scanned,
+        report.changed_files.len(),
+        if report.checked { "would change" } else { "changed" }
+    );
+
+    if report.checked {
+        for issue in &report.issues {
+            eprintln!("{}", render_format_issue(issue, color).trim_end());
+        }
+    } else {
+        for path in &report.changed_files {
+            println!("  {}", path.display());
+        }
+    }
+}
+
+fn print_lint_report(report: &LintReport, color: bool) {
+    println!(
+        "{}: scanned {} Java files, {} violations",
+        report.project.name,
+        report.files_scanned,
+        report.violations.len()
+    );
+
+    for violation in &report.violations {
+        eprintln!(
+            "{}",
+            render_lint_violation(&report.project.project_root, violation, color).trim_end()
+        );
+    }
+    for error in &report.processing_errors {
+        eprintln!(
+            "{}",
+            render_lint_processing_error(&report.project.project_root, error).trim_end()
+        );
+    }
+}
+
+fn print_audit_report(report: &AuditReport, ci: bool, color: bool) {
+    let mut by_severity = BTreeMap::new();
+    for severity in [
+        AuditSeverity::Critical,
+        AuditSeverity::High,
+        AuditSeverity::Moderate,
+        AuditSeverity::Low,
+        AuditSeverity::Unknown,
+    ] {
+        by_severity.insert(severity, 0_usize);
+    }
+    for finding in &report.findings {
+        *by_severity.entry(finding.severity).or_default() += 1;
+    }
+
+    println!("Audit summary");
+    println!("  packages scanned: {}", report.packages_scanned);
+    println!("  findings: {}", report.findings.len());
+    println!(
+        "  severities: critical={} high={} moderate={} low={} unknown={}",
+        by_severity[&AuditSeverity::Critical],
+        by_severity[&AuditSeverity::High],
+        by_severity[&AuditSeverity::Moderate],
+        by_severity[&AuditSeverity::Low],
+        by_severity[&AuditSeverity::Unknown],
+    );
+    println!();
+
+    for finding in &report.findings {
+        print_audit_finding(finding, ci, color);
+    }
+}
+
+fn print_audit_finding(finding: &AuditFinding, ci: bool, color: bool) {
+    println!(
+        "{} {}",
+        severity_badge(finding.severity, color),
+        finding.vuln_id
+    );
+    println!("  package: {}", finding.package);
+    println!("  summary: {}", finding.summary);
+    if let Some(version) = &finding.fixed_version {
+        println!("  fixed version: {}", version);
+    }
+    if !finding.members.is_empty() {
+        println!("  affected members: {}", finding.members.join(", "));
+    }
+    if ci && finding.severity.is_ci_failure() {
+        println!("  ci gate: this finding fails --ci");
+    }
+    for (index, chain) in finding.chains.iter().enumerate() {
+        let rendered = chain
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(" -> ");
+        println!("  path {}: {}", index + 1, rendered);
+    }
+    println!();
+}
+
+fn severity_badge(severity: AuditSeverity, color: bool) -> String {
+    let label = format!("[{}]", severity.label());
+    if !color {
+        return label;
+    }
+
+    let code = match severity {
+        AuditSeverity::Critical => "1;31",
+        AuditSeverity::High => "31",
+        AuditSeverity::Moderate => "33",
+        AuditSeverity::Low => "34",
+        AuditSeverity::Unknown => "90",
+    };
+    format!("\u{1b}[{code}m{label}\u{1b}[0m")
+}
+
+fn render_format_issue(issue: &FormatIssue, color: bool) -> String {
+    let expected = compact_preview(&issue.expected_line, 100);
+    render_source_diagnostic(
+        &issue.path,
+        issue.line,
+        issue.column,
+        issue.column + 1,
+        &issue.actual_line,
+        Level::ERROR,
+        "file is not formatted",
+        &format!("formatter output diverges here; expected `{expected}`"),
+        color,
+    )
+}
+
+fn render_lint_violation(project_root: &Path, violation: &LintViolation, color: bool) -> String {
+    let path = resolve_report_path(project_root, &violation.path);
+    let source_line = read_source_line(&path, violation.begin_line).unwrap_or_default();
+    let level = if violation.priority <= 2 {
+        Level::ERROR
+    } else {
+        Level::WARNING
+    };
+    let label = format!(
+        "{} [{}], priority {}",
+        violation.rule, violation.ruleset, violation.priority
+    );
+    render_source_diagnostic(
+        &path,
+        violation.begin_line,
+        violation.begin_column,
+        violation.end_column.max(violation.begin_column + 1),
+        &source_line,
+        level,
+        &violation.message,
+        &label,
+        color,
+    )
+}
+
+fn render_lint_processing_error(project_root: &Path, error: &LintProcessingError) -> String {
+    let path = resolve_report_path(project_root, &error.path);
+    format!("error: {}: {}", path.display(), error.message)
+}
+
+fn render_source_diagnostic(
+    path: &Path,
+    line: usize,
+    begin_column: usize,
+    end_column: usize,
+    source_line: &str,
+    level: Level,
+    title: &str,
+    label: &str,
+    color: bool,
+) -> String {
+    let renderer = if color {
+        Renderer::styled().decor_style(DecorStyle::Unicode)
+    } else {
+        Renderer::plain()
+    };
+    let (start, end) = snippet_span(source_line, begin_column, end_column);
+    let rendered_path = path.display().to_string();
+    let snippet = Snippet::source(source_line)
+        .line_start(line)
+        .path(&rendered_path)
+        .annotation(AnnotationKind::Primary.span(start..end).label(label));
+    renderer
+        .render(&[level.primary_title(title).element(snippet)])
+        .to_string()
+}
+
+fn resolve_report_path(project_root: &Path, path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        project_root.join(path)
+    }
+}
+
+fn read_source_line(path: &Path, line_number: usize) -> Option<String> {
+    fs::read_to_string(path)
+        .ok()?
+        .lines()
+        .nth(line_number.saturating_sub(1))
+        .map(|line| line.to_owned())
+}
+
+fn snippet_span(source_line: &str, begin_column: usize, end_column: usize) -> (usize, usize) {
+    if source_line.is_empty() {
+        return (0, 0);
+    }
+
+    let start = begin_column.saturating_sub(1).min(source_line.len() - 1);
+    let requested_end = end_column.saturating_sub(1).max(begin_column);
+    let end = requested_end.min(source_line.len()).max(start + 1);
+    (start, end)
+}
+
+fn compact_preview(value: &str, max_len: usize) -> String {
+    let compact = value.trim();
+    if compact.chars().count() <= max_len {
+        return compact.to_owned();
+    }
+
+    compact.chars().take(max_len.saturating_sub(3)).collect::<String>() + "..."
 }
 
 fn handle_run(

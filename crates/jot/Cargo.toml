@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+annotate-snippets.workspace = true
 clap.workspace = true
 jot-builder = { path = "../jot-builder" }
 jot-cache = { path = "../jot-cache" }
