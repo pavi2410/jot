@@ -1,248 +1,32 @@
+mod dependencies;
+mod discovery;
+mod editing;
+mod errors;
+mod models;
+mod raw;
+
+pub use dependencies::read_declared_dependencies;
+pub use discovery::{
+    find_jot_toml, find_workspace_jot_toml, find_workspace_root_jot_toml, read_toolchain_request,
+};
+pub use editing::pin_java_toolchain;
+pub use errors::ConfigError;
+pub use models::{
+    FormatConfig, JavaFormatStyle, LintConfig, ProjectBuildConfig, WorkspaceBuildConfig,
+    WorkspaceDependencySet, WorkspaceMemberBuildConfig, WorkspaceMemberDependencies,
+};
+
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use jot_toolchain::{JavaToolchainRequest, JdkVendor};
-use serde::Deserialize;
-use toml::Value as TomlValue;
-use toml_edit::{DocumentMut, Item, Table, Value, value};
+use jot_toolchain::JavaToolchainRequest;
 
-#[derive(Debug, Clone, Deserialize)]
-struct RawConfig {
-    project: Option<RawProject>,
-    workspace: Option<RawWorkspace>,
-    dependencies: Option<std::collections::BTreeMap<String, RawDependencySpec>>,
-    #[serde(rename = "test-dependencies")]
-    test_dependencies: Option<std::collections::BTreeMap<String, RawDependencySpec>>,
-    toolchains: Option<RawToolchains>,
-    format: Option<RawFormat>,
-    lint: Option<RawLint>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct RawProject {
-    name: String,
-    version: Option<String>,
-    group: Option<String>,
-    #[serde(rename = "main-class")]
-    main_class: Option<String>,
-    #[serde(rename = "source-dirs")]
-    source_dirs: Option<Vec<String>>,
-    #[serde(rename = "test-source-dirs")]
-    test_source_dirs: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct RawWorkspace {
-    members: Vec<String>,
-    group: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct RawCatalog {
-    versions: Option<std::collections::BTreeMap<String, String>>,
-    libraries: Option<std::collections::BTreeMap<String, RawCatalogLibrary>>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct RawCatalogLibrary {
-    module: String,
-    version: Option<RawCatalogVersion>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-enum RawCatalogVersion {
-    Literal(String),
-    Detailed { r#ref: String },
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct RawToolchains {
-    java: Option<RawJavaToolchain>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-enum RawJavaToolchain {
-    Version(String),
-    Detailed {
-        version: String,
-        vendor: Option<JdkVendor>,
-    },
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-enum RawDependencySpec {
-    Coords(String),
-    Detailed {
-        coords: Option<String>,
-        path: Option<String>,
-        catalog: Option<String>,
-    },
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct RawFormat {
-    #[serde(rename = "java-style")]
-    java_style: Option<JavaFormatStyle>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct RawLint {
-    #[serde(rename = "pmd-ruleset")]
-    pmd_ruleset: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "kebab-case")]
-pub enum JavaFormatStyle {
-    #[default]
-    Google,
-    Aosp,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct FormatConfig {
-    pub java_style: JavaFormatStyle,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct LintConfig {
-    pub pmd_ruleset: Option<PathBuf>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProjectBuildConfig {
-    pub config_path: PathBuf,
-    pub project_root: PathBuf,
-    pub name: String,
-    pub version: String,
-    pub group: Option<String>,
-    pub module_name: Option<String>,
-    pub main_class: Option<String>,
-    pub source_dirs: Vec<PathBuf>,
-    pub test_source_dirs: Vec<PathBuf>,
-    pub resource_dir: PathBuf,
-    pub dependencies: Vec<String>,
-    pub path_dependencies: Vec<PathBuf>,
-    pub test_dependencies: Vec<String>,
-    pub toolchain: Option<JavaToolchainRequest>,
-    pub format: FormatConfig,
-    pub lint: LintConfig,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkspaceBuildConfig {
-    pub config_path: PathBuf,
-    pub root_dir: PathBuf,
-    pub group: Option<String>,
-    pub toolchain: Option<JavaToolchainRequest>,
-    pub members: Vec<WorkspaceMemberBuildConfig>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkspaceMemberBuildConfig {
-    pub module_name: String,
-    pub project: ProjectBuildConfig,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkspaceDependencySet {
-    pub root_dir: PathBuf,
-    pub members: Vec<WorkspaceMemberDependencies>,
-    pub external_dependencies: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkspaceMemberDependencies {
-    pub module_name: String,
-    pub project_root: PathBuf,
-    pub path_dependencies: Vec<PathBuf>,
-    pub external_dependencies: Vec<String>,
-}
-
-pub fn find_jot_toml(start: &Path) -> Result<Option<PathBuf>, ConfigError> {
-    let mut current = if start.is_dir() {
-        start.to_path_buf()
-    } else {
-        start
-            .parent()
-            .ok_or_else(|| ConfigError::InvalidStartPath(start.to_path_buf()))?
-            .to_path_buf()
-    };
-
-    loop {
-        let candidate = current.join("jot.toml");
-        if candidate.is_file() {
-            return Ok(Some(candidate));
-        }
-
-        if !current.pop() {
-            return Ok(None);
-        }
-    }
-}
-
-pub fn find_workspace_jot_toml(start: &Path) -> Result<Option<PathBuf>, ConfigError> {
-    let mut current = if start.is_dir() {
-        start.to_path_buf()
-    } else {
-        start
-            .parent()
-            .ok_or_else(|| ConfigError::InvalidStartPath(start.to_path_buf()))?
-            .to_path_buf()
-    };
-    let mut found = None;
-
-    loop {
-        let candidate = current.join("jot.toml");
-        if candidate.is_file() {
-            found = Some(candidate);
-        }
-
-        if !current.pop() {
-            return Ok(found);
-        }
-    }
-}
-
-pub fn find_workspace_root_jot_toml(start: &Path) -> Result<Option<PathBuf>, ConfigError> {
-    let mut current = if start.is_dir() {
-        start.to_path_buf()
-    } else {
-        start
-            .parent()
-            .ok_or_else(|| ConfigError::InvalidStartPath(start.to_path_buf()))?
-            .to_path_buf()
-    };
-
-    loop {
-        let candidate = current.join("jot.toml");
-        if candidate.is_file() {
-            let content = fs::read_to_string(&candidate)?;
-            let config: RawConfig = toml::from_str(&content)?;
-            if config.workspace.is_some() {
-                return Ok(Some(candidate));
-            }
-        }
-
-        if !current.pop() {
-            return Ok(None);
-        }
-    }
-}
-
-pub fn read_toolchain_request(start: &Path) -> Result<Option<JavaToolchainRequest>, ConfigError> {
-    let Some(path) = find_jot_toml(start)? else {
-        return Ok(None);
-    };
-
-    let content = fs::read_to_string(&path)?;
-    let config: RawConfig = toml::from_str(&content)?;
-    let inherited = inherited_workspace_context(path.parent().unwrap_or(start))?;
-    Ok(parse_toolchain_request(config.toolchains).or(inherited.and_then(|ctx| ctx.toolchain)))
-}
+use crate::dependencies::{
+    catalog_path_for_root, detect_workspace_path_cycles, extract_dependency_coordinates,
+    extract_path_dependencies, module_name_from_member,
+};
+use crate::models::WorkspaceInheritance;
+use crate::raw::{RawConfig, RawFormat, RawJavaToolchain, RawLint, RawToolchains};
 
 pub fn load_project_build_config(start: &Path) -> Result<ProjectBuildConfig, ConfigError> {
     let Some(config_path) = find_jot_toml(start)? else {
@@ -279,14 +63,14 @@ pub fn load_workspace_build_config(
     let mut members = Vec::new();
     let mut seen_names = std::collections::BTreeSet::new();
 
-    for member in workspace.members {
-        let member_root = root_dir.join(&member);
+    for member in workspace.members.iter() {
+        let member_root = root_dir.join(member);
         let member_config_path = member_root.join("jot.toml");
         if !member_config_path.is_file() {
             return Err(ConfigError::WorkspaceMemberNotFound(member_config_path));
         }
 
-        let module_name = module_name_from_member(&member)?;
+        let module_name = module_name_from_member(member)?;
         if !seen_names.insert(module_name.clone()) {
             return Err(ConfigError::DuplicateWorkspaceModule(module_name));
         }
@@ -494,55 +278,6 @@ fn parse_lint_config(
     config
 }
 
-fn module_name_from_member(member: &str) -> Result<String, ConfigError> {
-    Path::new(member)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
-        .ok_or_else(|| ConfigError::InvalidWorkspaceMember(member.to_owned()))
-}
-
-pub fn read_declared_dependencies(start: &Path) -> Result<Vec<String>, ConfigError> {
-    let Some(path) = find_jot_toml(start)? else {
-        return Ok(Vec::new());
-    };
-
-    let content = fs::read_to_string(&path)?;
-    let config: RawConfig = toml::from_str(&content)?;
-    let inherited = inherited_workspace_context(path.parent().unwrap_or(start))?;
-    let catalog_path = inherited
-        .and_then(|ctx| ctx.catalog_path)
-        .or_else(|| path.parent().and_then(catalog_path_for_root));
-    extract_dependency_coordinates(config.dependencies, catalog_path.as_deref())
-}
-
-pub fn pin_java_toolchain(path: &Path, request: &JavaToolchainRequest) -> Result<(), ConfigError> {
-    let content = fs::read_to_string(path)?;
-    let mut document = content.parse::<DocumentMut>()?;
-
-    let toolchains = document
-        .entry("toolchains")
-        .or_insert(Item::Table(Table::new()));
-    if !toolchains.is_table() {
-        *toolchains = Item::Table(Table::new());
-    }
-
-    let java_item = match request.vendor {
-        Some(vendor) => {
-            let mut table = toml_edit::InlineTable::new();
-            table.insert("version", Value::from(request.version.as_str()));
-            table.insert("vendor", Value::from(vendor.to_string()));
-            value(table)
-        }
-        None => value(request.version.as_str()),
-    };
-    toolchains["java"] = java_item;
-
-    fs::write(path, document.to_string())?;
-    Ok(())
-}
-
 fn parse_toolchain_request(toolchains: Option<RawToolchains>) -> Option<JavaToolchainRequest> {
     let toolchains = toolchains?;
     toolchains.java.map(|java| match java {
@@ -552,268 +287,6 @@ fn parse_toolchain_request(toolchains: Option<RawToolchains>) -> Option<JavaTool
         },
         RawJavaToolchain::Detailed { version, vendor } => JavaToolchainRequest { version, vendor },
     })
-}
-
-fn extract_dependency_coordinates(
-    dependencies: Option<std::collections::BTreeMap<String, RawDependencySpec>>,
-    catalog_path: Option<&Path>,
-) -> Result<Vec<String>, ConfigError> {
-    let mut result = Vec::new();
-    let catalog = load_catalog(catalog_path)?;
-
-    for (name, spec) in dependencies.unwrap_or_default() {
-        match spec {
-            RawDependencySpec::Coords(coords) => result.push(coords),
-            RawDependencySpec::Detailed {
-                coords: Some(coords),
-                ..
-            } => result.push(coords),
-            RawDependencySpec::Detailed { path: Some(_), .. } => {}
-            RawDependencySpec::Detailed {
-                catalog: Some(alias),
-                ..
-            } => {
-                result.push(resolve_catalog_dependency(&name, &alias, catalog.as_ref())?);
-            }
-            RawDependencySpec::Detailed { .. } => {
-                return Err(ConfigError::UnsupportedDependencyDeclaration {
-                    name,
-                    reason: "dependency declaration must include `coords`".to_owned(),
-                });
-            }
-        }
-    }
-
-    Ok(result)
-}
-
-fn catalog_path_for_root(root: &Path) -> Option<PathBuf> {
-    let path = root.join("libs.versions.toml");
-    path.is_file().then_some(path)
-}
-
-fn load_catalog(catalog_path: Option<&Path>) -> Result<Option<RawCatalog>, ConfigError> {
-    let Some(path) = catalog_path else {
-        return Ok(None);
-    };
-
-    let content = fs::read_to_string(path)?;
-    let value = content.parse::<TomlValue>()?;
-    let catalog = value.try_into::<RawCatalog>()?;
-    Ok(Some(catalog))
-}
-
-fn resolve_catalog_dependency(
-    dependency_name: &str,
-    alias: &str,
-    catalog: Option<&RawCatalog>,
-) -> Result<String, ConfigError> {
-    let catalog = catalog.ok_or_else(|| ConfigError::MissingCatalogFile {
-        dependency: dependency_name.to_owned(),
-    })?;
-    let library = catalog
-        .libraries
-        .as_ref()
-        .and_then(|libraries| libraries.get(alias))
-        .ok_or_else(|| ConfigError::MissingCatalogEntry {
-            dependency: dependency_name.to_owned(),
-            alias: alias.to_owned(),
-        })?;
-
-    let version = match library.version.as_ref() {
-        Some(RawCatalogVersion::Literal(version)) => Some(version.clone()),
-        Some(RawCatalogVersion::Detailed { r#ref }) => Some(
-            catalog
-                .versions
-                .as_ref()
-                .and_then(|versions| versions.get(r#ref))
-                .cloned()
-                .ok_or_else(|| ConfigError::MissingCatalogVersion {
-                    dependency: dependency_name.to_owned(),
-                    alias: alias.to_owned(),
-                    version_ref: r#ref.clone(),
-                })?,
-        ),
-        None => None,
-    };
-
-    Ok(match version {
-        Some(version) => format!("{}:{}", library.module, version),
-        None => library.module.clone(),
-    })
-}
-
-fn extract_path_dependencies(
-    dependencies: Option<std::collections::BTreeMap<String, RawDependencySpec>>,
-    project_root: &Path,
-) -> Result<Vec<PathBuf>, ConfigError> {
-    let mut result = Vec::new();
-
-    for (name, spec) in dependencies.unwrap_or_default() {
-        if let RawDependencySpec::Detailed {
-            path: Some(path), ..
-        } = spec
-        {
-            let candidate = project_root.join(path);
-            let canonical = if candidate.exists() {
-                candidate.canonicalize()?
-            } else {
-                return Err(ConfigError::InvalidPathDependency {
-                    name,
-                    path: candidate,
-                    reason: "dependency path does not exist".to_owned(),
-                });
-            };
-
-            if !canonical.is_dir() {
-                return Err(ConfigError::InvalidPathDependency {
-                    name,
-                    path: canonical,
-                    reason: "dependency path must point to a directory".to_owned(),
-                });
-            }
-
-            if !canonical.join("jot.toml").is_file() {
-                return Err(ConfigError::InvalidPathDependency {
-                    name,
-                    path: canonical,
-                    reason: "dependency directory must contain jot.toml".to_owned(),
-                });
-            }
-
-            result.push(canonical);
-        }
-    }
-
-    result.sort();
-    result.dedup();
-    Ok(result)
-}
-
-fn detect_workspace_path_cycles(members: &[WorkspaceMemberBuildConfig]) -> Result<(), ConfigError> {
-    let mut by_root = std::collections::BTreeMap::new();
-    for member in members {
-        by_root.insert(
-            member.project.project_root.clone(),
-            member.module_name.clone(),
-        );
-    }
-
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    enum Mark {
-        Visiting,
-        Done,
-    }
-
-    fn visit(
-        module: &str,
-        graph: &std::collections::BTreeMap<String, Vec<String>>,
-        marks: &mut std::collections::BTreeMap<String, Mark>,
-        stack: &mut Vec<String>,
-    ) -> Result<(), ConfigError> {
-        match marks.get(module).copied() {
-            Some(Mark::Done) => return Ok(()),
-            Some(Mark::Visiting) => {
-                stack.push(module.to_owned());
-                return Err(ConfigError::WorkspacePathDependencyCycle(
-                    stack.join(" -> "),
-                ));
-            }
-            None => {}
-        }
-
-        marks.insert(module.to_owned(), Mark::Visiting);
-        stack.push(module.to_owned());
-
-        if let Some(neighbors) = graph.get(module) {
-            for next in neighbors {
-                visit(next, graph, marks, stack)?;
-            }
-        }
-
-        stack.pop();
-        marks.insert(module.to_owned(), Mark::Done);
-        Ok(())
-    }
-
-    let mut graph = std::collections::BTreeMap::<String, Vec<String>>::new();
-    for member in members {
-        let deps = member
-            .project
-            .path_dependencies
-            .iter()
-            .filter_map(|path| by_root.get(path).cloned())
-            .collect::<Vec<_>>();
-        graph.insert(member.module_name.clone(), deps);
-    }
-
-    let mut marks = std::collections::BTreeMap::<String, Mark>::new();
-    for member in members {
-        let mut stack = Vec::new();
-        visit(&member.module_name, &graph, &mut marks, &mut stack)?;
-    }
-
-    Ok(())
-}
-
-#[derive(Debug, Clone)]
-struct WorkspaceInheritance {
-    group: Option<String>,
-    toolchain: Option<JavaToolchainRequest>,
-    module_name: Option<String>,
-    catalog_path: Option<PathBuf>,
-    format: Option<FormatConfig>,
-    lint: Option<LintConfig>,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ConfigError {
-    #[error("invalid start path: {0}")]
-    InvalidStartPath(PathBuf),
-    #[error("could not find jot.toml starting from {0}")]
-    ProjectConfigNotFound(PathBuf),
-    #[error("missing [project] section in {0}")]
-    MissingProjectSection(PathBuf),
-    #[error("missing [project].{field} in {path}")]
-    MissingProjectField { path: PathBuf, field: &'static str },
-    #[error("io error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("failed to parse jot.toml: {0}")]
-    Toml(#[from] toml::de::Error),
-    #[error("failed to update jot.toml: {0}")]
-    EditToml(#[from] toml_edit::TomlError),
-    #[error("unsupported dependency declaration for `{name}`: {reason}")]
-    UnsupportedDependencyDeclaration { name: String, reason: String },
-    #[error("dependency `{dependency}` uses catalog syntax but no libs.versions.toml was found")]
-    MissingCatalogFile { dependency: String },
-    #[error("dependency `{dependency}` references missing catalog alias `{alias}`")]
-    MissingCatalogEntry { dependency: String, alias: String },
-    #[error("dependency `{dependency}` alias `{alias}` references missing version `{version_ref}`")]
-    MissingCatalogVersion {
-        dependency: String,
-        alias: String,
-        version_ref: String,
-    },
-    #[error("missing [workspace] section in {0}")]
-    MissingWorkspaceSection(PathBuf),
-    #[error("invalid [workspace] config in {path}: {reason}")]
-    InvalidWorkspaceConfig { path: PathBuf, reason: String },
-    #[error("invalid workspace member path `{0}`")]
-    InvalidWorkspaceMember(String),
-    #[error("workspace member config not found: {0}")]
-    WorkspaceMemberNotFound(PathBuf),
-    #[error("duplicate workspace module name `{0}`")]
-    DuplicateWorkspaceModule(String),
-    #[error("invalid path dependency `{name}` at {path}: {reason}")]
-    InvalidPathDependency {
-        name: String,
-        path: PathBuf,
-        reason: String,
-    },
-    #[error("workspace module `{module}` depends on path outside workspace: {dependency}")]
-    PathDependencyOutsideWorkspace { module: String, dependency: PathBuf },
-    #[error("workspace path dependency cycle detected: {0}")]
-    WorkspacePathDependencyCycle(String),
 }
 
 #[cfg(test)]

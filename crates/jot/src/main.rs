@@ -28,11 +28,11 @@ use jot_devtools::{
     LintProcessingError, LintReport, LintViolation,
 };
 use jot_resolver::{MavenResolver, TreeEntry};
+use jot_toolchain::{InstallOptions, JavaToolchainRequest, JdkVendor, ToolchainManager};
 use reqwest::blocking::Client;
 use semver::Version;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use jot_toolchain::{InstallOptions, JavaToolchainRequest, JdkVendor, ToolchainManager};
 use tempfile::{NamedTempFile, TempDir};
 use zip::ZipArchive;
 
@@ -994,13 +994,14 @@ fn handle_self_update(
     let client = Client::builder().build()?;
     let release = fetch_release(&client, &release_repo, requested_version)?;
     let release_version = normalize_version(&release.tag_name);
-    let archive_name = format!("jot-{}-{target_triple}.{archive_extension}", release.tag_name);
+    let archive_name = format!(
+        "jot-{}-{target_triple}.{archive_extension}",
+        release.tag_name
+    );
     let current_version = env!("CARGO_PKG_VERSION");
 
     if check_only {
-        println!(
-            "current: {current_version}\nlatest:  {release_version}\nrepo:    {release_repo}"
-        );
+        println!("current: {current_version}\nlatest:  {release_version}\nrepo:    {release_repo}");
         return Ok(());
     }
 
@@ -1012,9 +1013,7 @@ fn handle_self_update(
     let selection = select_release_assets(&release, &archive_name)?;
 
     if !yes && io::stdin().is_terminal() {
-        println!(
-            "Update jot from {current_version} to {release_version}? [y/N]"
-        );
+        println!("Update jot from {current_version} to {release_version}? [y/N]");
         let mut answer = String::new();
         io::stdin().read_line(&mut answer)?;
         let decision = answer.trim().to_ascii_lowercase();
@@ -1029,7 +1028,11 @@ fn handle_self_update(
         .downloads_dir()
         .join(format!("jot-{release_version}-{CHECKSUM_ASSET_NAME}"));
 
-    download_to_path(&client, &selection.archive.browser_download_url, &archive_path)?;
+    download_to_path(
+        &client,
+        &selection.archive.browser_download_url,
+        &archive_path,
+    )?;
     download_to_path(
         &client,
         &selection.checksums.browser_download_url,
@@ -1199,9 +1202,7 @@ fn fetch_release(
     let endpoint = match version {
         Some(value) => {
             let normalized = normalize_tag(value);
-            format!(
-                "https://api.github.com/repos/{release_repo}/releases/tags/{normalized}"
-            )
+            format!("https://api.github.com/repos/{release_repo}/releases/tags/{normalized}")
         }
         None => format!("https://api.github.com/repos/{release_repo}/releases/latest"),
     };
