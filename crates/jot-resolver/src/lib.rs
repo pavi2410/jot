@@ -131,7 +131,15 @@ impl MavenResolver {
         }];
         let mut seen = HashSet::new();
         seen.insert(root.to_string());
-        self.walk_dependencies(&root, 1, max_depth, &mut seen, &mut entries)?;
+        let inherited_exclusions = BTreeSet::new();
+        self.walk_dependencies(
+            &root,
+            1,
+            max_depth,
+            &inherited_exclusions,
+            &mut seen,
+            &mut entries,
+        )?;
         Ok(entries)
     }
 
@@ -150,7 +158,7 @@ impl MavenResolver {
 
             let tree = self.resolve_dependency_tree(input, max_depth)?;
             for entry in tree.into_iter().skip(1) {
-                if entry.note.as_deref() == Some("unresolved version") {
+                if entry.note.is_some() {
                     continue;
                 }
                 if entry.coordinate.version.is_some() {
@@ -180,6 +188,7 @@ impl MavenResolver {
         coordinate: &MavenCoordinate,
         depth: usize,
         max_depth: usize,
+        inherited_exclusions: &BTreeSet<(String, String)>,
         seen: &mut HashSet<String>,
         out: &mut Vec<TreeEntry>,
     ) -> Result<(), ResolverError> {
@@ -191,6 +200,38 @@ impl MavenResolver {
         for dependency in dependencies {
             let scope = dependency.scope.clone();
             let optional = dependency.optional;
+
+            if inherited_exclusions
+                .contains(&(dependency.group.clone(), dependency.artifact.clone()))
+            {
+                out.push(TreeEntry {
+                    depth,
+                    coordinate: MavenCoordinate {
+                        group: dependency.group,
+                        artifact: dependency.artifact,
+                        version: dependency.version,
+                    },
+                    scope,
+                    optional,
+                    note: Some("excluded".to_owned()),
+                });
+                continue;
+            }
+
+            if optional && depth > 1 {
+                out.push(TreeEntry {
+                    depth,
+                    coordinate: MavenCoordinate {
+                        group: dependency.group,
+                        artifact: dependency.artifact,
+                        version: dependency.version,
+                    },
+                    scope,
+                    optional,
+                    note: Some("optional omitted".to_owned()),
+                });
+                continue;
+            }
 
             let Some(next_coordinate) = dependency.to_coordinate()? else {
                 out.push(TreeEntry {
@@ -227,7 +268,16 @@ impl MavenResolver {
                 optional,
                 note: None,
             });
-            self.walk_dependencies(&next_coordinate, depth + 1, max_depth, seen, out)?;
+            let mut next_exclusions = inherited_exclusions.clone();
+            next_exclusions.extend(dependency.exclusions);
+            self.walk_dependencies(
+                &next_coordinate,
+                depth + 1,
+                max_depth,
+                &next_exclusions,
+                seen,
+                out,
+            )?;
         }
 
         Ok(())
@@ -366,6 +416,7 @@ impl MavenResolver {
                                     .as_ref()
                                     .map(|value| interpolate_value(value, &properties)),
                                 optional: dependency.optional.unwrap_or(false),
+                                exclusions: dependency_exclusions(&dependency, &properties),
                             })
                         })
                         .collect::<Vec<_>>()
@@ -464,6 +515,7 @@ pub struct ResolvedDependency {
     pub version: Option<String>,
     pub scope: Option<String>,
     pub optional: bool,
+    pub exclusions: BTreeSet<(String, String)>,
 }
 
 impl ResolvedDependency {
@@ -600,6 +652,33 @@ fn interpolate_value(input: &str, properties: &BTreeMap<String, String>) -> Stri
     result
 }
 
+fn dependency_exclusions(
+    dependency: &MavenDependency,
+    properties: &BTreeMap<String, String>,
+) -> BTreeSet<(String, String)> {
+    dependency
+        .exclusions
+        .as_ref()
+        .map(|exclusions| {
+            exclusions
+                .exclusion
+                .iter()
+                .filter_map(|entry| {
+                    let group = entry
+                        .group_id
+                        .as_ref()
+                        .map(|value| interpolate_value(value, properties))?;
+                    let artifact = entry
+                        .artifact_id
+                        .as_ref()
+                        .map(|value| interpolate_value(value, properties))?;
+                    Some((group, artifact))
+                })
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default()
+}
+
 fn is_cache_usable(path: &Path, ttl: Option<Duration>) -> Result<bool, ResolverError> {
     let Some(ttl) = ttl else {
         return Ok(true);
@@ -682,6 +761,21 @@ struct MavenDependency {
     packaging: Option<String>,
     scope: Option<String>,
     optional: Option<bool>,
+    exclusions: Option<MavenExclusions>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MavenExclusions {
+    #[serde(default)]
+    exclusion: Vec<MavenExclusion>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MavenExclusion {
+    #[serde(rename = "groupId")]
+    group_id: Option<String>,
+    #[serde(rename = "artifactId")]
+    artifact_id: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -709,14 +803,16 @@ pub enum ResolverError {
 #[cfg(test)]
 mod tests {
     use super::{
-        Lockfile, MavenDependencies, MavenDependencyManagement, MavenParent,
+        Lockfile, MavenDependencies, MavenDependencyManagement, MavenExclusion, MavenExclusions,
+        MavenParent,
         MavenCoordinate, MavenDependency, MavenProject, MavenVersioning, MavenVersions,
-        ResolvedDependency, LockedPackage, is_cache_usable, is_stable_maven_version,
+        ResolvedDependency, LockedPackage, dependency_exclusions, is_cache_usable,
+        is_stable_maven_version,
         is_unresolved_version_expression, interpolate_value,
         resolve_best_version,
     };
     use quick_xml::de::from_str;
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::fs;
     use std::time::Duration;
     use tempfile::tempdir;
@@ -821,6 +917,7 @@ mod tests {
                     version: Some("1.0.0".into()),
                     scope: None,
                     optional: false,
+                    exclusions: BTreeSet::new(),
                 };
                 assert_eq!(
                     literal
@@ -837,6 +934,7 @@ mod tests {
                     version: Some("${demo.version}".into()),
                     scope: None,
                     optional: false,
+                    exclusions: BTreeSet::new(),
                 };
                 assert!(managed.to_coordinate().expect("managed version").is_none());
             }
@@ -914,6 +1012,7 @@ mod tests {
                                 packaging: None,
                                 scope: None,
                                 optional: None,
+                                exclusions: None,
                             }],
                         },
                     }),
@@ -925,6 +1024,7 @@ mod tests {
                             packaging: None,
                             scope: None,
                             optional: None,
+                            exclusions: None,
                         }],
                     }),
                 };
@@ -940,5 +1040,30 @@ mod tests {
                         .as_deref(),
                     Some("2.0.16")
                 );
+            }
+
+            #[test]
+            fn parses_dependency_exclusions_and_interpolates_values() {
+                let dependency = MavenDependency {
+                    group_id: Some("org.example".to_owned()),
+                    artifact_id: Some("consumer".to_owned()),
+                    version: Some("1.0.0".to_owned()),
+                    packaging: None,
+                    scope: None,
+                    optional: None,
+                    exclusions: Some(MavenExclusions {
+                        exclusion: vec![MavenExclusion {
+                            group_id: Some("${excluded.group}".to_owned()),
+                            artifact_id: Some("${excluded.artifact}".to_owned()),
+                        }],
+                    }),
+                };
+
+                let mut properties = BTreeMap::new();
+                properties.insert("excluded.group".to_owned(), "org.slf4j".to_owned());
+                properties.insert("excluded.artifact".to_owned(), "slf4j-api".to_owned());
+
+                let exclusions = dependency_exclusions(&dependency, &properties);
+                assert!(exclusions.contains(&("org.slf4j".to_owned(), "slf4j-api".to_owned())));
             }
 }
