@@ -251,13 +251,13 @@ fn render_java_cli(project_name: &str, _group: &str, package_name: &str) -> Vec<
         (
             PathBuf::from("jot.toml"),
             format!(
-                "[project]\nname = \"{project_name}\"\nversion = \"0.1.0\"\nmain-class = \"{package_name}.CliMain\"\n\n[toolchains]\njava = \"21\"\n\n[test-dependencies]\njunit = \"org.junit.jupiter:junit-jupiter:5.11.0\"\n",
+                "[project]\nname = \"{project_name}\"\nversion = \"0.1.0\"\nmain-class = \"{package_name}.CliMain\"\n\n[toolchains]\njava = \"21\"\n\n[dependencies]\npicocli = \"info.picocli:picocli:4.7.6\"\n\n[test-dependencies]\njunit = \"org.junit.jupiter:junit-jupiter:5.11.0\"\n",
             ),
         ),
         (
             PathBuf::from("README.md"),
             format!(
-                "# {project_name}\n\nCLI sample for jot.\n\n## Commands\n\n```bash\njot build\njot test\njot run -- --help\n```\n"
+                "# {project_name}\n\nCLI sample for jot using Picocli.\n\n## Commands\n\n```bash\njot build\njot test\njot run -- --help\njot run -- Ada\n```\n"
             ),
         ),
         (
@@ -267,7 +267,7 @@ fn render_java_cli(project_name: &str, _group: &str, package_name: &str) -> Vec<
         (
             PathBuf::from(format!("src/main/java/{package_path}/CliMain.java")),
             format!(
-                "package {package_name};\n\npublic final class CliMain {{\n    public static void main(String[] args) {{\n        if (args.length > 0 && \"--help\".equals(args[0])) {{\n            System.out.println(\"usage: {project_name} [name]\");\n            return;\n        }}\n\n        String name = args.length > 0 ? args[0] : \"jot\";\n        System.out.println(\"hello from cli, \" + name);\n    }}\n}}\n"
+                "package {package_name};\n\nimport picocli.CommandLine;\nimport picocli.CommandLine.Command;\nimport picocli.CommandLine.Parameters;\n\n@Command(name = \"{project_name}\", mixinStandardHelpOptions = true, description = \"Greets the requested user.\")\npublic final class CliMain implements Runnable {{\n    @Parameters(index = \"0\", defaultValue = \"jot\", description = \"Name to greet.\")\n    private String name;\n\n    public static void main(String[] args) {{\n        int exitCode = new CommandLine(new CliMain()).execute(args);\n        System.exit(exitCode);\n    }}\n\n    @Override\n    public void run() {{\n        System.out.println(\"hello from cli, \" + name);\n    }}\n}}\n"
             ),
         ),
         (

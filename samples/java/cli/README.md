@@ -1,6 +1,6 @@
 # cli
 
-CLI sample for jot.
+CLI sample for jot using Picocli.
 
 ## Commands
 
@@ -8,4 +8,5 @@ CLI sample for jot.
 jot build
 jot test
 jot run -- --help
+jot run -- Ada
 ```
