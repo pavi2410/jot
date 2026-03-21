@@ -9,6 +9,8 @@ use toml_edit::{DocumentMut, Item, Table, Value, value};
 struct RawConfig {
     project: Option<RawProject>,
     dependencies: Option<std::collections::BTreeMap<String, RawDependencySpec>>,
+    #[serde(rename = "test-dependencies")]
+    test_dependencies: Option<std::collections::BTreeMap<String, RawDependencySpec>>,
     toolchains: Option<RawToolchains>,
 }
 
@@ -20,6 +22,8 @@ struct RawProject {
     main_class: Option<String>,
     #[serde(rename = "source-dirs")]
     source_dirs: Option<Vec<String>>,
+    #[serde(rename = "test-source-dirs")]
+    test_source_dirs: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -56,8 +60,10 @@ pub struct ProjectBuildConfig {
     pub version: String,
     pub main_class: Option<String>,
     pub source_dirs: Vec<PathBuf>,
+    pub test_source_dirs: Vec<PathBuf>,
     pub resource_dir: PathBuf,
     pub dependencies: Vec<String>,
+    pub test_dependencies: Vec<String>,
     pub toolchain: Option<JavaToolchainRequest>,
 }
 
@@ -134,6 +140,12 @@ pub fn load_project_build_config(start: &Path) -> Result<ProjectBuildConfig, Con
         .into_iter()
         .map(|value| project_root.join(value))
         .collect();
+    let test_source_dirs = project
+        .test_source_dirs
+        .unwrap_or_else(|| vec!["src/test/java".to_owned()])
+        .into_iter()
+        .map(|value| project_root.join(value))
+        .collect();
 
     Ok(ProjectBuildConfig {
         config_path: config_path.clone(),
@@ -147,8 +159,10 @@ pub fn load_project_build_config(start: &Path) -> Result<ProjectBuildConfig, Con
             })?,
         main_class: project.main_class,
         source_dirs,
+        test_source_dirs,
         resource_dir: project_root.join("src/main/resources"),
         dependencies: extract_dependency_coordinates(config.dependencies)?,
+        test_dependencies: extract_dependency_coordinates(config.test_dependencies)?,
         toolchain: parse_toolchain_request(config.toolchains),
     })
 }
@@ -368,8 +382,10 @@ mod tests {
         assert_eq!(config.version, "1.2.3");
         assert_eq!(config.main_class.as_deref(), Some("dev.demo.Main"));
         assert_eq!(config.source_dirs, vec![temp.path().join("src/main/java")]);
+        assert_eq!(config.test_source_dirs, vec![temp.path().join("src/test/java")]);
         assert_eq!(config.resource_dir, temp.path().join("src/main/resources"));
         assert_eq!(config.dependencies, vec!["org.slf4j:slf4j-api:2.0.16".to_owned()]);
+        assert_eq!(config.test_dependencies, Vec::<String>::new());
         assert_eq!(config.toolchain.expect("toolchain").version, "21");
     }
 }

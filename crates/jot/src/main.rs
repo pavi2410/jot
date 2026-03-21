@@ -45,6 +45,7 @@ enum Command {
         #[arg(last = true)]
         args: Vec<String>,
     },
+    Test,
     Java(JavaCommand),
 }
 
@@ -96,6 +97,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         } => handle_lock(&dependencies, depth, &output)?,
         Command::Resolve { dependency, deps } => handle_resolve(&dependency, deps)?,
         Command::Run { args } => handle_run(paths, manager, &args)?,
+        Command::Test => handle_test(paths, manager)?,
         Command::Tree { dependency, depth } => handle_tree(&dependency, depth)?,
         Command::Java(command) => handle_java(command, manager, paths)?,
     }
@@ -193,6 +195,21 @@ fn handle_run(
     let resolver = MavenResolver::new(paths)?;
     let builder = JavaProjectBuilder::new(resolver, manager);
     builder.run(&std::env::current_dir()?, args)?;
+    Ok(())
+}
+
+fn handle_test(
+    paths: JotPaths,
+    manager: ToolchainManager,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let resolver = MavenResolver::new(paths)?;
+    let builder = JavaProjectBuilder::new(resolver, manager);
+    let output = builder.test(&std::env::current_dir()?)?;
+    if output.tests_found {
+        println!("test execution completed for {}", output.project.name);
+    } else {
+        println!("no tests found for {}", output.project.name);
+    }
     Ok(())
 }
 

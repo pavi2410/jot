@@ -11,6 +11,8 @@ use jot_resolver::{MavenResolver, ResolvedArtifact};
 use jot_toolchain::{InstalledJdk, ToolchainManager};
 
 const DEFAULT_RESOLVE_DEPTH: usize = 8;
+const DEFAULT_JUNIT_CONSOLE_COORD: &str =
+	"org.junit.platform:junit-platform-console-standalone:6.0.3";
 
 #[derive(Debug)]
 pub struct JavaProjectBuilder {
@@ -45,7 +47,18 @@ impl JavaProjectBuilder {
 			return Err(BuildError::NoJavaSources(project.project_root.clone()));
 		}
 
-		compile_sources(&installed_jdk, &project, &dependencies, &classes_dir, &source_files)?;
+		let dependency_paths = dependencies
+			.iter()
+			.map(|artifact| artifact.path.clone())
+			.collect::<Vec<_>>();
+		compile_sources(
+			&installed_jdk,
+			project.toolchain.as_ref().map(|value| value.version.as_str()),
+			&project.project_root,
+			&dependency_paths,
+			&classes_dir,
+			&source_files,
+		)?;
 		copy_resources(&project.resource_dir, &classes_dir)?;
 		let jar_path = target_dir.join(format!("{}-{}.jar", project.name, project.version));
 		package_jar(&installed_jdk, &classes_dir, &jar_path, project.main_class.as_deref())?;
@@ -90,6 +103,106 @@ impl JavaProjectBuilder {
 
 		Ok(output)
 	}
+
+	pub fn test(&self, start: &Path) -> Result<TestOutput, BuildError> {
+		let project = load_project_build_config(start)?;
+		let toolchain_request = project
+			.toolchain
+			.clone()
+			.ok_or_else(|| BuildError::MissingJavaToolchain(project.config_path.clone()))?;
+		let installed_jdk = self.toolchains.ensure_installed(&toolchain_request)?;
+
+		let compile_dependencies = self
+			.resolver
+			.resolve_artifacts(&project.dependencies, DEFAULT_RESOLVE_DEPTH)?;
+
+		let mut test_dependency_inputs = project.test_dependencies.clone();
+		test_dependency_inputs.push(DEFAULT_JUNIT_CONSOLE_COORD.to_owned());
+		let test_dependencies = self
+			.resolver
+			.resolve_artifacts(&test_dependency_inputs, DEFAULT_RESOLVE_DEPTH)?;
+
+		let target_dir = project.project_root.join("target");
+		let classes_dir = target_dir.join("classes");
+		prepare_directory(&classes_dir)?;
+		let main_sources = collect_java_sources(&project.source_dirs)?;
+		if !main_sources.is_empty() {
+			let compile_dependency_paths = compile_dependencies
+				.iter()
+				.map(|item| item.path.clone())
+				.collect::<Vec<_>>();
+			compile_sources(
+				&installed_jdk,
+				project.toolchain.as_ref().map(|value| value.version.as_str()),
+				&project.project_root,
+				&compile_dependency_paths,
+				&classes_dir,
+				&main_sources,
+			)?;
+			copy_resources(&project.resource_dir, &classes_dir)?;
+		}
+
+		let test_sources = collect_java_sources(&project.test_source_dirs)?;
+		if test_sources.is_empty() {
+			return Ok(TestOutput {
+				project,
+				tests_found: false,
+			});
+		}
+
+		let test_classes_dir = target_dir.join("test-classes");
+		prepare_directory(&test_classes_dir)?;
+		let mut test_compile_classpath = vec![classes_dir.clone()];
+		test_compile_classpath.extend(compile_dependencies.iter().map(|item| item.path.clone()));
+		test_compile_classpath.extend(test_dependencies.iter().map(|item| item.path.clone()));
+		compile_sources(
+			&installed_jdk,
+			project.toolchain.as_ref().map(|value| value.version.as_str()),
+			&project.project_root,
+			&test_compile_classpath,
+			&test_classes_dir,
+			&test_sources,
+		)?;
+
+		let console_jar = test_dependencies
+			.iter()
+			.find(|item| {
+				item.coordinate.group == "org.junit.platform"
+					&& item.coordinate.artifact == "junit-platform-console-standalone"
+			})
+			.map(|item| item.path.clone())
+			.ok_or(BuildError::MissingJUnitConsole)?;
+
+		let mut runtime_classpath = vec![classes_dir, test_classes_dir];
+		runtime_classpath.extend(compile_dependencies.iter().map(|item| item.path.clone()));
+		runtime_classpath.extend(test_dependencies.iter().map(|item| item.path.clone()));
+		let classpath = join_paths_for_classpath(&runtime_classpath)?;
+
+		let status = Command::new(installed_jdk.java_binary())
+			.current_dir(&project.project_root)
+			.arg("-jar")
+			.arg(console_jar)
+			.arg("execute")
+			.arg("--scan-class-path")
+			.arg("--class-path")
+			.arg(classpath)
+			.stdin(Stdio::inherit())
+			.stdout(Stdio::inherit())
+			.stderr(Stdio::inherit())
+			.status()?;
+
+		if !status.success() {
+			return Err(BuildError::ProcessExit {
+				tool: "junit",
+				code: status.code(),
+			});
+		}
+
+		Ok(TestOutput {
+			project,
+			tests_found: true,
+		})
+	}
 }
 
 #[derive(Debug)]
@@ -101,36 +214,33 @@ pub struct BuildOutput {
 	pub jar_path: PathBuf,
 }
 
+#[derive(Debug)]
+pub struct TestOutput {
+	pub project: ProjectBuildConfig,
+	pub tests_found: bool,
+}
+
 fn compile_sources(
 	installed_jdk: &InstalledJdk,
-	project: &ProjectBuildConfig,
-	dependencies: &[ResolvedArtifact],
+	toolchain_version: Option<&str>,
+	project_root: &Path,
+	classpath_paths: &[PathBuf],
 	classes_dir: &Path,
 	source_files: &[PathBuf],
 ) -> Result<(), BuildError> {
 	let mut command = Command::new(installed_jdk.javac_binary());
 	command
-		.current_dir(&project.project_root)
+		.current_dir(project_root)
 		.arg("-d")
 		.arg(classes_dir);
 
-	if !dependencies.is_empty() {
-		let dependency_paths = dependencies
-			.iter()
-			.map(|artifact| artifact.path.clone())
-			.collect::<Vec<_>>();
+	if !classpath_paths.is_empty() {
 		command
 			.arg("-classpath")
-			.arg(join_paths_for_classpath(&dependency_paths)?);
+			.arg(join_paths_for_classpath(classpath_paths)?);
 	}
 
-	if let Some(release) = java_release_flag(
-		&project
-			.toolchain
-			.as_ref()
-			.map(|toolchain| toolchain.version.as_str())
-			.unwrap_or_default(),
-	) {
+	if let Some(release) = java_release_flag(toolchain_version.unwrap_or_default()) {
 		command.arg("--release").arg(release);
 	}
 
@@ -412,6 +522,8 @@ pub enum BuildError {
 	MissingMainClass(PathBuf),
 	#[error("no Java source files found under {0}")]
 	NoJavaSources(PathBuf),
+	#[error("could not locate junit-platform-console-standalone in resolved test dependencies")]
+	MissingJUnitConsole,
 	#[error("{tool} failed: {stderr}")]
 	CommandFailed { tool: &'static str, stderr: String },
 	#[error("{tool} exited with status {code:?}")]
