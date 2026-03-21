@@ -84,6 +84,18 @@ impl InstalledJdk {
             || self.release_name.starts_with(&format!("jdk-{expected}"))
             || self.semver.starts_with(expected)
     }
+
+    pub fn java_binary(&self) -> PathBuf {
+        binary_path(&self.java_home, "java")
+    }
+
+    pub fn javac_binary(&self) -> PathBuf {
+        binary_path(&self.java_home, "javac")
+    }
+
+    pub fn jar_binary(&self) -> PathBuf {
+        binary_path(&self.java_home, "jar")
+    }
 }
 
 pub trait ToolchainRequest {
@@ -208,6 +220,21 @@ impl ToolchainManager {
 
         installations.sort_by(|left, right| left.release_name.cmp(&right.release_name));
         Ok(installations)
+    }
+
+    pub fn ensure_installed(
+        &self,
+        request: &impl ToolchainRequest,
+    ) -> Result<InstalledJdk, ToolchainError> {
+        if let Some(existing) = self
+            .list_installed()?
+            .into_iter()
+            .find(|installation| installation.matches_request(request))
+        {
+            return Ok(existing);
+        }
+
+        self.install(request, InstallOptions::default())
     }
 
     pub fn java_env(
@@ -520,7 +547,15 @@ fn is_cache_fresh(fetched_at: OffsetDateTime, now: OffsetDateTime, ttl: Duration
 }
 
 fn java_binary_path(java_home: &Path) -> PathBuf {
-    let executable = if cfg!(windows) { "java.exe" } else { "java" };
+    binary_path(java_home, "java")
+}
+
+fn binary_path(java_home: &Path, tool: &str) -> PathBuf {
+    let executable = if cfg!(windows) {
+        format!("{tool}.exe")
+    } else {
+        tool.to_owned()
+    };
     java_home.join("bin").join(executable)
 }
 

@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use jot_builder::JavaProjectBuilder;
 use jot_cache::JotPaths;
 use jot_config::{
     find_workspace_jot_toml, pin_java_toolchain, read_declared_dependencies,
@@ -18,6 +19,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    Build,
     Clean {
         #[arg(long)]
         global: bool,
@@ -38,6 +40,10 @@ enum Command {
         dependency: String,
         #[arg(long, default_value_t = 3)]
         depth: usize,
+    },
+    Run {
+        #[arg(last = true)]
+        args: Vec<String>,
     },
     Java(JavaCommand),
 }
@@ -81,6 +87,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let manager = ToolchainManager::new(paths.clone())?;
 
     match cli.command {
+        Command::Build => handle_build(paths, manager)?,
         Command::Clean { global } => handle_clean(global, paths)?,
         Command::Lock {
             dependencies,
@@ -88,6 +95,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             output,
         } => handle_lock(&dependencies, depth, &output)?,
         Command::Resolve { dependency, deps } => handle_resolve(&dependency, deps)?,
+        Command::Run { args } => handle_run(paths, manager, &args)?,
         Command::Tree { dependency, depth } => handle_tree(&dependency, depth)?,
         Command::Java(command) => handle_java(command, manager, paths)?,
     }
@@ -158,6 +166,33 @@ fn handle_tree(dependency: &str, depth: usize) -> Result<(), Box<dyn std::error:
     for entry in entries {
         print_tree_entry(&entry);
     }
+    Ok(())
+}
+
+fn handle_build(
+    paths: JotPaths,
+    manager: ToolchainManager,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let resolver = MavenResolver::new(paths)?;
+    let builder = JavaProjectBuilder::new(resolver, manager);
+    let output = builder.build(&std::env::current_dir()?)?;
+    println!(
+        "built {} {} at {}",
+        output.project.name,
+        output.project.version,
+        output.jar_path.display()
+    );
+    Ok(())
+}
+
+fn handle_run(
+    paths: JotPaths,
+    manager: ToolchainManager,
+    args: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let resolver = MavenResolver::new(paths)?;
+    let builder = JavaProjectBuilder::new(resolver, manager);
+    builder.run(&std::env::current_dir()?, args)?;
     Ok(())
 }
 

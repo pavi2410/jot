@@ -1,13 +1,13 @@
 [package]
-name = "jot"
+name = "jot-builder"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-clap.workspace = true
-jot-builder = { path = "../jot-builder" }
-jot-cache = { path = "../jot-cache" }
 jot-config = { path = "../jot-config" }
 jot-resolver = { path = "../jot-resolver" }
 jot-toolchain = { path = "../jot-toolchain" }
-toml.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

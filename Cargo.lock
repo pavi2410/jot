@@ -762,11 +762,23 @@ name = "jot"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "jot-builder",
  "jot-cache",
  "jot-config",
  "jot-resolver",
  "jot-toolchain",
  "toml",
+]
+
+[[package]]
+name = "jot-builder"
+version = "0.1.0"
+dependencies = [
+ "jot-config",
+ "jot-resolver",
+ "jot-toolchain",
+ "tempfile",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

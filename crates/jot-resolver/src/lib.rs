@@ -21,6 +21,12 @@ pub struct MavenCoordinate {
     pub classifier: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedArtifact {
+	pub coordinate: MavenCoordinate,
+	pub path: PathBuf,
+}
+
 impl MavenCoordinate {
     pub fn parse(input: &str) -> Result<Self, ResolverError> {
         let parts = input.split(':').collect::<Vec<_>>();
@@ -241,6 +247,42 @@ impl MavenResolver {
                 })
                 .collect::<Result<Vec<_>, ResolverError>>()?,
         })
+    }
+
+    pub fn resolve_artifacts(
+        &self,
+        inputs: &[String],
+        max_depth: usize,
+    ) -> Result<Vec<ResolvedArtifact>, ResolverError> {
+        let mut packages = BTreeSet::new();
+
+        for input in inputs {
+            let root = self.resolve_coordinate(input)?;
+            packages.insert(root);
+
+            for entry in self.resolve_dependency_tree(input, max_depth)?.into_iter().skip(1) {
+                if entry.note.is_some() || entry.coordinate.version.is_none() {
+                    continue;
+                }
+
+                if include_classpath_scope(entry.scope.as_deref()) {
+                    packages.insert(entry.coordinate);
+                }
+            }
+        }
+
+        packages
+            .into_iter()
+            .map(|coordinate| {
+                let path = self.cache_artifact(&coordinate)?;
+                Ok(ResolvedArtifact { coordinate, path })
+            })
+            .collect()
+    }
+
+    pub fn cache_artifact(&self, coordinate: &MavenCoordinate) -> Result<PathBuf, ResolverError> {
+        self.cache_artifact_and_hash(coordinate)?;
+        self.artifact_cache_path(coordinate)
     }
 
     fn walk_dependencies(
@@ -953,6 +995,10 @@ fn is_stable_maven_version(version: &str) -> bool {
         && !lowered.contains("rc")
         && !lowered.contains("milestone")
         && !lowered.contains("m")
+}
+
+fn include_classpath_scope(scope: Option<&str>) -> bool {
+	!matches!(scope, Some("test" | "provided" | "import"))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

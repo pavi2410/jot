@@ -1,6 +1,7 @@
 [workspace]
 members = [
 	"crates/jot",
+	"crates/jot-builder",
 	"crates/jot-cache",
 	"crates/jot-config",
 	"crates/jot-platform",

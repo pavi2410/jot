@@ -7,8 +7,19 @@ use toml_edit::{DocumentMut, Item, Table, Value, value};
 
 #[derive(Debug, Deserialize)]
 struct RawConfig {
+    project: Option<RawProject>,
     dependencies: Option<std::collections::BTreeMap<String, RawDependencySpec>>,
     toolchains: Option<RawToolchains>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawProject {
+    name: String,
+    version: Option<String>,
+    #[serde(rename = "main-class")]
+    main_class: Option<String>,
+    #[serde(rename = "source-dirs")]
+    source_dirs: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -35,6 +46,19 @@ enum RawDependencySpec {
         path: Option<String>,
         catalog: Option<String>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectBuildConfig {
+    pub config_path: PathBuf,
+    pub project_root: PathBuf,
+    pub name: String,
+    pub version: String,
+    pub main_class: Option<String>,
+    pub source_dirs: Vec<PathBuf>,
+    pub resource_dir: PathBuf,
+    pub dependencies: Vec<String>,
+    pub toolchain: Option<JavaToolchainRequest>,
 }
 
 pub fn find_jot_toml(start: &Path) -> Result<Option<PathBuf>, ConfigError> {
@@ -87,20 +111,46 @@ pub fn read_toolchain_request(start: &Path) -> Result<Option<JavaToolchainReques
 
     let content = fs::read_to_string(path)?;
     let config: RawConfig = toml::from_str(&content)?;
-    let Some(toolchains) = config.toolchains else {
-        return Ok(None);
+    Ok(parse_toolchain_request(config.toolchains))
+}
+
+pub fn load_project_build_config(start: &Path) -> Result<ProjectBuildConfig, ConfigError> {
+    let Some(config_path) = find_jot_toml(start)? else {
+        return Err(ConfigError::ProjectConfigNotFound(start.to_path_buf()));
     };
 
-    Ok(toolchains.java.map(|java| match java {
-        RawJavaToolchain::Version(version) => JavaToolchainRequest {
-            version,
-            vendor: None,
-        },
-        RawJavaToolchain::Detailed { version, vendor } => JavaToolchainRequest {
-            version,
-            vendor,
-        },
-    }))
+    let project_root = config_path
+        .parent()
+        .ok_or_else(|| ConfigError::InvalidStartPath(config_path.clone()))?
+        .to_path_buf();
+    let content = fs::read_to_string(&config_path)?;
+    let config: RawConfig = toml::from_str(&content)?;
+    let project = config
+        .project
+        .ok_or_else(|| ConfigError::MissingProjectSection(config_path.clone()))?;
+    let source_dirs = project
+        .source_dirs
+        .unwrap_or_else(|| vec!["src/main/java".to_owned()])
+        .into_iter()
+        .map(|value| project_root.join(value))
+        .collect();
+
+    Ok(ProjectBuildConfig {
+        config_path: config_path.clone(),
+        project_root: project_root.clone(),
+        name: project.name,
+        version: project
+            .version
+            .ok_or_else(|| ConfigError::MissingProjectField {
+                path: config_path.clone(),
+                field: "version",
+            })?,
+        main_class: project.main_class,
+        source_dirs,
+        resource_dir: project_root.join("src/main/resources"),
+        dependencies: extract_dependency_coordinates(config.dependencies)?,
+        toolchain: parse_toolchain_request(config.toolchains),
+    })
 }
 
 pub fn read_declared_dependencies(start: &Path) -> Result<Vec<String>, ConfigError> {
@@ -110,37 +160,7 @@ pub fn read_declared_dependencies(start: &Path) -> Result<Vec<String>, ConfigErr
 
     let content = fs::read_to_string(path)?;
     let config: RawConfig = toml::from_str(&content)?;
-    let mut dependencies = Vec::new();
-
-    for (name, spec) in config.dependencies.unwrap_or_default() {
-        match spec {
-            RawDependencySpec::Coords(coords) => dependencies.push(coords),
-            RawDependencySpec::Detailed {
-                coords: Some(coords), ..
-            } => dependencies.push(coords),
-            RawDependencySpec::Detailed {
-                path: Some(_), ..
-            } => {}
-            RawDependencySpec::Detailed {
-                catalog: Some(_), ..
-            } => {
-                return Err(ConfigError::UnsupportedDependencyDeclaration {
-                    name,
-                    reason: "catalog-based dependencies are not supported by `jot lock` yet"
-                        .to_owned(),
-                });
-            }
-            RawDependencySpec::Detailed { .. } => {
-                return Err(ConfigError::UnsupportedDependencyDeclaration {
-                    name,
-                    reason: "dependency declaration must include `coords` for `jot lock`"
-                        .to_owned(),
-                });
-            }
-        }
-    }
-
-    Ok(dependencies)
+    extract_dependency_coordinates(config.dependencies)
 }
 
 pub fn pin_java_toolchain(path: &Path, request: &JavaToolchainRequest) -> Result<(), ConfigError> {
@@ -167,10 +187,66 @@ pub fn pin_java_toolchain(path: &Path, request: &JavaToolchainRequest) -> Result
     Ok(())
 }
 
+fn parse_toolchain_request(
+    toolchains: Option<RawToolchains>,
+) -> Option<JavaToolchainRequest> {
+    let toolchains = toolchains?;
+    toolchains.java.map(|java| match java {
+        RawJavaToolchain::Version(version) => JavaToolchainRequest {
+            version,
+            vendor: None,
+        },
+        RawJavaToolchain::Detailed { version, vendor } => JavaToolchainRequest {
+            version,
+            vendor,
+        },
+    })
+}
+
+fn extract_dependency_coordinates(
+    dependencies: Option<std::collections::BTreeMap<String, RawDependencySpec>>,
+) -> Result<Vec<String>, ConfigError> {
+    let mut result = Vec::new();
+
+    for (name, spec) in dependencies.unwrap_or_default() {
+        match spec {
+            RawDependencySpec::Coords(coords) => result.push(coords),
+            RawDependencySpec::Detailed {
+                coords: Some(coords), ..
+            } => result.push(coords),
+            RawDependencySpec::Detailed {
+                path: Some(_), ..
+            } => {}
+            RawDependencySpec::Detailed {
+                catalog: Some(_), ..
+            } => {
+                return Err(ConfigError::UnsupportedDependencyDeclaration {
+                    name,
+                    reason: "catalog-based dependencies are not supported yet".to_owned(),
+                });
+            }
+            RawDependencySpec::Detailed { .. } => {
+                return Err(ConfigError::UnsupportedDependencyDeclaration {
+                    name,
+                    reason: "dependency declaration must include `coords`".to_owned(),
+                });
+            }
+        }
+    }
+
+    Ok(result)
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("invalid start path: {0}")]
     InvalidStartPath(PathBuf),
+    #[error("could not find jot.toml starting from {0}")]
+    ProjectConfigNotFound(PathBuf),
+    #[error("missing [project] section in {0}")]
+    MissingProjectSection(PathBuf),
+    #[error("missing [project].{field} in {path}")]
+    MissingProjectField { path: PathBuf, field: &'static str },
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("failed to parse jot.toml: {0}")]
@@ -184,8 +260,8 @@ pub enum ConfigError {
 #[cfg(test)]
 mod tests {
     use super::{
-        JavaToolchainRequest, find_jot_toml, find_workspace_jot_toml, pin_java_toolchain,
-        read_declared_dependencies, read_toolchain_request,
+		JavaToolchainRequest, find_jot_toml, find_workspace_jot_toml, load_project_build_config,
+		pin_java_toolchain, read_declared_dependencies, read_toolchain_request,
     };
     use jot_toolchain::JdkVendor;
     use std::fs;
@@ -274,6 +350,26 @@ mod tests {
         let error = read_declared_dependencies(&config_path).expect_err("catalog should fail");
         assert!(error
             .to_string()
-            .contains("catalog-based dependencies are not supported by `jot lock` yet"));
+            .contains("catalog-based dependencies are not supported yet"));
+    }
+
+    #[test]
+    fn loads_project_build_config_with_defaults() {
+        let temp = tempdir().expect("tempdir");
+        let config_path = temp.path().join("jot.toml");
+        fs::write(
+            &config_path,
+            "[project]\nname = \"demo\"\nversion = \"1.2.3\"\nmain-class = \"dev.demo.Main\"\n\n[toolchains]\njava = \"21\"\n\n[dependencies]\nslf4j = \"org.slf4j:slf4j-api:2.0.16\"\n",
+        )
+        .expect("write config");
+
+        let config = load_project_build_config(temp.path()).expect("load project config");
+        assert_eq!(config.name, "demo");
+        assert_eq!(config.version, "1.2.3");
+        assert_eq!(config.main_class.as_deref(), Some("dev.demo.Main"));
+        assert_eq!(config.source_dirs, vec![temp.path().join("src/main/java")]);
+        assert_eq!(config.resource_dir, temp.path().join("src/main/resources"));
+        assert_eq!(config.dependencies, vec!["org.slf4j:slf4j-api:2.0.16".to_owned()]);
+        assert_eq!(config.toolchain.expect("toolchain").version, "21");
     }
 }
