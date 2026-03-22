@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
+use crate::commands::render::{format_tree_entry, print_sharp_table};
 use crate::utils::nearest_project_file;
 use crate::utils::write_locked_file;
 
@@ -400,52 +401,48 @@ fn same_package(left: &MavenCoordinate, right: &MavenCoordinate) -> bool {
 }
 
 fn print_deps_table(rows: &[(DirectDependencyRow, String)], include_module_column: bool) {
-    use tabled::{builder::Builder, settings::Style};
-
-    let mut builder = Builder::default();
-    if include_module_column {
-        builder.push_record(["module", "name", "coordinate", "version", "scope"]);
+    let headers = if include_module_column {
+        vec!["module", "name", "coordinate", "version", "scope"]
     } else {
-        builder.push_record(["name", "coordinate", "version", "scope"]);
-    }
+        vec!["name", "coordinate", "version", "scope"]
+    };
 
+    let mut table_rows = Vec::with_capacity(rows.len());
     for (row, version) in rows {
         if include_module_column {
-            builder.push_record([
-                row.module.as_deref().unwrap_or("-"),
-                &row.name,
-                &row.coordinate,
-                version,
-                row.scope,
+            table_rows.push(vec![
+                row.module.as_deref().unwrap_or("-").to_owned(),
+                row.name.clone(),
+                row.coordinate.clone(),
+                version.clone(),
+                row.scope.to_owned(),
             ]);
         } else {
-            builder.push_record([
-                row.name.as_str(),
-                row.coordinate.as_str(),
-                version,
-                row.scope,
+            table_rows.push(vec![
+                row.name.clone(),
+                row.coordinate.clone(),
+                version.clone(),
+                row.scope.to_owned(),
             ]);
         }
     }
 
-    println!("{}", builder.build().with(Style::sharp()));
+    print_sharp_table(&headers, &table_rows);
 }
 
 fn print_outdated_table(rows: &[(String, String, String, String)]) {
-    use tabled::{builder::Builder, settings::Style};
-
-    let mut builder = Builder::default();
-    builder.push_record(["name", "current", "latest", "status"]);
+    let headers = ["name", "current", "latest", "status"];
+    let mut table_rows = Vec::with_capacity(rows.len());
     for (name, current, latest, status) in rows {
-        builder.push_record([
-            name.as_str(),
-            current.as_str(),
-            latest.as_str(),
-            status.as_str(),
+        table_rows.push(vec![
+            name.to_owned(),
+            current.to_owned(),
+            latest.to_owned(),
+            status.to_owned(),
         ]);
     }
 
-    println!("{}", builder.build().with(Style::sharp()));
+    print_sharp_table(&headers, &table_rows);
 }
 
 fn select_packages_for_module(
@@ -504,28 +501,7 @@ fn select_packages_for_module(
 }
 
 fn print_tree_entry(entry: &TreeEntry, base_depth: usize) {
-    let indent = "  ".repeat(entry.depth + base_depth);
-    let scope = entry.scope.clone().unwrap_or_else(|| "compile".to_owned());
-    let optional = if entry.optional { " optional" } else { "" };
-    let note = entry
-        .note
-        .as_ref()
-        .map(|value| format!(" ({value})"))
-        .unwrap_or_default();
-
-    if entry.depth == 0 {
-        if base_depth == 0 {
-            println!("{}", entry.coordinate);
-        } else {
-            println!("{}- {}", indent, entry.coordinate);
-        }
-        return;
-    }
-
-    println!(
-        "{}- {} [{}{}]{}",
-        indent, entry.coordinate, scope, optional, note
-    );
+    println!("{}", format_tree_entry(entry, base_depth));
 }
 
 fn print_workspace_tree(

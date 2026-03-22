@@ -9,6 +9,7 @@ pub(crate) mod build;
 pub(crate) mod deps;
 pub(crate) mod project;
 pub(crate) mod publish;
+pub(crate) mod render;
 pub(crate) mod run;
 pub(crate) mod self_mgmt;
 pub(crate) mod toolchain;
