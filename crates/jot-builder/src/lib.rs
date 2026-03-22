@@ -76,18 +76,11 @@ impl JavaProjectBuilder {
             return Err(BuildError::NoSources(project.project_root.clone()));
         }
 
-        let mut dependency_paths = dependencies
-            .iter()
-            .map(|artifact| artifact.path.clone())
-            .collect::<Vec<_>>();
-        dependency_paths.extend(extra_classpath.iter().cloned());
-
-        if let Some(ref kotlin) = installed_kotlin {
-            let stdlib = kotlin.kotlin_stdlib_jar();
-            if stdlib.is_file() {
-                dependency_paths.push(stdlib);
-            }
-        }
+        let dependency_paths = ClasspathAssembler::new()
+            .with_artifacts(&dependencies)
+            .with_paths(extra_classpath.iter().cloned())
+            .with_optional_unique_path(kotlin_stdlib_jar(installed_kotlin.as_ref()))
+            .build();
 
         let jvm_target = project
             .toolchain
@@ -118,17 +111,11 @@ impl JavaProjectBuilder {
         let (fat_jar_path, fat_jar_warnings) =
             if let Some(main_class) = project.main_class.as_deref() {
                 let path = target_dir.join("bin").join(format!("{}.jar", project.name));
-                let mut fat_jar_dependencies = dependencies
-                    .iter()
-                    .map(|item| item.path.clone())
-                    .collect::<Vec<_>>();
-                fat_jar_dependencies.extend(extra_classpath.iter().cloned());
-                if let Some(ref kotlin) = installed_kotlin {
-                    let stdlib = kotlin.kotlin_stdlib_jar();
-                    if stdlib.is_file() {
-                        fat_jar_dependencies.push(stdlib);
-                    }
-                }
+                let fat_jar_dependencies = ClasspathAssembler::new()
+                    .with_artifacts(&dependencies)
+                    .with_paths(extra_classpath.iter().cloned())
+                    .with_optional_unique_path(kotlin_stdlib_jar(installed_kotlin.as_ref()))
+                    .build();
                 let warnings = build_fat_jar(
                     &installed_jdk,
                     &fat_jar_dependencies,
@@ -160,19 +147,11 @@ impl JavaProjectBuilder {
             .main_class
             .clone()
             .ok_or_else(|| BuildError::MissingMainClass(output.project.config_path.clone()))?;
-        let mut classpath_entries = vec![output.classes_dir.clone()];
-        classpath_entries.extend(
-            output
-                .dependencies
-                .iter()
-                .map(|artifact| artifact.path.clone()),
-        );
-        if let Some(ref kotlin) = output.installed_kotlin {
-            let stdlib = kotlin.kotlin_stdlib_jar();
-            if stdlib.is_file() {
-                classpath_entries.push(stdlib);
-            }
-        }
+        let classpath_entries = ClasspathAssembler::new()
+            .with_paths([output.classes_dir.clone()])
+            .with_artifacts(&output.dependencies)
+            .with_optional_unique_path(kotlin_stdlib_jar(output.installed_kotlin.as_ref()))
+            .build();
         let classpath = join_paths_for_classpath(&classpath_entries)?;
 
         let status = Command::new(output.installed_jdk.java_binary())
@@ -244,18 +223,11 @@ impl JavaProjectBuilder {
             .map(|value| value.version.as_str());
 
         if !main_java_sources.is_empty() || !main_kotlin_sources.is_empty() {
-            let mut main_compile_classpath = compile_dependencies
-                .iter()
-                .map(|item| item.path.clone())
-                .collect::<Vec<_>>();
-            main_compile_classpath.extend(path_dependency_jars.iter().cloned());
-
-            if let Some(ref kotlin) = installed_kotlin {
-                let stdlib = kotlin.kotlin_stdlib_jar();
-                if stdlib.is_file() {
-                    main_compile_classpath.push(stdlib);
-                }
-            }
+            let main_compile_classpath = ClasspathAssembler::new()
+                .with_artifacts(&compile_dependencies)
+                .with_paths(path_dependency_jars.iter().cloned())
+                .with_optional_unique_path(kotlin_stdlib_jar(installed_kotlin.as_ref()))
+                .build();
 
             let annotation_processing =
                 resolve_annotation_processing(&project, &self.resolver, &target_dir)?;
@@ -291,17 +263,13 @@ impl JavaProjectBuilder {
 
         let test_classes_dir = target_dir.join("test-classes");
         prepare_directory(&test_classes_dir)?;
-        let mut test_compile_classpath = vec![classes_dir.clone()];
-        test_compile_classpath.extend(compile_dependencies.iter().map(|item| item.path.clone()));
-        test_compile_classpath.extend(path_dependency_jars.iter().cloned());
-        test_compile_classpath.extend(test_dependencies.iter().map(|item| item.path.clone()));
-
-        if let Some(ref kotlin) = installed_kotlin {
-            let stdlib = kotlin.kotlin_stdlib_jar();
-            if stdlib.is_file() && !test_compile_classpath.contains(&stdlib) {
-                test_compile_classpath.push(stdlib);
-            }
-        }
+        let test_compile_classpath = ClasspathAssembler::new()
+            .with_paths([classes_dir.clone()])
+            .with_artifacts(&compile_dependencies)
+            .with_paths(path_dependency_jars.iter().cloned())
+            .with_artifacts(&test_dependencies)
+            .with_optional_unique_path(kotlin_stdlib_jar(installed_kotlin.as_ref()))
+            .build();
 
         // Test sources: no annotation processing
         let test_compilers = build_compiler_chain(
@@ -328,16 +296,13 @@ impl JavaProjectBuilder {
             .map(|item| item.path.clone())
             .ok_or(BuildError::MissingJUnitConsole)?;
 
-        let mut runtime_classpath = vec![classes_dir, test_classes_dir];
-        runtime_classpath.extend(compile_dependencies.iter().map(|item| item.path.clone()));
-        runtime_classpath.extend(path_dependency_jars);
-        runtime_classpath.extend(test_dependencies.iter().map(|item| item.path.clone()));
-        if let Some(ref kotlin) = installed_kotlin {
-            let stdlib = kotlin.kotlin_stdlib_jar();
-            if stdlib.is_file() && !runtime_classpath.contains(&stdlib) {
-                runtime_classpath.push(stdlib);
-            }
-        }
+        let runtime_classpath = ClasspathAssembler::new()
+            .with_paths([classes_dir, test_classes_dir])
+            .with_artifacts(&compile_dependencies)
+            .with_paths(path_dependency_jars)
+            .with_artifacts(&test_dependencies)
+            .with_optional_unique_path(kotlin_stdlib_jar(installed_kotlin.as_ref()))
+            .build();
         let classpath = join_paths_for_classpath(&runtime_classpath)?;
 
         let status = Command::new(installed_jdk.java_binary())
@@ -383,6 +348,50 @@ pub struct BuildOutput {
 pub struct TestOutput {
     pub project: ProjectBuildConfig,
     pub tests_found: bool,
+}
+
+#[derive(Default)]
+struct ClasspathAssembler {
+    entries: Vec<PathBuf>,
+}
+
+impl ClasspathAssembler {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn with_artifacts(mut self, artifacts: &[ResolvedArtifact]) -> Self {
+        self.entries
+            .extend(artifacts.iter().map(|artifact| artifact.path.clone()));
+        self
+    }
+
+    fn with_paths<I>(mut self, paths: I) -> Self
+    where
+        I: IntoIterator<Item = PathBuf>,
+    {
+        self.entries.extend(paths);
+        self
+    }
+
+    fn with_optional_unique_path(mut self, path: Option<PathBuf>) -> Self {
+        if let Some(path) = path
+            && !self.entries.contains(&path)
+        {
+            self.entries.push(path);
+        }
+        self
+    }
+
+    fn build(self) -> Vec<PathBuf> {
+        self.entries
+    }
+}
+
+fn kotlin_stdlib_jar(installed_kotlin: Option<&InstalledKotlin>) -> Option<PathBuf> {
+    installed_kotlin
+        .map(InstalledKotlin::kotlin_stdlib_jar)
+        .filter(|path| path.is_file())
 }
 
 fn prepare_directory(path: &Path) -> Result<(), BuildError> {
