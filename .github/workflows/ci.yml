@@ -50,6 +50,10 @@ jobs:
             path: samples/java/multi-module-workspace
           - name: Webserver sample
             path: samples/java/webserver
+          - name: Kotlin minimal app sample
+            path: samples/kotlin/minimal-app
+          - name: Mixed Java+Kotlin sample
+            path: samples/kotlin/mixed-java-kotlin
         include:
           - os: ubuntu-latest
             binary: target/debug/jot

@@ -50,6 +50,10 @@ pub enum BuildError {
     PathDependencyCycle(String),
     #[error("no Java source files found under {0}")]
     NoJavaSources(PathBuf),
+    #[error("no source files found under {0}")]
+    NoSources(PathBuf),
+    #[error("missing [toolchains].kotlin in {0} (required because .kt files were found)")]
+    MissingKotlinToolchain(PathBuf),
     #[error("could not locate junit-platform-console-standalone in resolved test dependencies")]
     MissingJUnitConsole,
     #[error("{tool} failed: {stderr}")]

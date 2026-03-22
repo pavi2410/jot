@@ -37,8 +37,9 @@ pub(crate) fn handle_clean(
     if global {
         let summary = paths.clear_global_cache()?;
         println!(
-            "Removed {} JDK entries and {} download entries from {}",
+            "Removed {} JDK entries, {} Kotlin entries, and {} download entries from {}",
             summary.removed_jdk_entries,
+            summary.removed_kotlin_entries,
             summary.removed_download_entries,
             paths.root().display()
         );

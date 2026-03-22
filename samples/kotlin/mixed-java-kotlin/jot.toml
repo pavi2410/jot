@@ -1,0 +1,8 @@
+[project]
+name = "mixed-java-kotlin"
+version = "0.1.0"
+main-class = "com.jot.samples.mixed.Main"
+
+[toolchains]
+java = "21"
+kotlin = "2.1.0"

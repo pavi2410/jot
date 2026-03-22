@@ -58,6 +58,7 @@ pub(crate) enum RawCatalogVersion {
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct RawToolchains {
     pub(crate) java: Option<RawJavaToolchain>,
+    pub(crate) kotlin: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

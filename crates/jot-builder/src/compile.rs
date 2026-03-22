@@ -4,7 +4,7 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use jot_toolchain::InstalledJdk;
+use jot_toolchain::{InstalledJdk, InstalledKotlin};
 
 use crate::diagnostics::format_javac_stderr;
 use crate::errors::BuildError;
@@ -59,6 +59,53 @@ pub(crate) fn compile_sources(
         return Err(BuildError::CommandFailed {
             tool: "javac",
             stderr: format_javac_stderr(&raw_stderr, std::io::stderr().is_terminal()),
+        });
+    }
+
+    Ok(())
+}
+
+pub(crate) fn compile_kotlin_sources(
+    installed_kotlin: &InstalledKotlin,
+    jvm_target: Option<&str>,
+    project_root: &Path,
+    classpath_paths: &[PathBuf],
+    classes_dir: &Path,
+    kotlin_files: &[PathBuf],
+    java_source_roots: Option<&[PathBuf]>,
+) -> Result<(), BuildError> {
+    let mut command = Command::new(installed_kotlin.kotlinc_binary());
+    command.current_dir(project_root).arg("-d").arg(classes_dir);
+
+    if !classpath_paths.is_empty() {
+        command
+            .arg("-classpath")
+            .arg(join_paths_for_classpath(classpath_paths)?);
+    }
+
+    if let Some(target) = jvm_target {
+        command.arg("-jvm-target").arg(target);
+    }
+
+    if let Some(roots) = java_source_roots {
+        let roots_str = roots
+            .iter()
+            .filter(|r| r.is_dir())
+            .map(|r| r.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join(",");
+        if !roots_str.is_empty() {
+            command.arg(format!("-Xjvm-source-roots={roots_str}"));
+        }
+    }
+
+    command.args(kotlin_files);
+    let output = command.output()?;
+    if !output.status.success() {
+        let raw_stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        return Err(BuildError::CommandFailed {
+            tool: "kotlinc",
+            stderr: raw_stderr,
         });
     }
 

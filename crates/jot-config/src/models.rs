@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use jot_toolchain::JavaToolchainRequest;
+use jot_toolchain::{JavaToolchainRequest, KotlinToolchainRequest};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
@@ -55,6 +55,7 @@ pub struct ProjectBuildConfig {
     pub processors: Vec<String>,
     pub processor_options: BTreeMap<String, String>,
     pub toolchain: Option<JavaToolchainRequest>,
+    pub kotlin_toolchain: Option<KotlinToolchainRequest>,
     pub publish: Option<PublishConfig>,
     pub format: FormatConfig,
     pub lint: LintConfig,
@@ -66,6 +67,7 @@ pub struct WorkspaceBuildConfig {
     pub root_dir: PathBuf,
     pub group: Option<String>,
     pub toolchain: Option<JavaToolchainRequest>,
+    pub kotlin_toolchain: Option<KotlinToolchainRequest>,
     pub members: Vec<WorkspaceMemberBuildConfig>,
 }
 
@@ -94,6 +96,7 @@ pub struct WorkspaceMemberDependencies {
 pub(crate) struct WorkspaceInheritance {
     pub(crate) group: Option<String>,
     pub(crate) toolchain: Option<JavaToolchainRequest>,
+    pub(crate) kotlin_toolchain: Option<KotlinToolchainRequest>,
     pub(crate) module_name: Option<String>,
     pub(crate) catalog_path: Option<PathBuf>,
     pub(crate) publish: Option<PublishConfig>,

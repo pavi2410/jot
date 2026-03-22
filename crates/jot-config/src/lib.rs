@@ -22,7 +22,7 @@ pub use models::{
 use std::fs;
 use std::path::Path;
 
-use jot_toolchain::JavaToolchainRequest;
+use jot_toolchain::{JavaToolchainRequest, KotlinToolchainRequest};
 
 use crate::dependencies::{
     catalog_path_for_root, detect_workspace_path_cycles, extract_dependency_coordinates,
@@ -64,7 +64,8 @@ pub fn load_workspace_build_config(
         });
     }
 
-    let root_toolchain = parse_toolchain_request(root_config.toolchains);
+    let root_toolchain = parse_toolchain_request(root_config.toolchains.as_ref());
+    let root_kotlin_toolchain = parse_kotlin_toolchain_request(root_config.toolchains.as_ref());
     let mut members = Vec::new();
     let mut seen_names = std::collections::BTreeSet::new();
 
@@ -83,6 +84,7 @@ pub fn load_workspace_build_config(
         let inherited = WorkspaceInheritance {
             group: workspace.group.clone(),
             toolchain: root_toolchain.clone(),
+            kotlin_toolchain: root_kotlin_toolchain.clone(),
             module_name: Some(module_name.clone()),
             catalog_path: catalog_path_for_root(&root_dir),
             publish: parse_publish_config(root_config.publish.clone(), None),
@@ -128,6 +130,7 @@ pub fn load_workspace_build_config(
         root_dir,
         group: workspace.group,
         toolchain: root_toolchain,
+        kotlin_toolchain: root_kotlin_toolchain,
         members,
     }))
 }
@@ -196,19 +199,37 @@ fn load_project_build_config_from_file_with_inheritance(
     let project = config
         .project
         .ok_or_else(|| ConfigError::MissingProjectSection(config_path.clone()))?;
+    let inherited_toolchain = inherited.as_ref().and_then(|ctx| ctx.toolchain.clone());
+    let inherited_kotlin_toolchain = inherited
+        .as_ref()
+        .and_then(|ctx| ctx.kotlin_toolchain.clone());
+    let kotlin_toolchain =
+        parse_kotlin_toolchain_request(config.toolchains.as_ref()).or(inherited_kotlin_toolchain);
+    let has_kotlin = kotlin_toolchain.is_some();
     let source_dirs = project
         .source_dirs
-        .unwrap_or_else(|| vec!["src/main/java".to_owned()])
+        .unwrap_or_else(|| {
+            let mut dirs = vec!["src/main/java".to_owned()];
+            if has_kotlin {
+                dirs.push("src/main/kotlin".to_owned());
+            }
+            dirs
+        })
         .into_iter()
         .map(|value| project_root.join(value))
         .collect();
     let test_source_dirs = project
         .test_source_dirs
-        .unwrap_or_else(|| vec!["src/test/java".to_owned()])
+        .unwrap_or_else(|| {
+            let mut dirs = vec!["src/test/java".to_owned()];
+            if has_kotlin {
+                dirs.push("src/test/kotlin".to_owned());
+            }
+            dirs
+        })
         .into_iter()
         .map(|value| project_root.join(value))
         .collect();
-    let inherited_toolchain = inherited.as_ref().and_then(|ctx| ctx.toolchain.clone());
     let inherited_group = inherited.as_ref().and_then(|ctx| ctx.group.clone());
     let inherited_catalog_path = inherited.as_ref().and_then(|ctx| ctx.catalog_path.clone());
     let inherited_publish = inherited.as_ref().and_then(|ctx| ctx.publish.clone());
@@ -244,7 +265,8 @@ fn load_project_build_config_from_file_with_inheritance(
         )?,
         processors,
         processor_options,
-        toolchain: parse_toolchain_request(config.toolchains).or(inherited_toolchain),
+        toolchain: parse_toolchain_request(config.toolchains.as_ref()).or(inherited_toolchain),
+        kotlin_toolchain,
         publish: parse_publish_config(config.publish, inherited_publish),
         format: parse_format_config(config.format, inherited_format),
         lint: parse_lint_config(config.lint, inherited_lint, &project_root),
@@ -261,7 +283,8 @@ fn inherited_workspace_context(start: &Path) -> Result<Option<WorkspaceInheritan
     let workspace = config.workspace;
     Ok(Some(WorkspaceInheritance {
         group: workspace.and_then(|ws| ws.group),
-        toolchain: parse_toolchain_request(config.toolchains),
+        toolchain: parse_toolchain_request(config.toolchains.as_ref()),
+        kotlin_toolchain: parse_kotlin_toolchain_request(config.toolchains.as_ref()),
         module_name: None,
         catalog_path: path.parent().and_then(catalog_path_for_root),
         publish: parse_publish_config(config.publish, None),
@@ -352,15 +375,30 @@ fn parse_publish_developer(raw: RawPublishDeveloper) -> Option<PublishDeveloper>
     })
 }
 
-fn parse_toolchain_request(toolchains: Option<RawToolchains>) -> Option<JavaToolchainRequest> {
+fn parse_toolchain_request(toolchains: Option<&RawToolchains>) -> Option<JavaToolchainRequest> {
     let toolchains = toolchains?;
-    toolchains.java.map(|java| match java {
+    toolchains.java.as_ref().map(|java| match java {
         RawJavaToolchain::Version(version) => JavaToolchainRequest {
-            version,
+            version: version.clone(),
             vendor: None,
         },
-        RawJavaToolchain::Detailed { version, vendor } => JavaToolchainRequest { version, vendor },
+        RawJavaToolchain::Detailed { version, vendor } => JavaToolchainRequest {
+            version: version.clone(),
+            vendor: *vendor,
+        },
     })
+}
+
+fn parse_kotlin_toolchain_request(
+    toolchains: Option<&RawToolchains>,
+) -> Option<KotlinToolchainRequest> {
+    let toolchains = toolchains?;
+    toolchains
+        .kotlin
+        .as_ref()
+        .map(|version| KotlinToolchainRequest {
+            version: version.clone(),
+        })
 }
 
 #[cfg(test)]

@@ -918,6 +918,7 @@ mod tests {
             processors: Vec::new(),
             processor_options: std::collections::BTreeMap::new(),
             toolchain: None,
+            kotlin_toolchain: None,
             publish: Some(PublishConfig {
                 license: Some("Apache-2.0".into()),
                 description: Some("Demo library".into()),
@@ -999,6 +1000,7 @@ mod tests {
             processors: Vec::new(),
             processor_options: std::collections::BTreeMap::new(),
             toolchain: None,
+            kotlin_toolchain: None,
             publish: Some(PublishConfig {
                 license: Some("Apache-2.0".into()),
                 description: Some("Demo library".into()),
@@ -1024,6 +1026,7 @@ mod tests {
                 platform: Platform::current().expect("platform"),
                 installed_at: OffsetDateTime::now_utc(),
             },
+            installed_kotlin: None,
             dependencies: Vec::new(),
             classes_dir: project_root.join("target/classes"),
             jar_path: project_root.join("target/demo-1.2.3.jar"),

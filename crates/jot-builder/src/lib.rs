@@ -14,9 +14,11 @@ use std::process::{Command, Stdio};
 
 use jot_config::{ProjectBuildConfig, load_project_build_config};
 use jot_resolver::{MavenResolver, ResolvedArtifact};
-use jot_toolchain::{InstalledJdk, ToolchainManager};
+use jot_toolchain::{InstalledJdk, InstalledKotlin, ToolchainManager};
 
-use compile::{AnnotationProcessingConfig, compile_sources, join_paths_for_classpath};
+use compile::{
+    AnnotationProcessingConfig, compile_kotlin_sources, compile_sources, join_paths_for_classpath,
+};
 use package::{build_fat_jar, copy_resources, package_jar};
 
 const DEFAULT_RESOLVE_DEPTH: usize = 8;
@@ -54,6 +56,12 @@ impl JavaProjectBuilder {
             .clone()
             .ok_or_else(|| BuildError::MissingJavaToolchain(project.config_path.clone()))?;
         let installed_jdk = self.toolchains.ensure_installed(&toolchain_request)?;
+
+        let installed_kotlin = match &project.kotlin_toolchain {
+            Some(request) => Some(self.toolchains.ensure_kotlin_installed(request)?),
+            None => None,
+        };
+
         let dependencies = self
             .resolver
             .resolve_artifacts(&project.dependencies, DEFAULT_RESOLVE_DEPTH)?;
@@ -61,9 +69,11 @@ impl JavaProjectBuilder {
         let classes_dir = target_dir.join("classes");
         prepare_directory(&classes_dir)?;
 
-        let source_files = collect_java_sources(&project.source_dirs)?;
-        if source_files.is_empty() {
-            return Err(BuildError::NoJavaSources(project.project_root.clone()));
+        let java_sources = collect_java_sources(&project.source_dirs)?;
+        let kotlin_sources = collect_sources_by_extension(&project.source_dirs, "kt")?;
+
+        if java_sources.is_empty() && kotlin_sources.is_empty() {
+            return Err(BuildError::NoSources(project.project_root.clone()));
         }
 
         let mut dependency_paths = dependencies
@@ -72,36 +82,77 @@ impl JavaProjectBuilder {
             .collect::<Vec<_>>();
         dependency_paths.extend(extra_classpath.iter().cloned());
 
-        let annotation_processing = if !project.processors.is_empty() {
-            let processor_artifacts = self
-                .resolver
-                .resolve_artifacts(&project.processors, DEFAULT_RESOLVE_DEPTH)?;
-            let generated_sources_dir = target_dir.join("generated-sources");
-            prepare_directory(&generated_sources_dir)?;
-            Some(AnnotationProcessingConfig {
-                processor_paths: processor_artifacts
-                    .iter()
-                    .map(|artifact| artifact.path.clone())
-                    .collect(),
-                options: project.processor_options.clone(),
-                generated_sources_dir,
-            })
-        } else {
-            None
-        };
+        if let Some(ref kotlin) = installed_kotlin {
+            let stdlib = kotlin.kotlin_stdlib_jar();
+            if stdlib.is_file() {
+                dependency_paths.push(stdlib);
+            }
+        }
 
-        compile_sources(
-            &installed_jdk,
-            project
-                .toolchain
+        let jvm_target = project
+            .toolchain
+            .as_ref()
+            .map(|value| value.version.as_str());
+
+        // Compile Kotlin sources first (if any)
+        if !kotlin_sources.is_empty() {
+            let kotlin = installed_kotlin
                 .as_ref()
-                .map(|value| value.version.as_str()),
-            &project.project_root,
-            &dependency_paths,
-            &classes_dir,
-            &source_files,
-            annotation_processing.as_ref(),
-        )?;
+                .ok_or_else(|| BuildError::MissingKotlinToolchain(project.config_path.clone()))?;
+
+            let java_source_roots = if !java_sources.is_empty() {
+                Some(project.source_dirs.as_slice())
+            } else {
+                None
+            };
+
+            compile_kotlin_sources(
+                kotlin,
+                jvm_target,
+                &project.project_root,
+                &dependency_paths,
+                &classes_dir,
+                &kotlin_sources,
+                java_source_roots,
+            )?;
+        }
+
+        // Compile Java sources (if any)
+        if !java_sources.is_empty() {
+            let mut java_classpath = dependency_paths.clone();
+            if !kotlin_sources.is_empty() {
+                java_classpath.push(classes_dir.clone());
+            }
+
+            let annotation_processing = if !project.processors.is_empty() {
+                let processor_artifacts = self
+                    .resolver
+                    .resolve_artifacts(&project.processors, DEFAULT_RESOLVE_DEPTH)?;
+                let generated_sources_dir = target_dir.join("generated-sources");
+                prepare_directory(&generated_sources_dir)?;
+                Some(AnnotationProcessingConfig {
+                    processor_paths: processor_artifacts
+                        .iter()
+                        .map(|artifact| artifact.path.clone())
+                        .collect(),
+                    options: project.processor_options.clone(),
+                    generated_sources_dir,
+                })
+            } else {
+                None
+            };
+
+            compile_sources(
+                &installed_jdk,
+                jvm_target,
+                &project.project_root,
+                &java_classpath,
+                &classes_dir,
+                &java_sources,
+                annotation_processing.as_ref(),
+            )?;
+        }
+
         copy_resources(&project.resource_dir, &classes_dir)?;
         let jar_path = target_dir.join(format!("{}-{}.jar", project.name, project.version));
         package_jar(&installed_jdk, &classes_dir, &jar_path, None)?;
@@ -114,6 +165,12 @@ impl JavaProjectBuilder {
                     .map(|item| item.path.clone())
                     .collect::<Vec<_>>();
                 fat_jar_dependencies.extend(extra_classpath.iter().cloned());
+                if let Some(ref kotlin) = installed_kotlin {
+                    let stdlib = kotlin.kotlin_stdlib_jar();
+                    if stdlib.is_file() {
+                        fat_jar_dependencies.push(stdlib);
+                    }
+                }
                 let warnings = build_fat_jar(
                     &installed_jdk,
                     &fat_jar_dependencies,
@@ -129,6 +186,7 @@ impl JavaProjectBuilder {
         Ok(BuildOutput {
             project,
             installed_jdk,
+            installed_kotlin,
             dependencies,
             classes_dir,
             jar_path,
@@ -151,6 +209,12 @@ impl JavaProjectBuilder {
                 .iter()
                 .map(|artifact| artifact.path.clone()),
         );
+        if let Some(ref kotlin) = output.installed_kotlin {
+            let stdlib = kotlin.kotlin_stdlib_jar();
+            if stdlib.is_file() {
+                classpath_entries.push(stdlib);
+            }
+        }
         let classpath = join_paths_for_classpath(&classpath_entries)?;
 
         let status = Command::new(output.installed_jdk.java_binary())
@@ -192,6 +256,11 @@ impl JavaProjectBuilder {
             .ok_or_else(|| BuildError::MissingJavaToolchain(project.config_path.clone()))?;
         let installed_jdk = self.toolchains.ensure_installed(&toolchain_request)?;
 
+        let installed_kotlin = match &project.kotlin_toolchain {
+            Some(request) => Some(self.toolchains.ensure_kotlin_installed(request)?),
+            None => None,
+        };
+
         let compile_dependencies = self
             .resolver
             .resolve_artifacts(&project.dependencies, DEFAULT_RESOLVE_DEPTH)?;
@@ -205,49 +274,93 @@ impl JavaProjectBuilder {
         let target_dir = project.project_root.join("target");
         let classes_dir = target_dir.join("classes");
         prepare_directory(&classes_dir)?;
-        let main_sources = collect_java_sources(&project.source_dirs)?;
-        if !main_sources.is_empty() {
-            let compile_dependency_paths = compile_dependencies
+
+        let main_java_sources = collect_java_sources(&project.source_dirs)?;
+        let main_kotlin_sources = collect_sources_by_extension(&project.source_dirs, "kt")?;
+
+        let jvm_target = project
+            .toolchain
+            .as_ref()
+            .map(|value| value.version.as_str());
+
+        if !main_java_sources.is_empty() || !main_kotlin_sources.is_empty() {
+            let mut main_compile_classpath = compile_dependencies
                 .iter()
                 .map(|item| item.path.clone())
                 .collect::<Vec<_>>();
-            let mut main_compile_classpath = compile_dependency_paths;
             main_compile_classpath.extend(path_dependency_jars.iter().cloned());
-            let annotation_processing = if !project.processors.is_empty() {
-                let processor_artifacts = self
-                    .resolver
-                    .resolve_artifacts(&project.processors, DEFAULT_RESOLVE_DEPTH)?;
-                let generated_sources_dir = target_dir.join("generated-sources");
-                prepare_directory(&generated_sources_dir)?;
-                Some(AnnotationProcessingConfig {
-                    processor_paths: processor_artifacts
-                        .iter()
-                        .map(|artifact| artifact.path.clone())
-                        .collect(),
-                    options: project.processor_options.clone(),
-                    generated_sources_dir,
-                })
-            } else {
-                None
-            };
 
-            compile_sources(
-                &installed_jdk,
-                project
-                    .toolchain
-                    .as_ref()
-                    .map(|value| value.version.as_str()),
-                &project.project_root,
-                &main_compile_classpath,
-                &classes_dir,
-                &main_sources,
-                annotation_processing.as_ref(),
-            )?;
+            if let Some(ref kotlin) = installed_kotlin {
+                let stdlib = kotlin.kotlin_stdlib_jar();
+                if stdlib.is_file() {
+                    main_compile_classpath.push(stdlib);
+                }
+            }
+
+            // Compile main Kotlin sources
+            if !main_kotlin_sources.is_empty() {
+                let kotlin = installed_kotlin.as_ref().ok_or_else(|| {
+                    BuildError::MissingKotlinToolchain(project.config_path.clone())
+                })?;
+                let java_source_roots = if !main_java_sources.is_empty() {
+                    Some(project.source_dirs.as_slice())
+                } else {
+                    None
+                };
+                compile_kotlin_sources(
+                    kotlin,
+                    jvm_target,
+                    &project.project_root,
+                    &main_compile_classpath,
+                    &classes_dir,
+                    &main_kotlin_sources,
+                    java_source_roots,
+                )?;
+            }
+
+            // Compile main Java sources
+            if !main_java_sources.is_empty() {
+                let mut java_classpath = main_compile_classpath.clone();
+                if !main_kotlin_sources.is_empty() {
+                    java_classpath.push(classes_dir.clone());
+                }
+
+                let annotation_processing = if !project.processors.is_empty() {
+                    let processor_artifacts = self
+                        .resolver
+                        .resolve_artifacts(&project.processors, DEFAULT_RESOLVE_DEPTH)?;
+                    let generated_sources_dir = target_dir.join("generated-sources");
+                    prepare_directory(&generated_sources_dir)?;
+                    Some(AnnotationProcessingConfig {
+                        processor_paths: processor_artifacts
+                            .iter()
+                            .map(|artifact| artifact.path.clone())
+                            .collect(),
+                        options: project.processor_options.clone(),
+                        generated_sources_dir,
+                    })
+                } else {
+                    None
+                };
+
+                compile_sources(
+                    &installed_jdk,
+                    jvm_target,
+                    &project.project_root,
+                    &java_classpath,
+                    &classes_dir,
+                    &main_java_sources,
+                    annotation_processing.as_ref(),
+                )?;
+            }
+
             copy_resources(&project.resource_dir, &classes_dir)?;
         }
 
-        let test_sources = collect_java_sources(&project.test_source_dirs)?;
-        if test_sources.is_empty() {
+        let test_java_sources = collect_java_sources(&project.test_source_dirs)?;
+        let test_kotlin_sources = collect_sources_by_extension(&project.test_source_dirs, "kt")?;
+
+        if test_java_sources.is_empty() && test_kotlin_sources.is_empty() {
             return Ok(TestOutput {
                 project,
                 tests_found: false,
@@ -260,18 +373,51 @@ impl JavaProjectBuilder {
         test_compile_classpath.extend(compile_dependencies.iter().map(|item| item.path.clone()));
         test_compile_classpath.extend(path_dependency_jars.iter().cloned());
         test_compile_classpath.extend(test_dependencies.iter().map(|item| item.path.clone()));
-        compile_sources(
-            &installed_jdk,
-            project
-                .toolchain
+
+        if let Some(ref kotlin) = installed_kotlin {
+            let stdlib = kotlin.kotlin_stdlib_jar();
+            if stdlib.is_file() && !test_compile_classpath.contains(&stdlib) {
+                test_compile_classpath.push(stdlib);
+            }
+        }
+
+        // Compile test Kotlin sources
+        if !test_kotlin_sources.is_empty() {
+            let kotlin = installed_kotlin
                 .as_ref()
-                .map(|value| value.version.as_str()),
-            &project.project_root,
-            &test_compile_classpath,
-            &test_classes_dir,
-            &test_sources,
-            None,
-        )?;
+                .ok_or_else(|| BuildError::MissingKotlinToolchain(project.config_path.clone()))?;
+            let java_source_roots = if !test_java_sources.is_empty() {
+                Some(project.test_source_dirs.as_slice())
+            } else {
+                None
+            };
+            compile_kotlin_sources(
+                kotlin,
+                jvm_target,
+                &project.project_root,
+                &test_compile_classpath,
+                &test_classes_dir,
+                &test_kotlin_sources,
+                java_source_roots,
+            )?;
+        }
+
+        // Compile test Java sources
+        if !test_java_sources.is_empty() {
+            let mut java_test_classpath = test_compile_classpath.clone();
+            if !test_kotlin_sources.is_empty() {
+                java_test_classpath.push(test_classes_dir.clone());
+            }
+            compile_sources(
+                &installed_jdk,
+                jvm_target,
+                &project.project_root,
+                &java_test_classpath,
+                &test_classes_dir,
+                &test_java_sources,
+                None,
+            )?;
+        }
 
         let console_jar = test_dependencies
             .iter()
@@ -286,6 +432,12 @@ impl JavaProjectBuilder {
         runtime_classpath.extend(compile_dependencies.iter().map(|item| item.path.clone()));
         runtime_classpath.extend(path_dependency_jars);
         runtime_classpath.extend(test_dependencies.iter().map(|item| item.path.clone()));
+        if let Some(ref kotlin) = installed_kotlin {
+            let stdlib = kotlin.kotlin_stdlib_jar();
+            if stdlib.is_file() && !runtime_classpath.contains(&stdlib) {
+                runtime_classpath.push(stdlib);
+            }
+        }
         let classpath = join_paths_for_classpath(&runtime_classpath)?;
 
         let status = Command::new(installed_jdk.java_binary())
@@ -319,6 +471,7 @@ impl JavaProjectBuilder {
 pub struct BuildOutput {
     pub project: ProjectBuildConfig,
     pub installed_jdk: InstalledJdk,
+    pub installed_kotlin: Option<InstalledKotlin>,
     pub dependencies: Vec<ResolvedArtifact>,
     pub classes_dir: PathBuf,
     pub jar_path: PathBuf,
@@ -347,6 +500,40 @@ fn collect_java_sources(source_dirs: &[PathBuf]) -> Result<Vec<PathBuf>, BuildEr
     }
     files.sort();
     Ok(files)
+}
+
+fn collect_sources_by_extension(
+    source_dirs: &[PathBuf],
+    extension: &str,
+) -> Result<Vec<PathBuf>, BuildError> {
+    let mut files = Vec::new();
+    for source_dir in source_dirs {
+        collect_sources_in_dir(source_dir, extension, &mut files)?;
+    }
+    files.sort();
+    Ok(files)
+}
+
+fn collect_sources_in_dir(
+    path: &Path,
+    extension: &str,
+    files: &mut Vec<PathBuf>,
+) -> Result<(), BuildError> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let entry_path = entry.path();
+        if entry.file_type()?.is_dir() {
+            collect_sources_in_dir(&entry_path, extension, files)?;
+        } else if entry_path.extension().and_then(|value| value.to_str()) == Some(extension) {
+            files.push(entry_path);
+        }
+    }
+
+    Ok(())
 }
 
 fn collect_java_sources_in_dir(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), BuildError> {

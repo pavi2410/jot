@@ -54,6 +54,34 @@ pub struct JavaToolchainRequest {
     pub vendor: Option<JdkVendor>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct KotlinToolchainRequest {
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstalledKotlin {
+    pub version: String,
+    pub kotlin_home: PathBuf,
+    pub install_dir: PathBuf,
+    pub installed_at: OffsetDateTime,
+}
+
+impl InstalledKotlin {
+    pub fn kotlinc_binary(&self) -> PathBuf {
+        let executable = if cfg!(windows) {
+            "kotlinc.bat"
+        } else {
+            "kotlinc"
+        };
+        self.kotlin_home.join("bin").join(executable)
+    }
+
+    pub fn kotlin_stdlib_jar(&self) -> PathBuf {
+        self.kotlin_home.join("lib").join("kotlin-stdlib.jar")
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct InstallOptions {
     pub force: bool,
@@ -234,6 +262,78 @@ impl ToolchainManager {
         }
 
         self.install(request, InstallOptions::default())
+    }
+
+    pub fn ensure_kotlin_installed(
+        &self,
+        request: &KotlinToolchainRequest,
+    ) -> Result<InstalledKotlin, ToolchainError> {
+        let install_dir = self.paths.kotlin_install_dir(&request.version);
+        let metadata_path = install_dir.join("install.json");
+
+        if metadata_path.is_file() {
+            let content = fs::read(&metadata_path)?;
+            let existing: InstalledKotlin = serde_json::from_slice(&content)?;
+            if existing.kotlinc_binary().is_file() {
+                return Ok(existing);
+            }
+            fs::remove_dir_all(&install_dir)?;
+        }
+
+        self.install_kotlin(request)
+    }
+
+    fn install_kotlin(
+        &self,
+        request: &KotlinToolchainRequest,
+    ) -> Result<InstalledKotlin, ToolchainError> {
+        let version = &request.version;
+        let _lock = KotlinInstallLock::acquire(&self.paths, version)?;
+
+        let url = format!(
+            "https://github.com/JetBrains/kotlin/releases/download/v{version}/kotlin-compiler-{version}.zip"
+        );
+
+        let download_filename = format!("kotlin-compiler-{version}.zip");
+        let download_path = self.paths.downloads_dir().join(&download_filename);
+
+        let resolve_progress = spinner(&format!("Resolving Kotlin {version}"));
+        resolve_progress.finish_with_message(format!("Resolved Kotlin {version}"));
+
+        if self.offline && !download_path.is_file() {
+            return Err(ToolchainError::OfflineDownloadRequired { url });
+        }
+
+        if !download_path.is_file() {
+            self.download(&url, &download_path)?;
+        }
+
+        let install_dir = self.paths.kotlin_install_dir(version);
+        if install_dir.exists() {
+            fs::remove_dir_all(&install_dir)?;
+        }
+
+        let extract_progress = spinner(&format!("Extracting {download_filename}"));
+        let temp_dir = TempDir::new_in(self.paths.kotlins_dir())?;
+        self.extract_archive(&download_path, temp_dir.path())?;
+        extract_progress.finish_with_message(format!("Extracted {download_filename}"));
+
+        let kotlin_home = install_dir.join("kotlinc");
+
+        let extracted_dir = temp_dir.keep();
+        fs::rename(extracted_dir, &install_dir)?;
+
+        let installation = InstalledKotlin {
+            version: version.clone(),
+            kotlin_home: kotlin_home.clone(),
+            install_dir: install_dir.clone(),
+            installed_at: OffsetDateTime::now_utc(),
+        };
+
+        let metadata_path = install_dir.join("install.json");
+        fs::write(&metadata_path, serde_json::to_vec_pretty(&installation)?)?;
+
+        Ok(installation)
     }
 
     pub fn java_env(
@@ -517,6 +617,34 @@ impl InstallLock {
 }
 
 impl Drop for InstallLock {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
+
+struct KotlinInstallLock {
+    file: fs::File,
+}
+
+impl KotlinInstallLock {
+    fn acquire(paths: &JotPaths, version: &str) -> Result<Self, ToolchainError> {
+        let lock_path = paths.kotlin_install_lock_path(version);
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&lock_path)?;
+        file.lock_exclusive()
+            .map_err(|source| ToolchainError::LockAcquisition {
+                path: lock_path,
+                source,
+            })?;
+        Ok(Self { file })
+    }
+}
+
+impl Drop for KotlinInstallLock {
     fn drop(&mut self) {
         let _ = self.file.unlock();
     }

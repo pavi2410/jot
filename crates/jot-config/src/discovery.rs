@@ -85,6 +85,6 @@ pub fn read_toolchain_request(
     let content = fs::read_to_string(&path)?;
     let config: RawConfig = toml::from_str(&content)?;
     let inherited = crate::inherited_workspace_context(path.parent().unwrap_or(start))?;
-    Ok(crate::parse_toolchain_request(config.toolchains)
+    Ok(crate::parse_toolchain_request(config.toolchains.as_ref())
         .or(inherited.and_then(|ctx| ctx.toolchain)))
 }
