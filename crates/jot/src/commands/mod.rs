@@ -41,6 +41,13 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             name,
         )?,
         Command::Clean { global } => project::handle_clean(global, paths)?,
+        Command::Add {
+            coordinate,
+            catalog,
+            test,
+            name,
+        } => deps::handle_add(coordinate.as_deref(), catalog.as_deref(), test, name.as_deref())?,
+        Command::Remove { name, test } => deps::handle_remove(&name, test)?,
         Command::Fmt { check, module } => {
             build::handle_fmt(paths, manager, check, module.as_deref())?
         }

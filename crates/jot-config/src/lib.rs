@@ -9,7 +9,7 @@ pub use dependencies::read_declared_dependencies;
 pub use discovery::{
     find_jot_toml, find_workspace_jot_toml, find_workspace_root_jot_toml, read_toolchain_request,
 };
-pub use editing::pin_java_toolchain;
+pub use editing::{DependencySpec, add_dependency, pin_java_toolchain, remove_dependency};
 pub use errors::ConfigError;
 pub use models::{
     FormatConfig, JavaFormatStyle, LintConfig, ProjectBuildConfig, WorkspaceBuildConfig,
@@ -292,9 +292,10 @@ fn parse_toolchain_request(toolchains: Option<RawToolchains>) -> Option<JavaTool
 #[cfg(test)]
 mod tests {
     use super::{
-        JavaToolchainRequest, find_jot_toml, find_workspace_jot_toml, find_workspace_root_jot_toml,
-        load_project_build_config, load_workspace_build_config, load_workspace_dependency_set,
-        pin_java_toolchain, read_declared_dependencies, read_toolchain_request,
+        DependencySpec, JavaToolchainRequest, add_dependency, find_jot_toml,
+        find_workspace_jot_toml, find_workspace_root_jot_toml, load_project_build_config,
+        load_workspace_build_config, load_workspace_dependency_set, pin_java_toolchain,
+        read_declared_dependencies, read_toolchain_request, remove_dependency,
     };
     use jot_toolchain::JdkVendor;
     use std::fs;
@@ -392,6 +393,52 @@ mod tests {
                 "org.slf4j:slf4j-api:2.0.16".to_owned(),
             ]
         );
+    }
+
+    #[test]
+    fn adds_and_removes_main_dependency_entry() {
+        let temp = tempdir().expect("tempdir");
+        let config_path = temp.path().join("jot.toml");
+        fs::write(&config_path, "[project]\nname = \"demo\"\nversion = \"0.1.0\"\n")
+            .expect("write config");
+
+        add_dependency(
+            &config_path,
+            "slf4j",
+            DependencySpec::Coords("org.slf4j:slf4j-api:2.0.16".to_owned()),
+            false,
+        )
+        .expect("add dependency");
+
+        let content = fs::read_to_string(&config_path).expect("read config");
+        assert!(content.contains("[dependencies]"));
+        assert!(content.contains("slf4j = \"org.slf4j:slf4j-api:2.0.16\""));
+
+        let removed = remove_dependency(&config_path, "slf4j", false).expect("remove dependency");
+        assert!(removed);
+
+        let content = fs::read_to_string(&config_path).expect("read config");
+        assert!(!content.contains("slf4j = \"org.slf4j:slf4j-api:2.0.16\""));
+    }
+
+    #[test]
+    fn adds_test_catalog_dependency_entry() {
+        let temp = tempdir().expect("tempdir");
+        let config_path = temp.path().join("jot.toml");
+        fs::write(&config_path, "[project]\nname = \"demo\"\nversion = \"0.1.0\"\n")
+            .expect("write config");
+
+        add_dependency(
+            &config_path,
+            "junit",
+            DependencySpec::Catalog("junit".to_owned()),
+            true,
+        )
+        .expect("add test dependency");
+
+        let content = fs::read_to_string(&config_path).expect("read config");
+        assert!(content.contains("[test-dependencies]"));
+        assert!(content.contains("junit = { catalog = \"junit\" }"));
     }
 
     #[test]

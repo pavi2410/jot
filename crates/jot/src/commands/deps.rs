@@ -1,10 +1,17 @@
 use std::path::PathBuf;
 
 use jot_cache::JotPaths;
-use jot_config::{load_workspace_dependency_set, read_declared_dependencies};
-use jot_resolver::{MavenResolver, TreeEntry};
+use jot_config::{
+    DependencySpec, add_dependency, load_workspace_dependency_set, read_declared_dependencies,
+    remove_dependency,
+};
+use jot_resolver::{MavenCoordinate, MavenResolver, TreeEntry};
 
+use crate::utils::nearest_project_file;
 use crate::utils::write_locked_file;
+
+const DEFAULT_LOCK_DEPTH: usize = 8;
+const DEFAULT_LOCKFILE_NAME: &str = "jot.lock";
 
 pub(crate) fn handle_lock(
     dependencies: &[String],
@@ -101,6 +108,108 @@ pub(crate) fn handle_tree(
         print_tree_entry(&entry, 0);
     }
     Ok(())
+}
+
+pub(crate) fn handle_add(
+    coordinate: Option<&str>,
+    catalog: Option<&str>,
+    test: bool,
+    name: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let cwd = std::env::current_dir()?;
+    let project_file = nearest_project_file(&cwd)?;
+
+    let (dependency_name, spec) = resolve_add_input(coordinate, catalog, name)?;
+    add_dependency(&project_file, &dependency_name, spec, test)?;
+
+    println!(
+        "added dependency `{}` to {} [{}]",
+        dependency_name,
+        project_file.display(),
+        if test {
+            "test-dependencies"
+        } else {
+            "dependencies"
+        }
+    );
+
+    regenerate_lockfile_if_possible()
+}
+
+pub(crate) fn handle_remove(name: &str, test: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let cwd = std::env::current_dir()?;
+    let project_file = nearest_project_file(&cwd)?;
+
+    let removed = remove_dependency(&project_file, name, test)?;
+    if !removed {
+        return Err(format!(
+            "dependency `{name}` was not found in [{}]",
+            if test {
+                "test-dependencies"
+            } else {
+                "dependencies"
+            }
+        )
+        .into());
+    }
+
+    println!(
+        "removed dependency `{}` from {} [{}]",
+        name,
+        project_file.display(),
+        if test {
+            "test-dependencies"
+        } else {
+            "dependencies"
+        }
+    );
+
+    regenerate_lockfile_if_possible()
+}
+
+fn resolve_add_input(
+    coordinate: Option<&str>,
+    catalog: Option<&str>,
+    name: Option<&str>,
+) -> Result<(String, DependencySpec), Box<dyn std::error::Error>> {
+    match (coordinate, catalog) {
+        (Some(_), Some(_)) => {
+            Err("use either a coordinate argument or --catalog, but not both".into())
+        }
+        (None, None) => Err("missing dependency input: provide <group:artifact:version> or --catalog <name>".into()),
+        (Some(raw), None) => {
+            let parsed = MavenCoordinate::parse(raw)?;
+            if parsed.version.is_none() {
+                return Err("coordinate must include a version: <group:artifact:version>".into());
+            }
+
+            let dependency_name = name
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| parsed.artifact.clone());
+            Ok((dependency_name, DependencySpec::Coords(parsed.to_string())))
+        }
+        (None, Some(alias)) => {
+            let dependency_name = name.map(ToOwned::to_owned).unwrap_or_else(|| alias.to_owned());
+            Ok((dependency_name, DependencySpec::Catalog(alias.to_owned())))
+        }
+    }
+}
+
+fn regenerate_lockfile_if_possible() -> Result<(), Box<dyn std::error::Error>> {
+    let lock_output = PathBuf::from(DEFAULT_LOCKFILE_NAME);
+    match handle_lock(&[], DEFAULT_LOCK_DEPTH, &lock_output) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            if error
+                .to_string()
+                .contains("no dependency coordinates were provided")
+            {
+                println!("skipped lockfile regeneration: no declared external dependencies");
+                return Ok(());
+            }
+            Err(error)
+        }
+    }
 }
 
 fn print_tree_entry(entry: &TreeEntry, base_depth: usize) {

@@ -47,6 +47,20 @@ pub(crate) enum Command {
         #[arg(long)]
         global: bool,
     },
+    Add {
+        coordinate: Option<String>,
+        #[arg(long)]
+        catalog: Option<String>,
+        #[arg(long)]
+        test: bool,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    Remove {
+        name: String,
+        #[arg(long)]
+        test: bool,
+    },
     Lock {
         dependencies: Vec<String>,
         #[arg(long, default_value_t = 8)]
