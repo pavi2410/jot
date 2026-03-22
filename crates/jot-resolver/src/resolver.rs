@@ -70,6 +70,24 @@ struct EffectivePomModel {
     dependencies: Vec<ResolvedDependency>,
 }
 
+struct InterpolationContext<'a> {
+    properties: &'a BTreeMap<String, String>,
+}
+
+impl<'a> InterpolationContext<'a> {
+    fn new(properties: &'a BTreeMap<String, String>) -> Self {
+        Self { properties }
+    }
+
+    fn value(&self, input: &str) -> String {
+        interpolate_value(input, self.properties)
+    }
+
+    fn optional_ref(&self, input: Option<&String>) -> Option<String> {
+        input.map(|value| self.value(value))
+    }
+}
+
 #[derive(Debug)]
 pub struct MavenResolver {
     client: Client,
@@ -409,50 +427,39 @@ impl MavenResolver {
 
             if let Some(raw_properties) = project.properties {
                 for (name, value) in raw_properties {
-                    let interpolated = interpolate_value(&value, &properties);
+                    let interpolated = InterpolationContext::new(&properties).value(&value);
                     properties.insert(name, interpolated);
                 }
             }
 
+            let interpolation = InterpolationContext::new(&properties);
+
             if let Some(management) = project.dependency_management {
                 for dependency in management.dependencies.dependency {
-                    let Some(group) = dependency
-                        .group_id
-                        .map(|value| interpolate_value(&value, &properties))
+                    let Some(group) = interpolation.optional_ref(dependency.group_id.as_ref())
                     else {
                         continue;
                     };
-                    let Some(artifact) = dependency
-                        .artifact_id
-                        .map(|value| interpolate_value(&value, &properties))
+                    let Some(artifact) =
+                        interpolation.optional_ref(dependency.artifact_id.as_ref())
                     else {
                         continue;
                     };
 
-                    let scope = dependency
-                        .scope
-                        .as_ref()
-                        .map(|value| interpolate_value(value, &properties));
-                    let packaging = dependency
-                        .packaging
-                        .as_ref()
-                        .map(|value| interpolate_value(value, &properties));
+                    let scope = interpolation.optional_ref(dependency.scope.as_ref());
+                    let packaging = interpolation.optional_ref(dependency.packaging.as_ref());
 
                     if scope.as_deref() == Some("import") && packaging.as_deref() == Some("pom") {
-                        if let Some(version) = dependency
-                            .version
-                            .as_ref()
-                            .map(|value| interpolate_value(value, &properties))
+                        if let Some(version) =
+                            interpolation.optional_ref(dependency.version.as_ref())
                         {
                             let imported = self.build_effective_model(
                                 &MavenCoordinate {
                                     group: group.clone(),
                                     artifact: artifact.clone(),
                                     version: Some(version),
-                                    classifier: dependency
-                                        .classifier
-                                        .as_ref()
-                                        .map(|value| interpolate_value(value, &properties)),
+                                    classifier: interpolation
+                                        .optional_ref(dependency.classifier.as_ref()),
                                 },
                                 visiting,
                             )?;
@@ -464,8 +471,7 @@ impl MavenResolver {
                     }
 
                     if let Some(version) = dependency.version {
-                        managed_versions
-                            .insert((group, artifact), interpolate_value(&version, &properties));
+                        managed_versions.insert((group, artifact), interpolation.value(&version));
                     }
                 }
             }
@@ -476,18 +482,13 @@ impl MavenResolver {
                     deps.dependency
                         .into_iter()
                         .filter_map(|dependency| {
-                            let group = dependency
-                                .group_id
-                                .as_ref()
-                                .map(|value| interpolate_value(value, &properties))?;
-                            let artifact = dependency
-                                .artifact_id
-                                .as_ref()
-                                .map(|value| interpolate_value(value, &properties))?;
+                            let group = interpolation.optional_ref(dependency.group_id.as_ref())?;
+                            let artifact =
+                                interpolation.optional_ref(dependency.artifact_id.as_ref())?;
                             let version = dependency
                                 .version
                                 .as_ref()
-                                .map(|value| interpolate_value(value, &properties))
+                                .map(|value| interpolation.value(value))
                                 .or_else(|| {
                                     managed_versions
                                         .get(&(group.clone(), artifact.clone()))
@@ -498,14 +499,9 @@ impl MavenResolver {
                                 group,
                                 artifact,
                                 version,
-                                classifier: dependency
-                                    .classifier
-                                    .as_ref()
-                                    .map(|value| interpolate_value(value, &properties)),
-                                scope: dependency
-                                    .scope
-                                    .as_ref()
-                                    .map(|value| interpolate_value(value, &properties)),
+                                classifier: interpolation
+                                    .optional_ref(dependency.classifier.as_ref()),
+                                scope: interpolation.optional_ref(dependency.scope.as_ref()),
                                 optional: dependency.optional.unwrap_or(false),
                                 exclusions: dependency_exclusions(&dependency, &properties),
                             })
