@@ -1,12 +1,11 @@
 mod google_java_format;
 mod ktlint;
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use jot_config::ProjectBuildConfig;
 
-use crate::{DevTools, DevToolsError, GOOGLE_JAVA_FORMAT_COORD, KTLINT_COORD, count_bar, spinner};
+use crate::{DevTools, DevToolsError, GOOGLE_JAVA_FORMAT_COORD, KTLINT_COORD, count_bar};
 
 use google_java_format::GoogleJavaFormat;
 use ktlint::Ktlint;
@@ -66,7 +65,7 @@ impl DevTools {
 
         let mut formatters: Vec<Box<dyn Formatter>> = Vec::new();
 
-        let resolve_progress = spinner("Resolving google-java-format runtime");
+        let resolve_progress = jot_common::spinner("Resolving google-java-format runtime");
         let gjf_jar = self.resolve_exact_tool_artifact(GOOGLE_JAVA_FORMAT_COORD)?;
         resolve_progress.finish_with_message("Resolved google-java-format runtime");
         formatters.push(Box::new(GoogleJavaFormat::new(
@@ -75,7 +74,7 @@ impl DevTools {
         )));
 
         if project.kotlin_toolchain.is_some() {
-            let resolve_progress = spinner("Resolving ktlint runtime");
+            let resolve_progress = jot_common::spinner("Resolving ktlint runtime");
             let ktlint_jar = self.resolve_exact_tool_artifact(KTLINT_COORD)?;
             resolve_progress.finish_with_message("Resolved ktlint runtime");
             formatters.push(Box::new(Ktlint::new(ktlint_jar)));
@@ -135,36 +134,17 @@ impl DevTools {
 // ── Shared helpers ──────────────────────────────────────────────────────────
 
 pub(crate) fn collect_files_with_ext(project: &ProjectBuildConfig, ext: &str) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    for source_dir in project
+    let dirs: Vec<PathBuf> = project
         .source_dirs
         .iter()
         .chain(project.test_source_dirs.iter())
-    {
-        visit_files_with_ext(source_dir, ext, &mut files);
-    }
-    files.sort();
-    files.dedup();
-    files
-}
-
-fn visit_files_with_ext(root: &Path, ext: &str, files: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(root) else {
-        return;
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            visit_files_with_ext(&path, ext, files);
-        } else if path.extension().and_then(|e| e.to_str()) == Some(ext) {
-            files.push(path);
-        }
-    }
+        .cloned()
+        .collect();
+    jot_common::collect_files_by_ext(&dirs, ext)
 }
 
 pub(crate) fn join_classpath(paths: &[PathBuf]) -> Result<std::ffi::OsString, DevToolsError> {
-    Ok(std::env::join_paths(paths.iter())?)
+    Ok(jot_common::join_classpath(paths)?)
 }
 
 pub(crate) fn describe_format_issue(file: &Path, original: &str, formatted: &str) -> FormatIssue {

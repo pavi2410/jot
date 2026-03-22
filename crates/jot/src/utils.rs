@@ -29,7 +29,7 @@ pub(crate) fn write_locked_file(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let lock_path = paths.locks_dir().join(format!(
         "file-{}.lock",
-        sanitize_for_filename(&output_path.to_string_lossy())
+        jot_common::sanitize_for_filename(&output_path.to_string_lossy())
     ));
     let lock_file = OpenOptions::new()
         .create(true)
@@ -58,16 +58,6 @@ pub(crate) fn write_locked_file(
 
     let _ = lock_file.unlock();
     Ok(())
-}
-
-pub(crate) fn sanitize_for_filename(value: &str) -> String {
-    value
-        .chars()
-        .map(|ch| match ch {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' => ch,
-            _ => '_',
-        })
-        .collect()
 }
 
 pub(crate) fn find_file_named(root: &Path, target_file_name: &str) -> io::Result<Option<PathBuf>> {

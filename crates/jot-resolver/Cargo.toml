@@ -8,6 +8,7 @@ license.workspace = true
 fs2.workspace = true
 hex.workspace = true
 jot-cache = { path = "../jot-cache" }
+jot-common = { path = "../jot-common" }
 quick-xml.workspace = true
 reqwest.workspace = true
 serde.workspace = true

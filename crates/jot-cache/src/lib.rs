@@ -32,7 +32,7 @@ impl JotPaths {
     }
 
     pub fn kotlin_install_lock_path(&self, version: &str) -> PathBuf {
-        let safe_version = sanitize_for_filename(version);
+        let safe_version = jot_common::sanitize_for_filename(version);
         self.locks_dir().join(format!("kotlin-{safe_version}.lock"))
     }
 
@@ -87,8 +87,8 @@ impl JotPaths {
     }
 
     pub fn install_lock_path(&self, vendor: &str, version: &str, platform: &str) -> PathBuf {
-        let safe_version = sanitize_for_filename(version);
-        let safe_platform = sanitize_for_filename(platform);
+        let safe_version = jot_common::sanitize_for_filename(version);
+        let safe_platform = jot_common::sanitize_for_filename(platform);
         self.locks_dir()
             .join(format!("jdk-{vendor}-{safe_version}-{safe_platform}.lock"))
     }
@@ -103,15 +103,6 @@ pub struct CacheCleanupSummary {
     pub removed_lock_entries: usize,
 }
 
-fn sanitize_for_filename(value: &str) -> String {
-    value
-        .chars()
-        .map(|ch| match ch {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' => ch,
-            _ => '_',
-        })
-        .collect()
-}
 
 fn count_entries(path: &Path) -> Result<usize, CacheError> {
     if !path.exists() {

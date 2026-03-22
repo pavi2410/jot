@@ -10,7 +10,7 @@ use super::{LintContext, LintProcessingError, LintResult, LintViolation, Linter}
 use crate::format::collect_files_with_ext;
 use crate::models::PmdReport;
 use crate::{
-    DEFAULT_PMD_RULESET, DevToolsError, PMD_CLI_COORD, PMD_JAVA_COORD, PMD_MAIN_CLASS, spinner,
+    DEFAULT_PMD_RULESET, DevToolsError, PMD_CLI_COORD, PMD_JAVA_COORD, PMD_MAIN_CLASS,
     write_path_list,
 };
 
@@ -91,7 +91,7 @@ impl Linter for Pmd {
             .arg("--relativize-paths-with")
             .arg(&project.project_root);
 
-        let lint_progress = spinner(&format!("Running PMD on {} Java files", java_files.len()));
+        let lint_progress = jot_common::spinner(&format!("Running PMD on {} Java files", java_files.len()));
         let output = command.output()?;
         lint_progress
             .finish_with_message(format!("PMD completed for {} Java files", java_files.len()));

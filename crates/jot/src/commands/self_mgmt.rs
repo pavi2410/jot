@@ -3,18 +3,14 @@ use std::io;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::IsTerminal;
-use std::io::Read;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use flate2::read::GzDecoder;
 use jot_cache::JotPaths;
 use reqwest::blocking::Client;
 use semver::Version;
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 use tempfile::{NamedTempFile, TempDir};
-use zip::ZipArchive;
 
 use crate::cli::{SelfCommand, SelfSubcommand};
 use crate::commands::render::{StatusTone, print_status_stdout, stdout_color, style};
@@ -318,41 +314,12 @@ fn read_expected_checksum(
 }
 
 fn sha256_file(path: &Path) -> Result<String, Box<dyn std::error::Error>> {
-    let file = fs::File::open(path)?;
-    let mut reader = BufReader::new(file);
-    let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
-
-    loop {
-        let bytes_read = reader.read(&mut buffer)?;
-        if bytes_read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..bytes_read]);
-    }
-
-    Ok(hex::encode(hasher.finalize()))
+    Ok(jot_common::sha256_file(path)?)
 }
 
 fn extract_release_binary(archive_path: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let temp_dir = TempDir::new()?;
-    let file_name = archive_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default();
-
-    if file_name.ends_with(".zip") {
-        let file = fs::File::open(archive_path)?;
-        let mut archive = ZipArchive::new(file)?;
-        archive.extract(temp_dir.path())?;
-    } else if file_name.ends_with(".tar.gz") {
-        let file = fs::File::open(archive_path)?;
-        let decoder = GzDecoder::new(file);
-        let mut archive = tar::Archive::new(decoder);
-        archive.unpack(temp_dir.path())?;
-    } else {
-        return Err(format!("unsupported release archive: {}", archive_path.display()).into());
-    }
+    jot_common::extract_archive(archive_path, temp_dir.path())?;
 
     let binary_name = if cfg!(windows) { "jot.exe" } else { "jot" };
     let extracted_path = find_file_named(temp_dir.path(), binary_name)?.ok_or_else(|| {

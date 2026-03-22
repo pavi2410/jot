@@ -554,7 +554,10 @@ fn build_scope_index(
                     continue;
                 }
                 let scope = entry.scope.unwrap_or_else(|| "compile".to_owned());
-                index.entry(entry.coordinate.to_string()).or_default().insert(scope);
+                index
+                    .entry(entry.coordinate.to_string())
+                    .or_default()
+                    .insert(scope);
             }
         }
     }

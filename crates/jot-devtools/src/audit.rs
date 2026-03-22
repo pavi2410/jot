@@ -16,7 +16,7 @@ use toml_edit::{DocumentMut, Item, value};
 use crate::models::{
     OsvBatchRequest, OsvBatchResponse, OsvPackage, OsvQuery, OsvSeverity, OsvVulnerability,
 };
-use crate::{DEFAULT_RESOLVE_DEPTH, DevTools, DevToolsError, count_bar, spinner};
+use crate::{DEFAULT_RESOLVE_DEPTH, DevTools, DevToolsError, count_bar};
 
 #[derive(Debug)]
 pub struct AuditReport {
@@ -149,7 +149,7 @@ impl AuditContext {
 
 impl DevTools {
     pub fn audit(&self, start: &Path, fix: bool) -> Result<AuditReport, DevToolsError> {
-        let resolve_progress = spinner("Resolving dependency graph for audit");
+        let resolve_progress = jot_common::spinner("Resolving dependency graph for audit");
         let context = AuditContext::load(start, &self.resolver, Some(&resolve_progress))?;
         resolve_progress.finish_with_message(format!(
             "Resolved dependency graph for {} packages",
@@ -161,7 +161,7 @@ impl DevTools {
             package_ids.push(package.coordinate.clone());
         }
 
-        let batch_progress = spinner(&format!("Querying OSV for {} packages", package_ids.len()));
+        let batch_progress = jot_common::spinner(&format!("Querying OSV for {} packages", package_ids.len()));
         let response: OsvBatchResponse = self
             .osv
             .post("https://api.osv.dev/v1/querybatch")
@@ -249,7 +249,7 @@ impl DevTools {
         });
 
         let fixed_dependencies = if fix {
-            let fix_progress = spinner("Applying vulnerability fixes");
+            let fix_progress = jot_common::spinner("Applying vulnerability fixes");
             let fixed = apply_audit_fixes(start, &context, &findings)?;
             fix_progress
                 .finish_with_message(format!("Updated {} direct dependency declarations", fixed));
@@ -445,7 +445,7 @@ fn write_locked_file(
 ) -> Result<(), DevToolsError> {
     let lock_path = paths.locks_dir().join(format!(
         "file-{}.lock",
-        sanitize_for_filename(&output_path.to_string_lossy())
+        jot_common::sanitize_for_filename(&output_path.to_string_lossy())
     ));
     let lock_file = OpenOptions::new()
         .create(true)
@@ -477,15 +477,6 @@ fn write_locked_file(
     Ok(())
 }
 
-fn sanitize_for_filename(value: &str) -> String {
-    value
-        .chars()
-        .map(|ch| match ch {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' => ch,
-            _ => '_',
-        })
-        .collect()
-}
 
 pub(crate) fn rewrite_coordinate(
     coords: &str,

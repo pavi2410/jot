@@ -1,5 +1,8 @@
+use std::path::PathBuf;
+
 use clap::Parser;
 use jot_cache::JotPaths;
+use jot_config::load_workspace_build_config;
 use jot_toolchain::ToolchainManager;
 
 use crate::cli::{Cli, Command};
@@ -99,4 +102,40 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+/// Resolved project targets: either workspace members or a single project.
+pub(crate) enum ProjectTargets {
+    Workspace { roots: Vec<PathBuf> },
+    Single { root: PathBuf },
+}
+
+/// Resolve which project roots to operate on, handling workspace detection and `--module` filtering.
+pub(crate) fn select_project_targets(
+    module: Option<&str>,
+) -> Result<ProjectTargets, Box<dyn std::error::Error>> {
+    let cwd = std::env::current_dir()?;
+    if let Some(workspace) = load_workspace_build_config(&cwd)? {
+        let roots = if let Some(module) = module {
+            let member = workspace
+                .members
+                .iter()
+                .find(|candidate| candidate.module_name == module)
+                .ok_or_else(|| format!("unknown workspace module `{module}`"))?;
+            vec![member.project.project_root.clone()]
+        } else {
+            workspace
+                .members
+                .iter()
+                .map(|member| member.project.project_root.clone())
+                .collect::<Vec<_>>()
+        };
+        return Ok(ProjectTargets::Workspace { roots });
+    }
+
+    if module.is_some() {
+        return Err("--module can only be used from inside a workspace".into());
+    }
+
+    Ok(ProjectTargets::Single { root: cwd })
 }

@@ -7,11 +7,10 @@ license.workspace = true
 [dependencies]
 annotate-snippets.workspace = true
 clap.workspace = true
-flate2.workspace = true
 fs2.workspace = true
-hex.workspace = true
 jot-builder = { path = "../jot-builder" }
 jot-cache = { path = "../jot-cache" }
+jot-common = { path = "../jot-common" }
 jot-config = { path = "../jot-config" }
 jot-devtools = { path = "../jot-devtools" }
 jot-resolver = { path = "../jot-resolver" }
@@ -19,12 +18,9 @@ jot-toolchain = { path = "../jot-toolchain" }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
 quick-xml.workspace = true
-tar.workspace = true
 tempfile.workspace = true
 toml.workspace = true
-zip.workspace = true
 self-replace = "1.5.0"
 semver = "1.0.27"
 tabled.workspace = true

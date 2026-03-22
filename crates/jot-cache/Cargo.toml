@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 directories.workspace = true
+jot-common = { path = "../jot-common" }
 thiserror.workspace = true
 
 [dev-dependencies]

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
@@ -501,21 +501,7 @@ fn write_sha256_sidecars(paths: &[PathBuf]) -> Result<(), Box<dyn std::error::Er
 }
 
 fn compute_sha256(path: &Path) -> Result<String, Box<dyn std::error::Error>> {
-    use sha2::{Digest, Sha256};
-
-    let mut file = fs::File::open(path)?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 65_536];
-
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-
-    Ok(hex::encode(hasher.finalize()))
+    Ok(jot_common::sha256_file(path)?)
 }
 
 fn find_gpg_binary() -> Result<String, Box<dyn std::error::Error>> {

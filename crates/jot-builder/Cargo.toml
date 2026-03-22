@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 annotate-snippets = "0.12.13"
+jot-common = { path = "../jot-common" }
 jot-config = { path = "../jot-config" }
 jot-resolver = { path = "../jot-resolver" }
 jot-toolchain = { path = "../jot-toolchain" }

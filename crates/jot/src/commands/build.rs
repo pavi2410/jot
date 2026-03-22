@@ -3,7 +3,7 @@ use std::path::Path;
 use annotate_snippets::Level;
 use jot_builder::JavaProjectBuilder;
 use jot_cache::JotPaths;
-use jot_config::{find_workspace_root_jot_toml, load_workspace_build_config};
+use jot_config::find_workspace_root_jot_toml;
 use jot_devtools::{
     DevTools, FormatIssue, FormatReport, LintProcessingError, LintReport, LintViolation,
 };
@@ -84,46 +84,21 @@ pub(crate) fn handle_fmt(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let resolver = MavenResolver::new(paths)?;
     let devtools = DevTools::new(resolver, manager)?;
-    let cwd = std::env::current_dir()?;
     let color = stderr_color();
+    let targets = super::select_project_targets(module)?;
+    let roots = match targets {
+        super::ProjectTargets::Workspace { roots } => roots,
+        super::ProjectTargets::Single { root } => vec![root],
+    };
 
-    if let Some(workspace) = load_workspace_build_config(&cwd)? {
-        let members = if let Some(module) = module {
-            let member = workspace
-                .members
-                .iter()
-                .find(|candidate| candidate.module_name == module)
-                .ok_or_else(|| format!("unknown workspace module `{module}`"))?;
-            vec![member.project.project_root.clone()]
-        } else {
-            workspace
-                .members
-                .iter()
-                .map(|member| member.project.project_root.clone())
-                .collect::<Vec<_>>()
-        };
-
-        let mut had_changes = false;
-        for member in members {
-            let report = devtools.format(&member, check)?;
-            had_changes |= !report.changed_files.is_empty();
-            print_format_report(&report, color);
-        }
-
-        if check && had_changes {
-            return Err("format check failed".into());
-        }
-        return Ok(());
+    let mut had_changes = false;
+    for root in roots {
+        let report = devtools.format(&root, check)?;
+        had_changes |= !report.changed_files.is_empty();
+        print_format_report(&report, color);
     }
 
-    if module.is_some() {
-        return Err("--module can only be used from inside a workspace".into());
-    }
-
-    let report = devtools.format(&cwd, check)?;
-    print_format_report(&report, color);
-    let has_changes = !report.changed_files.is_empty();
-    if check && has_changes {
+    if check && had_changes {
         return Err("format check failed".into());
     }
     Ok(())
@@ -136,44 +111,20 @@ pub(crate) fn handle_lint(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let resolver = MavenResolver::new(paths)?;
     let devtools = DevTools::new(resolver, manager)?;
-    let cwd = std::env::current_dir()?;
     let color = stderr_color();
+    let targets = super::select_project_targets(module)?;
+    let roots = match targets {
+        super::ProjectTargets::Workspace { roots } => roots,
+        super::ProjectTargets::Single { root } => vec![root],
+    };
 
-    if let Some(workspace) = load_workspace_build_config(&cwd)? {
-        let members = if let Some(module) = module {
-            let member = workspace
-                .members
-                .iter()
-                .find(|candidate| candidate.module_name == module)
-                .ok_or_else(|| format!("unknown workspace module `{module}`"))?;
-            vec![member.project.project_root.clone()]
-        } else {
-            workspace
-                .members
-                .iter()
-                .map(|member| member.project.project_root.clone())
-                .collect::<Vec<_>>()
-        };
-
-        let mut violations = 0;
-        for member in members {
-            let report = devtools.lint(&member)?;
-            print_lint_report(&report, color);
-            violations += report.violations.len() + report.processing_errors.len();
-        }
-        if violations > 0 {
-            return Err("lint found violations".into());
-        }
-        return Ok(());
+    let mut violations = 0;
+    for root in roots {
+        let report = devtools.lint(&root)?;
+        print_lint_report(&report, color);
+        violations += report.violations.len() + report.processing_errors.len();
     }
-
-    if module.is_some() {
-        return Err("--module can only be used from inside a workspace".into());
-    }
-
-    let report = devtools.lint(&cwd)?;
-    print_lint_report(&report, color);
-    if !report.violations.is_empty() || !report.processing_errors.is_empty() {
+    if violations > 0 {
         return Err("lint found violations".into());
     }
     Ok(())

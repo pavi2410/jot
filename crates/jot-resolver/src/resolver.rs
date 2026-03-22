@@ -86,10 +86,10 @@ impl CoordinateCacheKey {
             .unwrap_or_default();
 
         Self {
-            group: sanitize_for_filename(&coordinate.group),
-            artifact: sanitize_for_filename(&coordinate.artifact),
-            version: coordinate.version.as_deref().map(sanitize_for_filename),
-            classifier_suffix: sanitize_for_filename(&classifier_suffix),
+            group: jot_common::sanitize_for_filename(&coordinate.group),
+            artifact: jot_common::sanitize_for_filename(&coordinate.artifact),
+            version: coordinate.version.as_deref().map(jot_common::sanitize_for_filename),
+            classifier_suffix: jot_common::sanitize_for_filename(&classifier_suffix),
         }
     }
 
@@ -151,7 +151,7 @@ impl MavenResolver {
         Ok(Self {
             client: Client::builder().build()?,
             paths,
-            offline: offline_mode_enabled(),
+            offline: jot_common::offline_mode_enabled(),
         })
     }
 
@@ -681,14 +681,14 @@ impl MavenResolver {
     fn cache_lock_path(&self, target: &Path) -> PathBuf {
         self.paths.locks_dir().join(format!(
             "resolver-{}.lock",
-            sanitize_for_filename(&target.to_string_lossy())
+            jot_common::sanitize_for_filename(&target.to_string_lossy())
         ))
     }
 
     fn artifact_lock_path(&self, coordinate: &MavenCoordinate) -> PathBuf {
         self.paths.locks_dir().join(format!(
             "artifact-{}.lock",
-            sanitize_for_filename(&coordinate.to_string())
+            jot_common::sanitize_for_filename(&coordinate.to_string())
         ))
     }
 
@@ -916,27 +916,8 @@ pub(crate) fn write_text_atomic(path: &Path, body: &str) -> Result<(), ResolverE
     Ok(())
 }
 
-fn offline_mode_enabled() -> bool {
-    std::env::var("JOT_OFFLINE").ok().is_some_and(|value| {
-        matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        )
-    })
-}
-
 pub(crate) fn include_classpath_scope(scope: Option<&str>) -> bool {
     !matches!(scope, Some("test" | "provided" | "import"))
-}
-
-pub(crate) fn sanitize_for_filename(value: &str) -> String {
-    value
-        .chars()
-        .map(|ch| match ch {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' => ch,
-            _ => '_',
-        })
-        .collect()
 }
 
 pub(crate) fn interpolate_value(input: &str, properties: &BTreeMap<String, String>) -> String {

@@ -9,7 +9,7 @@ use tempfile::NamedTempFile;
 use super::{LintContext, LintResult, LintViolation, Linter};
 use crate::format::collect_files_with_ext;
 use crate::models::CheckstyleReport;
-use crate::{DEFAULT_DETEKT_CONFIG, DETEKT_CLI_COORD, DETEKT_MAIN_CLASS, DevToolsError, spinner};
+use crate::{DEFAULT_DETEKT_CONFIG, DETEKT_CLI_COORD, DETEKT_MAIN_CLASS, DevToolsError};
 
 pub(crate) struct Detekt {
     jar: PathBuf,
@@ -72,7 +72,7 @@ impl Linter for Detekt {
             .arg("--report")
             .arg(format!("xml:{}", detekt_report.path().display()));
 
-        let lint_progress = spinner(&format!(
+        let lint_progress = jot_common::spinner(&format!(
             "Running detekt on {} Kotlin files",
             kotlin_files.len()
         ));

@@ -1,21 +1,18 @@
 use std::fmt::{Display, Formatter};
 use std::fs;
 use std::fs::OpenOptions;
-use std::io::{BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use flate2::read::GzDecoder;
 use fs2::FileExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use jot_cache::JotPaths;
 use jot_platform::{OperatingSystem, Platform};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use tempfile::{NamedTempFile, TempDir};
 use time::OffsetDateTime;
-use zip::ZipArchive;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, clap::ValueEnum)]
 #[serde(rename_all = "kebab-case")]
@@ -162,7 +159,7 @@ impl ToolchainManager {
             client,
             paths,
             platform: Platform::current()?,
-            offline: offline_mode_enabled(),
+            offline: jot_common::offline_mode_enabled(),
         })
     }
 
@@ -172,11 +169,14 @@ impl ToolchainManager {
         options: InstallOptions,
     ) -> Result<InstalledJdk, ToolchainError> {
         let vendor = request.vendor().unwrap_or(JdkVendor::Adoptium);
-        let _install_lock =
-            InstallLock::acquire(&self.paths, vendor, request.version(), &self.platform)?;
+        let _install_lock = FileLock::acquire(&self.paths.install_lock_path(
+            &vendor.to_string(),
+            request.version(),
+            &self.platform.to_string(),
+        ))?;
 
         let resolve_progress =
-            spinner(&format!("Resolving JDK {} ({})", request.version(), vendor));
+            jot_common::spinner(&format!("Resolving JDK {} ({})", request.version(), vendor));
         let asset = self.resolve_latest_asset(request.version(), vendor)?;
         resolve_progress.finish_with_message(format!(
             "Resolved {} {} for {}",
@@ -210,7 +210,7 @@ impl ToolchainManager {
         )?;
 
         let temp_dir = TempDir::new_in(self.paths.jdks_dir())?;
-        let extract_progress = spinner(&format!("Extracting {}", asset.binary.package.name));
+        let extract_progress = jot_common::spinner(&format!("Extracting {}", asset.binary.package.name));
         self.extract_archive(&download_path, temp_dir.path())?;
         extract_progress.finish_with_message(format!("Extracted {}", asset.binary.package.name));
         let java_home = detect_java_home(temp_dir.path())?;
@@ -288,7 +288,7 @@ impl ToolchainManager {
         request: &KotlinToolchainRequest,
     ) -> Result<InstalledKotlin, ToolchainError> {
         let version = &request.version;
-        let _lock = KotlinInstallLock::acquire(&self.paths, version)?;
+        let _lock = FileLock::acquire(&self.paths.kotlin_install_lock_path(version))?;
 
         let url = format!(
             "https://github.com/JetBrains/kotlin/releases/download/v{version}/kotlin-compiler-{version}.zip"
@@ -297,7 +297,7 @@ impl ToolchainManager {
         let download_filename = format!("kotlin-compiler-{version}.zip");
         let download_path = self.paths.downloads_dir().join(&download_filename);
 
-        let resolve_progress = spinner(&format!("Resolving Kotlin {version}"));
+        let resolve_progress = jot_common::spinner(&format!("Resolving Kotlin {version}"));
         resolve_progress.finish_with_message(format!("Resolved Kotlin {version}"));
 
         if self.offline && !download_path.is_file() {
@@ -313,7 +313,7 @@ impl ToolchainManager {
             fs::remove_dir_all(&install_dir)?;
         }
 
-        let extract_progress = spinner(&format!("Extracting {download_filename}"));
+        let extract_progress = jot_common::spinner(&format!("Extracting {download_filename}"));
         let temp_dir = TempDir::new_in(self.paths.kotlins_dir())?;
         self.extract_archive(&download_path, temp_dir.path())?;
         extract_progress.finish_with_message(format!("Extracted {download_filename}"));
@@ -404,7 +404,7 @@ impl ToolchainManager {
     }
 
     fn resolve_cache_path(&self, feature_version: &str, vendor: JdkVendor) -> PathBuf {
-        let safe_version = sanitize_for_filename(feature_version);
+        let safe_version = jot_common::sanitize_for_filename(feature_version);
         self.paths.resolve_cache_dir().join(format!(
             "asset-{vendor}-{version}-{platform}.json",
             vendor = vendor,
@@ -528,20 +528,7 @@ impl ToolchainManager {
     }
 
     fn verify_checksum(&self, path: &Path, expected: &str) -> Result<(), ToolchainError> {
-        let file = fs::File::open(path)?;
-        let mut reader = BufReader::new(file);
-        let mut hasher = Sha256::new();
-        let mut buffer = [0_u8; 64 * 1024];
-
-        loop {
-            let bytes_read = reader.read(&mut buffer)?;
-            if bytes_read == 0 {
-                break;
-            }
-            hasher.update(&buffer[..bytes_read]);
-        }
-
-        let actual = hex::encode(hasher.finalize());
+        let actual = jot_common::sha256_file(path)?;
         if actual != expected {
             return Err(ToolchainError::ChecksumMismatch {
                 path: path.to_path_buf(),
@@ -558,28 +545,8 @@ impl ToolchainManager {
         archive_path: &Path,
         destination: &Path,
     ) -> Result<(), ToolchainError> {
-        let file = fs::File::open(archive_path)?;
-        let file_name = archive_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or_default();
-
-        if file_name.ends_with(".zip") {
-            let mut archive = ZipArchive::new(file)?;
-            archive.extract(destination)?;
-            return Ok(());
-        }
-
-        if file_name.ends_with(".tar.gz") || file_name.ends_with(".tgz") {
-            let decoder = GzDecoder::new(file);
-            let mut archive = tar::Archive::new(decoder);
-            archive.unpack(destination)?;
-            return Ok(());
-        }
-
-        Err(ToolchainError::UnsupportedArchive(
-            archive_path.to_path_buf(),
-        ))
+        jot_common::extract_archive(archive_path, destination)?;
+        Ok(())
     }
 
     fn read_installation(path: &Path) -> Result<InstalledJdk, ToolchainError> {
@@ -588,78 +555,31 @@ impl ToolchainManager {
     }
 }
 
-struct InstallLock {
+struct FileLock {
     file: fs::File,
 }
 
-impl InstallLock {
-    fn acquire(
-        paths: &JotPaths,
-        vendor: JdkVendor,
-        version: &str,
-        platform: &Platform,
-    ) -> Result<Self, ToolchainError> {
-        let lock_path =
-            paths.install_lock_path(&vendor.to_string(), version, &platform.to_string());
+impl FileLock {
+    fn acquire(path: &Path) -> Result<Self, ToolchainError> {
         let file = OpenOptions::new()
             .create(true)
             .truncate(false)
             .read(true)
             .write(true)
-            .open(&lock_path)?;
+            .open(path)?;
         file.lock_exclusive()
             .map_err(|source| ToolchainError::LockAcquisition {
-                path: lock_path,
+                path: path.to_path_buf(),
                 source,
             })?;
         Ok(Self { file })
     }
 }
 
-impl Drop for InstallLock {
+impl Drop for FileLock {
     fn drop(&mut self) {
         let _ = self.file.unlock();
     }
-}
-
-struct KotlinInstallLock {
-    file: fs::File,
-}
-
-impl KotlinInstallLock {
-    fn acquire(paths: &JotPaths, version: &str) -> Result<Self, ToolchainError> {
-        let lock_path = paths.kotlin_install_lock_path(version);
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(&lock_path)?;
-        file.lock_exclusive()
-            .map_err(|source| ToolchainError::LockAcquisition {
-                path: lock_path,
-                source,
-            })?;
-        Ok(Self { file })
-    }
-}
-
-impl Drop for KotlinInstallLock {
-    fn drop(&mut self) {
-        let _ = self.file.unlock();
-    }
-}
-
-fn spinner(message: &str) -> ProgressBar {
-    let progress = ProgressBar::new_spinner();
-    progress.set_style(
-        ProgressStyle::with_template("{spinner:.green} {msg}")
-            .expect("valid spinner template")
-            .tick_strings(&["-", "\\", "|", "/"]),
-    );
-    progress.enable_steady_tick(std::time::Duration::from_millis(100));
-    progress.set_message(message.to_owned());
-    progress
 }
 
 fn download_bar(total_bytes: Option<u64>, message: &str) -> ProgressBar {
@@ -712,16 +632,6 @@ fn is_installation_usable(installation: &InstalledJdk) -> bool {
     java_binary_path(&installation.java_home).is_file()
 }
 
-fn sanitize_for_filename(value: &str) -> String {
-    value
-        .chars()
-        .map(|ch| match ch {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' => ch,
-            _ => '_',
-        })
-        .collect()
-}
-
 fn is_cache_fresh(fetched_at: OffsetDateTime, now: OffsetDateTime, ttl: Duration) -> bool {
     if now < fetched_at {
         return true;
@@ -731,14 +641,6 @@ fn is_cache_fresh(fetched_at: OffsetDateTime, now: OffsetDateTime, ttl: Duration
     age.whole_seconds() <= ttl.as_secs() as i64
 }
 
-fn offline_mode_enabled() -> bool {
-    std::env::var("JOT_OFFLINE").ok().is_some_and(|value| {
-        matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        )
-    })
-}
 
 fn java_binary_path(java_home: &Path) -> PathBuf {
     binary_path(java_home, "java")
@@ -841,6 +743,16 @@ pub enum ToolchainError {
     OfflineArchiveMissing { path: PathBuf, url: String },
     #[error("offline mode is enabled and would need to download {url}")]
     OfflineDownloadRequired { url: String },
+}
+
+impl From<jot_common::CommonError> for ToolchainError {
+    fn from(error: jot_common::CommonError) -> Self {
+        match error {
+            jot_common::CommonError::Io(error) => Self::Io(error),
+            jot_common::CommonError::Zip(error) => Self::Zip(error),
+            jot_common::CommonError::UnsupportedArchive(path) => Self::UnsupportedArchive(path),
+        }
+    }
 }
 
 #[cfg(test)]

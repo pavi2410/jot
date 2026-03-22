@@ -129,7 +129,7 @@ pub(crate) fn build_compiler_chain(
 // ── Shared helpers ──────────────────────────────────────────────────────────
 
 pub(crate) fn join_paths_for_classpath(paths: &[PathBuf]) -> Result<OsString, BuildError> {
-    std::env::join_paths(paths).map_err(BuildError::JoinPaths)
+    jot_common::join_classpath(paths).map_err(BuildError::JoinPaths)
 }
 
 pub(crate) fn java_release_flag(version: &str) -> Option<String> {
@@ -148,32 +148,5 @@ pub(crate) fn collect_sources_by_extension(
     source_dirs: &[PathBuf],
     extension: &str,
 ) -> Result<Vec<PathBuf>, BuildError> {
-    let mut files = Vec::new();
-    for source_dir in source_dirs {
-        collect_sources_in_dir(source_dir, extension, &mut files)?;
-    }
-    files.sort();
-    Ok(files)
-}
-
-fn collect_sources_in_dir(
-    path: &Path,
-    extension: &str,
-    files: &mut Vec<PathBuf>,
-) -> Result<(), BuildError> {
-    if !path.exists() {
-        return Ok(());
-    }
-
-    for entry in std::fs::read_dir(path)? {
-        let entry = entry?;
-        let entry_path = entry.path();
-        if entry.file_type()?.is_dir() {
-            collect_sources_in_dir(&entry_path, extension, files)?;
-        } else if entry_path.extension().and_then(|value| value.to_str()) == Some(extension) {
-            files.push(entry_path);
-        }
-    }
-
-    Ok(())
+    Ok(jot_common::collect_files_by_ext(source_dirs, extension))
 }

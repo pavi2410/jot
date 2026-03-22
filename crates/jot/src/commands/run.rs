@@ -1,6 +1,6 @@
 use jot_builder::JavaProjectBuilder;
 use jot_cache::JotPaths;
-use jot_config::{find_workspace_root_jot_toml, load_workspace_build_config};
+use jot_config::find_workspace_root_jot_toml;
 use jot_resolver::MavenResolver;
 use jot_toolchain::ToolchainManager;
 
@@ -60,60 +60,27 @@ pub(crate) fn handle_test(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let resolver = MavenResolver::new(paths)?;
     let builder = JavaProjectBuilder::new(resolver, manager);
-    let cwd = std::env::current_dir()?;
+    let targets = super::select_project_targets(module)?;
+    let roots = match targets {
+        super::ProjectTargets::Workspace { roots } => roots,
+        super::ProjectTargets::Single { root } => vec![root],
+    };
 
-    if let Some(workspace) = load_workspace_build_config(&cwd)? {
-        let selected = if let Some(module) = module {
-            let member = workspace
-                .members
-                .iter()
-                .find(|candidate| candidate.module_name == module)
-                .ok_or_else(|| format!("unknown workspace module `{module}`"))?;
-            vec![member.project.project_root.clone()]
+    for project_root in roots {
+        let output = builder.test(&project_root)?;
+        if output.tests_found {
+            print_status_stdout(
+                "test",
+                StatusTone::Success,
+                format!("execution completed for {}", output.project.name),
+            );
         } else {
-            workspace
-                .members
-                .iter()
-                .map(|member| member.project.project_root.clone())
-                .collect::<Vec<_>>()
-        };
-
-        for project_root in selected {
-            let output = builder.test(&project_root)?;
-            if output.tests_found {
-                print_status_stdout(
-                    "test",
-                    StatusTone::Success,
-                    format!("execution completed for {}", output.project.name),
-                );
-            } else {
-                print_status_stdout(
-                    "test",
-                    StatusTone::Dim,
-                    format!("no tests found for {}", output.project.name),
-                );
-            }
+            print_status_stdout(
+                "test",
+                StatusTone::Dim,
+                format!("no tests found for {}", output.project.name),
+            );
         }
-        return Ok(());
-    }
-
-    if module.is_some() {
-        return Err("--module can only be used from inside a workspace".into());
-    }
-
-    let output = builder.test(&cwd)?;
-    if output.tests_found {
-        print_status_stdout(
-            "test",
-            StatusTone::Success,
-            format!("execution completed for {}", output.project.name),
-        );
-    } else {
-        print_status_stdout(
-            "test",
-            StatusTone::Dim,
-            format!("no tests found for {}", output.project.name),
-        );
     }
     Ok(())
 }

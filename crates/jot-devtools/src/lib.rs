@@ -139,18 +139,6 @@ pub enum DevToolsError {
 
 // ── Shared utilities ────────────────────────────────────────────────────────
 
-pub(crate) fn spinner(message: &str) -> ProgressBar {
-    let progress = ProgressBar::new_spinner();
-    progress.set_style(
-        ProgressStyle::with_template("{spinner:.green} {msg}")
-            .expect("valid spinner template")
-            .tick_strings(&["-", "\\", "|", "/"]),
-    );
-    progress.enable_steady_tick(std::time::Duration::from_millis(100));
-    progress.set_message(message.to_owned());
-    progress
-}
-
 pub(crate) fn count_bar(total: usize, message: &str) -> ProgressBar {
     let progress = ProgressBar::new(total as u64);
     progress.set_style(
