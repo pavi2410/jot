@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
-use std::io::IsTerminal;
 
 use jot_cache::JotPaths;
 use jot_devtools::{AuditFinding, AuditReport, AuditSeverity, DevTools};
 use jot_resolver::MavenResolver;
 use jot_toolchain::ToolchainManager;
+
+use crate::commands::render::{StatusTone, print_status_stdout, status_badge, stdout_color, style};
 
 pub(crate) fn handle_audit(
     paths: JotPaths,
@@ -18,9 +19,13 @@ pub(crate) fn handle_audit(
     let report = devtools.audit(&cwd, fix)?;
 
     if report.findings.is_empty() {
-        println!(
-            "No vulnerabilities found across {} packages",
-            report.packages_scanned
+        print_status_stdout(
+            "audit",
+            StatusTone::Success,
+            format!(
+                "no vulnerabilities found across {} packages",
+                report.packages_scanned
+            ),
         );
         return Ok(());
     }
@@ -29,12 +34,16 @@ pub(crate) fn handle_audit(
         .findings
         .iter()
         .any(|finding| ci && finding.severity.is_ci_failure());
-    print_audit_report(&report, ci, std::io::stdout().is_terminal());
+    print_audit_report(&report, ci, stdout_color());
 
     if fix {
-        println!(
-            "updated {} direct dependency declarations",
-            report.fixed_dependencies
+        print_status_stdout(
+            "fix",
+            StatusTone::Success,
+            format!(
+                "updated {} direct dependency declarations",
+                report.fixed_dependencies
+            ),
         );
     }
 
@@ -60,16 +69,19 @@ fn print_audit_report(report: &AuditReport, ci: bool, color: bool) {
         *by_severity.entry(finding.severity).or_default() += 1;
     }
 
-    println!("Audit summary");
-    println!("  packages scanned: {}", report.packages_scanned);
-    println!("  findings: {}", report.findings.len());
-    println!(
-        "  severities: critical={} high={} moderate={} low={} unknown={}",
-        by_severity[&AuditSeverity::Critical],
-        by_severity[&AuditSeverity::High],
-        by_severity[&AuditSeverity::Moderate],
-        by_severity[&AuditSeverity::Low],
-        by_severity[&AuditSeverity::Unknown],
+    print_status_stdout(
+        "audit",
+        StatusTone::Info,
+        format!(
+            "packages={} findings={} critical={} high={} moderate={} low={} unknown={}",
+            report.packages_scanned,
+            report.findings.len(),
+            by_severity[&AuditSeverity::Critical],
+            by_severity[&AuditSeverity::High],
+            by_severity[&AuditSeverity::Moderate],
+            by_severity[&AuditSeverity::Low],
+            by_severity[&AuditSeverity::Unknown],
+        ),
     );
     println!();
 
@@ -93,7 +105,10 @@ fn print_audit_finding(finding: &AuditFinding, ci: bool, color: bool) {
         println!("  affected members: {}", finding.members.join(", "));
     }
     if ci && finding.severity.is_ci_failure() {
-        println!("  ci gate: this finding fails --ci");
+        println!(
+            "  {}",
+            style("ci gate: this finding fails --ci", StatusTone::Error, color)
+        );
     }
     for (index, chain) in finding.chains.iter().enumerate() {
         let rendered = chain
@@ -107,17 +122,12 @@ fn print_audit_finding(finding: &AuditFinding, ci: bool, color: bool) {
 }
 
 fn severity_badge(severity: AuditSeverity, color: bool) -> String {
-    let label = format!("[{}]", severity.label());
-    if !color {
-        return label;
-    }
-
-    let code = match severity {
-        AuditSeverity::Critical => "1;31",
-        AuditSeverity::High => "31",
-        AuditSeverity::Moderate => "33",
-        AuditSeverity::Low => "34",
-        AuditSeverity::Unknown => "90",
+    let tone = match severity {
+        AuditSeverity::Critical => StatusTone::Error,
+        AuditSeverity::High => StatusTone::Warning,
+        AuditSeverity::Moderate => StatusTone::Info,
+        AuditSeverity::Low => StatusTone::Accent,
+        AuditSeverity::Unknown => StatusTone::Dim,
     };
-    format!("\u{1b}[{code}m{label}\u{1b}[0m")
+    status_badge(severity.label(), tone, color)
 }

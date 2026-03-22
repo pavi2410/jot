@@ -18,6 +18,8 @@ use reqwest::StatusCode;
 use reqwest::blocking::Client;
 use tempfile::TempDir;
 
+use crate::commands::render::{StatusTone, print_status_stdout};
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_publish(
     paths: JotPaths,
@@ -71,16 +73,20 @@ pub(crate) fn handle_publish(
                 dry_run,
                 allow_snapshot,
             )?;
-            println!(
-                "published {}:{}:{}",
-                module_output
-                    .build
-                    .project
-                    .group
-                    .as_deref()
-                    .unwrap_or("<missing-group>"),
-                module_output.build.project.name,
-                module_output.build.project.version
+            print_status_stdout(
+                "publish",
+                StatusTone::Success,
+                format!(
+                    "{}:{}:{}",
+                    module_output
+                        .build
+                        .project
+                        .group
+                        .as_deref()
+                        .unwrap_or("<missing-group>"),
+                    module_output.build.project.name,
+                    module_output.build.project.version
+                ),
             );
         }
         return Ok(());
@@ -101,11 +107,15 @@ pub(crate) fn handle_publish(
         dry_run,
         allow_snapshot,
     )?;
-    println!(
-        "published {}:{}:{}",
-        output.project.group.as_deref().unwrap_or("<missing-group>"),
-        output.project.name,
-        output.project.version
+    print_status_stdout(
+        "publish",
+        StatusTone::Success,
+        format!(
+            "{}:{}:{}",
+            output.project.group.as_deref().unwrap_or("<missing-group>"),
+            output.project.name,
+            output.project.version
+        ),
     );
     Ok(())
 }
@@ -132,9 +142,10 @@ fn publish_project(
     write_sha256_sidecars(&staged.uploads)?;
 
     if dry_run {
-        println!(
-            "dry-run: staged publish bundle at {}",
-            staged.stage_dir.display()
+        print_status_stdout(
+            "dry-run",
+            StatusTone::Info,
+            format!("staged publish bundle at {}", staged.stage_dir.display()),
         );
         return Ok(());
     }

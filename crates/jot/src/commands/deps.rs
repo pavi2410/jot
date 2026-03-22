@@ -8,7 +8,9 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::commands::render::{format_tree_entry, print_sharp_table};
+use crate::commands::render::{
+    StatusTone, format_tree_entry, print_sharp_table, print_status_stdout, stdout_color, style,
+};
 use crate::utils::nearest_project_file;
 use crate::utils::write_locked_file;
 
@@ -67,7 +69,11 @@ pub(crate) fn handle_lock(
         output.clone()
     };
     write_locked_file(&paths, &output_path, content.as_bytes())?;
-    println!("wrote {}", output_path.display());
+    print_status_stdout(
+        "lock",
+        StatusTone::Success,
+        output_path.display().to_string(),
+    );
     Ok(())
 }
 
@@ -80,23 +86,27 @@ pub(crate) fn handle_resolve(
     let resolver = MavenResolver::new(paths)?;
     if deps {
         let (coordinate, dependencies) = resolver.resolve_direct_dependencies(dependency)?;
-        println!("{}", coordinate);
+        print_status_stdout("resolve", StatusTone::Info, coordinate.to_string());
         if dependencies.is_empty() {
-            println!("  (no direct dependencies)");
+            print_status_stdout("deps", StatusTone::Dim, "no direct dependencies");
         } else {
             for dependency in dependencies {
                 let version = dependency.version.unwrap_or_else(|| "<managed>".to_owned());
                 let scope = dependency.scope.unwrap_or_else(|| "compile".to_owned());
                 let optional = if dependency.optional { " optional" } else { "" };
-                println!(
-                    "  - {}:{}:{} [{}{}]",
-                    dependency.group, dependency.artifact, version, scope, optional
+                print_status_stdout(
+                    "dep",
+                    StatusTone::Accent,
+                    format!(
+                        "{}:{}:{} [{}{}]",
+                        dependency.group, dependency.artifact, version, scope, optional
+                    ),
                 );
             }
         }
     } else {
         let coordinate = resolver.resolve_coordinate(dependency)?;
-        println!("{}", coordinate);
+        print_status_stdout("resolve", StatusTone::Info, coordinate.to_string());
     }
     Ok(())
 }
@@ -138,15 +148,19 @@ pub(crate) fn handle_add(
     let (dependency_name, spec) = resolve_add_input(coordinate, catalog, name)?;
     add_dependency(&project_file, &dependency_name, spec, test)?;
 
-    println!(
-        "added dependency `{}` to {} [{}]",
-        dependency_name,
-        project_file.display(),
-        if test {
-            "test-dependencies"
-        } else {
-            "dependencies"
-        }
+    print_status_stdout(
+        "add",
+        StatusTone::Success,
+        format!(
+            "{} -> {} [{}]",
+            dependency_name,
+            project_file.display(),
+            if test {
+                "test-dependencies"
+            } else {
+                "dependencies"
+            }
+        ),
     );
 
     regenerate_lockfile_if_possible()
@@ -169,15 +183,19 @@ pub(crate) fn handle_remove(name: &str, test: bool) -> Result<(), Box<dyn std::e
         .into());
     }
 
-    println!(
-        "removed dependency `{}` from {} [{}]",
-        name,
-        project_file.display(),
-        if test {
-            "test-dependencies"
-        } else {
-            "dependencies"
-        }
+    print_status_stdout(
+        "remove",
+        StatusTone::Success,
+        format!(
+            "{} from {} [{}]",
+            name,
+            project_file.display(),
+            if test {
+                "test-dependencies"
+            } else {
+                "dependencies"
+            }
+        ),
     );
 
     regenerate_lockfile_if_possible()
@@ -224,7 +242,11 @@ fn regenerate_lockfile_if_possible() -> Result<(), Box<dyn std::error::Error>> {
                 .to_string()
                 .contains("no dependency coordinates were provided")
             {
-                println!("skipped lockfile regeneration: no declared external dependencies");
+                print_status_stdout(
+                    "lock",
+                    StatusTone::Dim,
+                    "skipped regeneration: no declared external dependencies",
+                );
                 return Ok(());
             }
             Err(error)
@@ -237,7 +259,7 @@ pub(crate) fn handle_deps(module: Option<&str>) -> Result<(), Box<dyn std::error
     let lockfile = load_lockfile(&selection.lockfile_path)?;
 
     if selection.rows.is_empty() {
-        println!("no declared dependencies found");
+        print_status_stdout("deps", StatusTone::Dim, "no declared dependencies found");
         return Ok(());
     }
 
@@ -268,7 +290,7 @@ pub(crate) fn handle_outdated(module: Option<&str>) -> Result<(), Box<dyn std::e
     };
 
     if packages.is_empty() {
-        println!("no locked packages found");
+        print_status_stdout("outdated", StatusTone::Dim, "no locked packages found");
         return Ok(());
     }
 
@@ -526,19 +548,27 @@ fn print_workspace_tree(
         .map(|member| (member.project_root.clone(), member.module_name.clone()))
         .collect::<std::collections::BTreeMap<_, _>>();
 
-    println!("workspace");
+    print_status_stdout("tree", StatusTone::Info, "workspace");
+    let color = stdout_color();
     for member in workspace.members {
         if module.is_some_and(|selected| selected != member.module_name) {
             continue;
         }
 
-        println!("- {}", member.module_name);
+        println!(
+            "- {}",
+            style(&member.module_name, StatusTone::Accent, color)
+        );
         for path_dependency in &member.path_dependencies {
             let dependency_name = by_root
                 .get(path_dependency)
                 .cloned()
                 .unwrap_or_else(|| path_dependency.display().to_string());
-            println!("  - {} (workspace)", dependency_name);
+            println!(
+                "  - {} {}",
+                dependency_name,
+                style("(workspace)", StatusTone::Dim, color)
+            );
         }
 
         for dependency in &member.external_dependencies {

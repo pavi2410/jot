@@ -17,6 +17,7 @@ use tempfile::{NamedTempFile, TempDir};
 use zip::ZipArchive;
 
 use crate::cli::{SelfCommand, SelfSubcommand};
+use crate::commands::render::{StatusTone, print_status_stdout, stdout_color, style};
 use crate::utils::find_file_named;
 
 const DEFAULT_RELEASE_REPO: &str = "pavi2410/jot";
@@ -80,24 +81,45 @@ fn handle_self_update(
     let current_version = env!("CARGO_PKG_VERSION");
 
     if check_only {
-        println!("current: {current_version}\nlatest:  {release_version}\nrepo:    {release_repo}");
+        print_status_stdout(
+            "self",
+            StatusTone::Info,
+            format!("current: {current_version}"),
+        );
+        print_status_stdout(
+            "self",
+            StatusTone::Info,
+            format!("latest: {release_version}"),
+        );
+        print_status_stdout("self", StatusTone::Info, format!("repo:   {release_repo}"));
         return Ok(());
     }
 
     if requested_version.is_none() && semver_not_newer(&release_version, current_version) {
-        println!("jot is already up to date ({current_version})");
+        print_status_stdout(
+            "self",
+            StatusTone::Success,
+            format!("already up to date ({current_version})"),
+        );
         return Ok(());
     }
 
     let selection = select_release_assets(&release, &archive_name)?;
 
     if !yes && io::stdin().is_terminal() {
-        println!("Update jot from {current_version} to {release_version}? [y/N]");
+        println!(
+            "{}",
+            style(
+                &format!("Update jot from {current_version} to {release_version}? [y/N]"),
+                StatusTone::Warning,
+                stdout_color(),
+            )
+        );
         let mut answer = String::new();
         io::stdin().read_line(&mut answer)?;
         let decision = answer.trim().to_ascii_lowercase();
         if decision != "y" && decision != "yes" {
-            println!("aborted");
+            print_status_stdout("self", StatusTone::Dim, "aborted");
             return Ok(());
         }
     }
@@ -122,7 +144,11 @@ fn handle_self_update(
     let extracted_binary = extract_release_binary(&archive_path)?;
     self_replace::self_replace(extracted_binary)?;
 
-    println!("updated jot from {current_version} to {release_version}");
+    print_status_stdout(
+        "self",
+        StatusTone::Success,
+        format!("updated from {current_version} to {release_version}"),
+    );
     Ok(())
 }
 
@@ -132,21 +158,32 @@ fn handle_self_uninstall(yes: bool) -> Result<(), Box<dyn std::error::Error>> {
             return Err("non-interactive uninstall requires --yes".into());
         }
 
-        println!("Uninstall jot from this executable path? [y/N]");
+        println!(
+            "{}",
+            style(
+                "Uninstall jot from this executable path? [y/N]",
+                StatusTone::Warning,
+                stdout_color(),
+            )
+        );
         let mut answer = String::new();
         io::stdin().read_line(&mut answer)?;
         let decision = answer.trim().to_ascii_lowercase();
         if decision != "y" && decision != "yes" {
-            println!("aborted");
+            print_status_stdout("self", StatusTone::Dim, "aborted");
             return Ok(());
         }
     }
 
     let executable = std::env::current_exe()?;
     self_replace::self_delete()?;
-    println!(
-        "scheduled uninstall of {} (binary will be removed after process exit)",
-        executable.display()
+    print_status_stdout(
+        "self",
+        StatusTone::Success,
+        format!(
+            "scheduled uninstall of {} (binary removed after process exit)",
+            executable.display()
+        ),
     );
     Ok(())
 }

@@ -4,6 +4,8 @@ use jot_config::{find_workspace_root_jot_toml, load_workspace_build_config};
 use jot_resolver::MavenResolver;
 use jot_toolchain::ToolchainManager;
 
+use crate::commands::render::{StatusTone, print_status_stdout};
+
 pub(crate) fn handle_run(
     paths: JotPaths,
     manager: ToolchainManager,
@@ -79,9 +81,17 @@ pub(crate) fn handle_test(
         for project_root in selected {
             let output = builder.test(&project_root)?;
             if output.tests_found {
-                println!("test execution completed for {}", output.project.name);
+                print_status_stdout(
+                    "test",
+                    StatusTone::Success,
+                    format!("execution completed for {}", output.project.name),
+                );
             } else {
-                println!("no tests found for {}", output.project.name);
+                print_status_stdout(
+                    "test",
+                    StatusTone::Dim,
+                    format!("no tests found for {}", output.project.name),
+                );
             }
         }
         return Ok(());
@@ -93,9 +103,17 @@ pub(crate) fn handle_test(
 
     let output = builder.test(&cwd)?;
     if output.tests_found {
-        println!("test execution completed for {}", output.project.name);
+        print_status_stdout(
+            "test",
+            StatusTone::Success,
+            format!("execution completed for {}", output.project.name),
+        );
     } else {
-        println!("no tests found for {}", output.project.name);
+        print_status_stdout(
+            "test",
+            StatusTone::Dim,
+            format!("no tests found for {}", output.project.name),
+        );
     }
     Ok(())
 }

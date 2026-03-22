@@ -1,4 +1,3 @@
-use std::io::IsTerminal;
 use std::path::Path;
 
 use annotate_snippets::Level;
@@ -12,8 +11,9 @@ use jot_resolver::MavenResolver;
 use jot_toolchain::ToolchainManager;
 
 use crate::commands::render::{
-    read_source_line, render_lint_processing_error as render_lint_processing_error_line,
-    render_source_diagnostic, resolve_report_path,
+    StatusTone, print_status_stderr, print_status_stdout, read_source_line,
+    render_lint_processing_error as render_lint_processing_error_line, render_source_diagnostic,
+    resolve_report_path, stderr_color, style,
 };
 
 pub(crate) fn handle_build(
@@ -28,17 +28,25 @@ pub(crate) fn handle_build(
     if find_workspace_root_jot_toml(&cwd)?.is_some() {
         let output = builder.build_workspace(&cwd, module)?;
         for module in output.modules {
-            println!(
-                "built {} {} at {}",
-                module.build.project.name,
-                module.build.project.version,
-                module.build.jar_path.display()
+            print_status_stdout(
+                "build",
+                StatusTone::Success,
+                format!(
+                    "{} {} -> {}",
+                    module.build.project.name,
+                    module.build.project.version,
+                    module.build.jar_path.display()
+                ),
             );
             if let Some(path) = module.build.fat_jar_path {
-                println!("fat-jar ({}): {}", module.module_name, path.display());
+                print_status_stdout(
+                    "fat-jar",
+                    StatusTone::Accent,
+                    format!("{} -> {}", module.module_name, path.display()),
+                );
             }
             for warning in module.build.fat_jar_warnings {
-                eprintln!("warning: {warning}");
+                print_status_stderr("warn", StatusTone::Warning, warning);
             }
         }
         return Ok(());
@@ -49,17 +57,21 @@ pub(crate) fn handle_build(
     }
 
     let output = builder.build(&cwd)?;
-    println!(
-        "built {} {} at {}",
-        output.project.name,
-        output.project.version,
-        output.jar_path.display()
+    print_status_stdout(
+        "build",
+        StatusTone::Success,
+        format!(
+            "{} {} -> {}",
+            output.project.name,
+            output.project.version,
+            output.jar_path.display()
+        ),
     );
     if let Some(path) = output.fat_jar_path {
-        println!("fat-jar: {}", path.display());
+        print_status_stdout("fat-jar", StatusTone::Accent, path.display().to_string());
     }
     for warning in output.fat_jar_warnings {
-        eprintln!("warning: {warning}");
+        print_status_stderr("warn", StatusTone::Warning, warning);
     }
     Ok(())
 }
@@ -73,7 +85,7 @@ pub(crate) fn handle_fmt(
     let resolver = MavenResolver::new(paths)?;
     let devtools = DevTools::new(resolver, manager)?;
     let cwd = std::env::current_dir()?;
-    let color = std::io::stderr().is_terminal();
+    let color = stderr_color();
 
     if let Some(workspace) = load_workspace_build_config(&cwd)? {
         let members = if let Some(module) = module {
@@ -125,7 +137,7 @@ pub(crate) fn handle_lint(
     let resolver = MavenResolver::new(paths)?;
     let devtools = DevTools::new(resolver, manager)?;
     let cwd = std::env::current_dir()?;
-    let color = std::io::stderr().is_terminal();
+    let color = stderr_color();
 
     if let Some(workspace) = load_workspace_build_config(&cwd)? {
         let members = if let Some(module) = module {
@@ -168,16 +180,21 @@ pub(crate) fn handle_lint(
 }
 
 fn print_format_report(report: &FormatReport, color: bool) {
-    println!(
-        "{}: scanned {} files, {} {}",
-        report.project.name,
-        report.files_scanned,
-        report.changed_files.len(),
-        if report.checked {
-            "would change"
-        } else {
-            "changed"
-        }
+    let changed_verb = if report.checked {
+        style("would change", StatusTone::Warning, color)
+    } else {
+        style("changed", StatusTone::Success, color)
+    };
+    print_status_stdout(
+        "fmt",
+        StatusTone::Info,
+        format!(
+            "{}: scanned {} files, {} {}",
+            report.project.name,
+            report.files_scanned,
+            report.changed_files.len(),
+            changed_verb
+        ),
     );
 
     if report.checked {
@@ -186,17 +203,26 @@ fn print_format_report(report: &FormatReport, color: bool) {
         }
     } else {
         for path in &report.changed_files {
-            println!("  {}", path.display());
+            print_status_stdout("changed", StatusTone::Accent, path.display().to_string());
         }
     }
 }
 
 fn print_lint_report(report: &LintReport, color: bool) {
-    println!(
-        "{}: scanned {} files, {} violations",
-        report.project.name,
-        report.files_scanned,
-        report.violations.len()
+    let tone = if report.violations.is_empty() && report.processing_errors.is_empty() {
+        StatusTone::Success
+    } else {
+        StatusTone::Warning
+    };
+    print_status_stdout(
+        "lint",
+        tone,
+        format!(
+            "{}: scanned {} files, {} violations",
+            report.project.name,
+            report.files_scanned,
+            report.violations.len()
+        ),
     );
 
     for violation in &report.violations {

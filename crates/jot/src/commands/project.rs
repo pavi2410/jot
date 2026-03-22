@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use jot_cache::JotPaths;
 use jot_config::load_workspace_build_config;
 
+use crate::commands::render::{StatusTone, print_status_stdout};
 use crate::init_templates;
 use crate::utils::nearest_project_file;
 
@@ -21,11 +22,15 @@ pub(crate) fn handle_init(
         name,
     };
     let output = init_templates::scaffold(cwd, options)?;
-    println!(
-        "created {} template at {} ({} files)",
-        output.template,
-        output.root.display(),
-        output.created_files
+    print_status_stdout(
+        "init",
+        StatusTone::Success,
+        format!(
+            "{} template at {} ({} files)",
+            output.template,
+            output.root.display(),
+            output.created_files
+        ),
     );
     Ok(())
 }
@@ -36,12 +41,16 @@ pub(crate) fn handle_clean(
 ) -> Result<(), Box<dyn std::error::Error>> {
     if global {
         let summary = paths.clear_global_cache()?;
-        println!(
-            "Removed {} JDK entries, {} Kotlin entries, and {} download entries from {}",
-            summary.removed_jdk_entries,
-            summary.removed_kotlin_entries,
-            summary.removed_download_entries,
-            paths.root().display()
+        print_status_stdout(
+            "clean",
+            StatusTone::Success,
+            format!(
+                "removed {} JDK, {} Kotlin, {} downloads from {}",
+                summary.removed_jdk_entries,
+                summary.removed_kotlin_entries,
+                summary.removed_download_entries,
+                paths.root().display()
+            ),
         );
         return Ok(());
     }
@@ -71,10 +80,14 @@ pub(crate) fn handle_clean(
     }
 
     if deleted.is_empty() {
-        println!("no project target directories were removed");
+        print_status_stdout(
+            "clean",
+            StatusTone::Dim,
+            "no project target directories removed",
+        );
     } else {
         for path in deleted {
-            println!("removed {}", path.display());
+            print_status_stdout("clean", StatusTone::Success, path.display().to_string());
         }
     }
 
