@@ -6,6 +6,11 @@ mod versions;
 
 pub use coordinate::MavenCoordinate;
 pub use errors::ResolverError;
+pub use models::{
+    MavenDependencies, MavenDependency, MavenDeveloper, MavenDevelopers, MavenExclusion,
+    MavenExclusions, MavenLicense, MavenLicenses, MavenMetadata, MavenParent, MavenProject,
+    MavenScm, MavenVersioning, MavenVersions,
+};
 pub use resolver::{
     LockedPackage, Lockfile, MavenResolver, ResolvedArtifact, ResolvedDependency, TreeEntry,
 };
@@ -299,7 +304,6 @@ mod tests {
                 artifact_id: Some("parent".to_owned()),
                 version: Some("1.0.0".to_owned()),
             }),
-            properties: None,
             dependency_management: Some(MavenDependencyManagement {
                 dependencies: MavenDependencies {
                     dependency: vec![MavenDependency {
@@ -314,7 +318,6 @@ mod tests {
                     }],
                 },
             }),
-            distribution_management: None,
             dependencies: Some(MavenDependencies {
                 dependency: vec![MavenDependency {
                     group_id: Some("org.slf4j".to_owned()),
@@ -327,6 +330,7 @@ mod tests {
                     exclusions: None,
                 }],
             }),
+            ..Default::default()
         };
 
         assert_eq!(
@@ -396,9 +400,6 @@ mod tests {
             group_id: Some("legacy.group".to_owned()),
             artifact_id: Some("legacy-artifact".to_owned()),
             version: Some("1.0.0".to_owned()),
-            parent: None,
-            properties: None,
-            dependency_management: None,
             distribution_management: Some(MavenDistributionManagement {
                 relocation: Some(MavenRelocation {
                     group_id: Some("modern.group".to_owned()),
@@ -407,7 +408,7 @@ mod tests {
                     classifier: Some("sources".to_owned()),
                 }),
             }),
-            dependencies: None,
+            ..Default::default()
         };
 
         let resolved = relocation_target(

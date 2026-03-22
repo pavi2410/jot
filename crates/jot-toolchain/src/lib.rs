@@ -96,6 +96,10 @@ impl InstalledJdk {
     pub fn jar_binary(&self) -> PathBuf {
         binary_path(&self.java_home, "jar")
     }
+
+    pub fn javadoc_binary(&self) -> PathBuf {
+        binary_path(&self.java_home, "javadoc")
+    }
 }
 
 pub trait ToolchainRequest {

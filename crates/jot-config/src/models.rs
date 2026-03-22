@@ -21,6 +21,21 @@ pub struct LintConfig {
     pub pmd_ruleset: Option<PathBuf>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PublishConfig {
+    pub license: Option<String>,
+    pub description: Option<String>,
+    pub url: Option<String>,
+    pub scm: Option<String>,
+    pub developer: Option<PublishDeveloper>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublishDeveloper {
+    pub name: String,
+    pub email: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectBuildConfig {
     pub config_path: PathBuf,
@@ -37,6 +52,7 @@ pub struct ProjectBuildConfig {
     pub path_dependencies: Vec<PathBuf>,
     pub test_dependencies: Vec<String>,
     pub toolchain: Option<JavaToolchainRequest>,
+    pub publish: Option<PublishConfig>,
     pub format: FormatConfig,
     pub lint: LintConfig,
 }
@@ -77,6 +93,7 @@ pub(crate) struct WorkspaceInheritance {
     pub(crate) toolchain: Option<JavaToolchainRequest>,
     pub(crate) module_name: Option<String>,
     pub(crate) catalog_path: Option<PathBuf>,
+    pub(crate) publish: Option<PublishConfig>,
     pub(crate) format: Option<FormatConfig>,
     pub(crate) lint: Option<LintConfig>,
 }

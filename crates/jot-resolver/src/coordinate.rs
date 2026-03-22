@@ -49,14 +49,24 @@ impl MavenCoordinate {
     }
 
     pub(crate) fn metadata_url(&self) -> String {
+        self.metadata_url_for(&repository_base_url())
+    }
+
+    pub(crate) fn metadata_url_for(&self, repository_base: &str) -> String {
         let group_path = self.group.replace('.', "/");
         format!(
             "{}/{}/{}/maven-metadata.xml",
-            MAVEN_CENTRAL, group_path, self.artifact
+            repository_base.trim_end_matches('/'),
+            group_path,
+            self.artifact
         )
     }
 
     pub(crate) fn pom_url(&self) -> Result<String, ResolverError> {
+        self.pom_url_for(&repository_base_url())
+    }
+
+    pub(crate) fn pom_url_for(&self, repository_base: &str) -> Result<String, ResolverError> {
         let version = self
             .version
             .as_deref()
@@ -64,11 +74,20 @@ impl MavenCoordinate {
         let group_path = self.group.replace('.', "/");
         Ok(format!(
             "{}/{}/{}/{}/{}-{}.pom",
-            MAVEN_CENTRAL, group_path, self.artifact, version, self.artifact, version
+            repository_base.trim_end_matches('/'),
+            group_path,
+            self.artifact,
+            version,
+            self.artifact,
+            version
         ))
     }
 
     pub(crate) fn jar_url(&self) -> Result<String, ResolverError> {
+        self.jar_url_for(&repository_base_url())
+    }
+
+    pub(crate) fn jar_url_for(&self, repository_base: &str) -> Result<String, ResolverError> {
         let version = self
             .version
             .as_deref()
@@ -82,7 +101,7 @@ impl MavenCoordinate {
 
         Ok(format!(
             "{}/{}/{}/{}/{}-{}{}.jar",
-            MAVEN_CENTRAL,
+            repository_base.trim_end_matches('/'),
             group_path,
             self.artifact,
             version,
@@ -95,6 +114,10 @@ impl MavenCoordinate {
     pub(crate) fn jar_sha256_url(&self) -> Result<String, ResolverError> {
         Ok(format!("{}.sha256", self.jar_url()?))
     }
+}
+
+fn repository_base_url() -> String {
+    std::env::var("JOT_MAVEN_REPOSITORY").unwrap_or_else(|_| MAVEN_CENTRAL.to_owned())
 }
 
 impl Display for MavenCoordinate {

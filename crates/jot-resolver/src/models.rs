@@ -1,100 +1,194 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-#[derive(Debug, Deserialize)]
-pub(crate) struct MavenMetadata {
-    pub(crate) versioning: Option<MavenVersioning>,
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MavenMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub versioning: Option<MavenVersioning>,
 }
 
-#[derive(Debug, Deserialize)]
-pub(crate) struct MavenVersioning {
-    pub(crate) latest: Option<String>,
-    pub(crate) release: Option<String>,
-    pub(crate) versions: Option<MavenVersions>,
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MavenVersioning {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub versions: Option<MavenVersions>,
 }
 
-#[derive(Debug, Deserialize)]
-pub(crate) struct MavenVersions {
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MavenVersions {
     #[serde(default)]
-    pub(crate) version: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub version: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
-pub(crate) struct MavenProject {
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MavenProject {
+    #[serde(rename = "@xmlns", skip_serializing_if = "Option::is_none")]
+    pub xml_namespace: Option<String>,
+    #[serde(rename = "@xmlns:xsi", skip_serializing_if = "Option::is_none")]
+    pub xml_schema_namespace: Option<String>,
+    #[serde(
+        rename = "@xsi:schemaLocation",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub xml_schema_location: Option<String>,
+    #[serde(rename = "modelVersion", skip_serializing_if = "Option::is_none")]
+    pub model_version: Option<String>,
     #[serde(rename = "groupId")]
-    pub(crate) group_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
     #[serde(rename = "artifactId")]
-    pub(crate) artifact_id: Option<String>,
-    pub(crate) version: Option<String>,
-    pub(crate) parent: Option<MavenParent>,
-    pub(crate) properties: Option<BTreeMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub packaging: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent: Option<MavenParent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub properties: Option<BTreeMap<String, String>>,
     #[serde(rename = "dependencyManagement")]
-    pub(crate) dependency_management: Option<MavenDependencyManagement>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dependency_management: Option<MavenDependencyManagement>,
     #[serde(rename = "distributionManagement")]
-    pub(crate) distribution_management: Option<MavenDistributionManagement>,
-    pub(crate) dependencies: Option<MavenDependencies>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub distribution_management: Option<MavenDistributionManagement>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub licenses: Option<MavenLicenses>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scm: Option<MavenScm>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub developers: Option<MavenDevelopers>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dependencies: Option<MavenDependencies>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub(crate) struct MavenParent {
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MavenParent {
     #[serde(rename = "groupId")]
-    pub(crate) group_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
     #[serde(rename = "artifactId")]
-    pub(crate) artifact_id: Option<String>,
-    pub(crate) version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-pub(crate) struct MavenDependencyManagement {
-    pub(crate) dependencies: MavenDependencies,
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MavenDependencyManagement {
+    pub dependencies: MavenDependencies,
 }
 
-#[derive(Debug, Deserialize)]
-pub(crate) struct MavenDistributionManagement {
-    pub(crate) relocation: Option<MavenRelocation>,
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MavenDistributionManagement {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relocation: Option<MavenRelocation>,
 }
 
-#[derive(Debug, Deserialize)]
-pub(crate) struct MavenRelocation {
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MavenRelocation {
     #[serde(rename = "groupId")]
-    pub(crate) group_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
     #[serde(rename = "artifactId")]
-    pub(crate) artifact_id: Option<String>,
-    pub(crate) version: Option<String>,
-    pub(crate) classifier: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub classifier: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-pub(crate) struct MavenDependencies {
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MavenDependencies {
     #[serde(default)]
-    pub(crate) dependency: Vec<MavenDependency>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub dependency: Vec<MavenDependency>,
 }
 
-#[derive(Debug, Deserialize)]
-pub(crate) struct MavenDependency {
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MavenDependency {
     #[serde(rename = "groupId")]
-    pub(crate) group_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
     #[serde(rename = "artifactId")]
-    pub(crate) artifact_id: Option<String>,
-    pub(crate) version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
     #[serde(rename = "type")]
-    pub(crate) packaging: Option<String>,
-    pub(crate) classifier: Option<String>,
-    pub(crate) scope: Option<String>,
-    pub(crate) optional: Option<bool>,
-    pub(crate) exclusions: Option<MavenExclusions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub packaging: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub classifier: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub optional: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exclusions: Option<MavenExclusions>,
 }
 
-#[derive(Debug, Deserialize)]
-pub(crate) struct MavenExclusions {
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MavenExclusions {
     #[serde(default)]
-    pub(crate) exclusion: Vec<MavenExclusion>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub exclusion: Vec<MavenExclusion>,
 }
 
-#[derive(Debug, Deserialize)]
-pub(crate) struct MavenExclusion {
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MavenExclusion {
     #[serde(rename = "groupId")]
-    pub(crate) group_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
     #[serde(rename = "artifactId")]
-    pub(crate) artifact_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MavenLicenses {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub license: Vec<MavenLicense>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MavenLicense {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MavenScm {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connection: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MavenDevelopers {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub developer: Vec<MavenDeveloper>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MavenDeveloper {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
 }

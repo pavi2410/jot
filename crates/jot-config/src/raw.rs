@@ -11,6 +11,7 @@ pub(crate) struct RawConfig {
     #[serde(rename = "test-dependencies")]
     pub(crate) test_dependencies: Option<std::collections::BTreeMap<String, RawDependencySpec>>,
     pub(crate) toolchains: Option<RawToolchains>,
+    pub(crate) publish: Option<RawPublish>,
     pub(crate) format: Option<RawFormat>,
     pub(crate) lint: Option<RawLint>,
 }
@@ -89,4 +90,19 @@ pub(crate) struct RawFormat {
 pub(crate) struct RawLint {
     #[serde(rename = "pmd-ruleset")]
     pub(crate) pmd_ruleset: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct RawPublish {
+    pub(crate) license: Option<String>,
+    pub(crate) description: Option<String>,
+    pub(crate) url: Option<String>,
+    pub(crate) scm: Option<String>,
+    pub(crate) developer: Option<RawPublishDeveloper>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct RawPublishDeveloper {
+    pub(crate) name: Option<String>,
+    pub(crate) email: Option<String>,
 }

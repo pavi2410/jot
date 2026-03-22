@@ -8,6 +8,7 @@ pub(crate) mod audit;
 pub(crate) mod build;
 pub(crate) mod deps;
 pub(crate) mod project;
+pub(crate) mod publish;
 pub(crate) mod run;
 pub(crate) mod self_mgmt;
 pub(crate) mod toolchain;
@@ -28,6 +29,25 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Command::Audit { fix, ci } => audit::handle_audit(paths, fix, ci)?,
         Command::Build { module } => build::handle_build(paths, manager, module.as_deref())?,
+        Command::Publish {
+            module,
+            repository,
+            username,
+            password,
+            signing_key,
+            dry_run,
+            allow_snapshot,
+        } => publish::handle_publish(
+            paths,
+            manager,
+            module.as_deref(),
+            repository.as_deref(),
+            username.as_deref(),
+            password.as_deref(),
+            signing_key.as_deref(),
+            dry_run,
+            allow_snapshot,
+        )?,
         Command::Init {
             template,
             group,

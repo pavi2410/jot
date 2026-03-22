@@ -14,8 +14,9 @@ pub use discovery::{
 pub use editing::{DependencySpec, add_dependency, pin_java_toolchain, remove_dependency};
 pub use errors::ConfigError;
 pub use models::{
-    FormatConfig, JavaFormatStyle, LintConfig, ProjectBuildConfig, WorkspaceBuildConfig,
-    WorkspaceDependencySet, WorkspaceMemberBuildConfig, WorkspaceMemberDependencies,
+    FormatConfig, JavaFormatStyle, LintConfig, ProjectBuildConfig, PublishConfig, PublishDeveloper,
+    WorkspaceBuildConfig, WorkspaceDependencySet, WorkspaceMemberBuildConfig,
+    WorkspaceMemberDependencies,
 };
 
 use std::fs;
@@ -28,7 +29,9 @@ use crate::dependencies::{
     extract_path_dependencies, module_name_from_member,
 };
 use crate::models::WorkspaceInheritance;
-use crate::raw::{RawConfig, RawFormat, RawJavaToolchain, RawLint, RawToolchains};
+use crate::raw::{
+    RawConfig, RawFormat, RawJavaToolchain, RawLint, RawPublish, RawPublishDeveloper, RawToolchains,
+};
 
 pub fn load_project_build_config(start: &Path) -> Result<ProjectBuildConfig, ConfigError> {
     let Some(config_path) = find_jot_toml(start)? else {
@@ -82,6 +85,7 @@ pub fn load_workspace_build_config(
             toolchain: root_toolchain.clone(),
             module_name: Some(module_name.clone()),
             catalog_path: catalog_path_for_root(&root_dir),
+            publish: parse_publish_config(root_config.publish.clone(), None),
             format: Some(parse_format_config(root_config.format.clone(), None)),
             lint: Some(parse_lint_config(root_config.lint.clone(), None, &root_dir)),
         };
@@ -207,6 +211,7 @@ fn load_project_build_config_from_file_with_inheritance(
     let inherited_toolchain = inherited.as_ref().and_then(|ctx| ctx.toolchain.clone());
     let inherited_group = inherited.as_ref().and_then(|ctx| ctx.group.clone());
     let inherited_catalog_path = inherited.as_ref().and_then(|ctx| ctx.catalog_path.clone());
+    let inherited_publish = inherited.as_ref().and_then(|ctx| ctx.publish.clone());
     let inherited_format = inherited.as_ref().and_then(|ctx| ctx.format.clone());
     let inherited_lint = inherited.as_ref().and_then(|ctx| ctx.lint.clone());
     let module_name = inherited.and_then(|ctx| ctx.module_name);
@@ -236,6 +241,7 @@ fn load_project_build_config_from_file_with_inheritance(
             catalog_path.as_deref(),
         )?,
         toolchain: parse_toolchain_request(config.toolchains).or(inherited_toolchain),
+        publish: parse_publish_config(config.publish, inherited_publish),
         format: parse_format_config(config.format, inherited_format),
         lint: parse_lint_config(config.lint, inherited_lint, &project_root),
     })
@@ -254,6 +260,7 @@ fn inherited_workspace_context(start: &Path) -> Result<Option<WorkspaceInheritan
         toolchain: parse_toolchain_request(config.toolchains),
         module_name: None,
         catalog_path: path.parent().and_then(catalog_path_for_root),
+        publish: parse_publish_config(config.publish, None),
         format: Some(parse_format_config(config.format, None)),
         lint: Some(parse_lint_config(
             config.lint,
@@ -285,6 +292,60 @@ fn parse_lint_config(
         config.pmd_ruleset = Some(config_root.join(pmd_ruleset));
     }
     config
+}
+
+fn parse_publish_config(
+    raw: Option<RawPublish>,
+    inherited: Option<PublishConfig>,
+) -> Option<PublishConfig> {
+    let mut config = inherited.unwrap_or_default();
+    let mut touched = false;
+
+    if config != PublishConfig::default() {
+        touched = true;
+    }
+
+    if let Some(raw) = raw {
+        if let Some(license) = raw.license {
+            config.license = Some(license);
+            touched = true;
+        }
+        if let Some(description) = raw.description {
+            config.description = Some(description);
+            touched = true;
+        }
+        if let Some(url) = raw.url {
+            config.url = Some(url);
+            touched = true;
+        }
+        if let Some(scm) = raw.scm {
+            config.scm = Some(scm);
+            touched = true;
+        }
+        if let Some(developer) = raw.developer
+            && let Some(developer) = parse_publish_developer(developer)
+        {
+            config.developer = Some(developer);
+            touched = true;
+        }
+    }
+
+    touched.then_some(config)
+}
+
+fn parse_publish_developer(raw: RawPublishDeveloper) -> Option<PublishDeveloper> {
+    let name = raw.name?.trim().to_owned();
+    if name.is_empty() {
+        return None;
+    }
+
+    Some(PublishDeveloper {
+        name,
+        email: raw
+            .email
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty()),
+    })
 }
 
 fn parse_toolchain_request(toolchains: Option<RawToolchains>) -> Option<JavaToolchainRequest> {
@@ -402,6 +463,40 @@ mod tests {
                 "org.slf4j:slf4j-api:2.0.16".to_owned(),
             ]
         );
+    }
+
+    #[test]
+    fn inherits_publish_metadata_from_workspace_root() {
+        let temp = tempdir().expect("tempdir");
+        let workspace = temp.path().join("workspace");
+        let member = workspace.join("lib");
+        fs::create_dir_all(&member).expect("create member");
+
+        fs::write(
+            workspace.join("jot.toml"),
+            "[workspace]\nmembers = [\"lib\"]\ngroup = \"io.github.demo\"\n\n[publish]\nlicense = \"Apache-2.0\"\ndescription = \"workspace package\"\nurl = \"https://example.com\"\nscm = \"https://example.com/repo.git\"\ndeveloper = { name = \"Pavi\", email = \"pavi@example.com\" }\n",
+        )
+        .expect("write workspace config");
+        fs::write(
+            member.join("jot.toml"),
+            "[project]\nname = \"demo\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("write member config");
+
+        let workspace = load_workspace_build_config(&member)
+            .expect("load workspace")
+            .expect("workspace config");
+        let publish = workspace.members[0]
+            .project
+            .publish
+            .clone()
+            .expect("publish config");
+
+        assert_eq!(publish.license.as_deref(), Some("Apache-2.0"));
+        assert_eq!(publish.description.as_deref(), Some("workspace package"));
+        assert_eq!(publish.url.as_deref(), Some("https://example.com"));
+        assert_eq!(publish.scm.as_deref(), Some("https://example.com/repo.git"));
+        assert_eq!(publish.developer.expect("developer").name, "Pavi");
     }
 
     #[test]

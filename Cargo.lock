@@ -799,8 +799,10 @@ dependencies = [
  "jot-cache",
  "jot-config",
  "jot-devtools",
+ "jot-platform",
  "jot-resolver",
  "jot-toolchain",
+ "quick-xml",
  "reqwest",
  "self-replace",
  "semver",
@@ -810,6 +812,7 @@ dependencies = [
  "tabled",
  "tar",
  "tempfile",
+ "time",
  "toml",
  "zip",
 ]

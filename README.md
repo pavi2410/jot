@@ -79,6 +79,13 @@ guava = "com.google.guava:guava:33.4.0-jre"
 
 [test-dependencies]
 junit = { catalog = "junit" }   # resolved from libs.versions.toml
+
+[publish]
+license = "Apache-2.0"
+description = "My published library"
+url = "https://github.com/example/my-app"
+scm = "https://github.com/example/my-app.git"
+developer = { name = "Your Name", email = "you@example.com" }
 ```
 
 ---
@@ -93,6 +100,7 @@ junit = { catalog = "junit" }   # resolved from libs.versions.toml
 | `jot build [--module <name>]` | Compile sources and produce a JAR (+ fat-JAR if `main-class` is set) |
 | `jot run [--module <name>] [-- <args>]` | Build and run the main class |
 | `jot test [--module <name>]` | Compile and run JUnit 5 tests |
+| `jot publish [--module <name>] [--repository <target>] [--dry-run]` | Build publish artifacts, sign them with GPG, and upload them using Maven repository layout |
 | `jot clean` | Delete `target/` for the current project or workspace members |
 | `jot clean --global` | Wipe the global jot cache |
 
@@ -179,6 +187,34 @@ jot --offline test
 ```
 
 If something's missing from cache, jot tells you exactly what to fetch first.
+
+---
+
+## Publishing
+
+`jot publish` publishes standard Maven-style artifacts:
+
+- main JAR
+- sources JAR
+- javadoc JAR
+- generated POM
+- ASCII-armored GPG signatures
+- SHA-256 sidecars
+
+Minimal flow:
+
+```bash
+jot publish --repository file:///tmp/jot-m2 --dry-run
+jot publish --repository https://repo.example.com/releases
+```
+
+Notes:
+
+- `[project].group` is required for publishing and can be inherited from `[workspace].group`
+- `[publish]` metadata is required
+- `gpg` must be available on `PATH`
+- use `--signing-key <key-id>` or `JOT_PUBLISH_GPG_KEY` to pick a key explicitly
+- use `JOT_PUBLISH_USERNAME` and `JOT_PUBLISH_PASSWORD` for authenticated HTTP repositories
 
 ---
 

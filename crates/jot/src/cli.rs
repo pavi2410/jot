@@ -18,6 +18,22 @@ pub(crate) enum Command {
         #[arg(long)]
         module: Option<String>,
     },
+    Publish {
+        #[arg(long)]
+        module: Option<String>,
+        #[arg(long)]
+        repository: Option<String>,
+        #[arg(long)]
+        username: Option<String>,
+        #[arg(long)]
+        password: Option<String>,
+        #[arg(long)]
+        signing_key: Option<String>,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        allow_snapshot: bool,
+    },
     Init {
         #[arg(long)]
         template: Option<String>,
