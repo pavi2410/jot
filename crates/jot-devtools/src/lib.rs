@@ -33,6 +33,36 @@ pub(crate) const PMD_CLI_COORD: &str = "net.sourceforge.pmd:pmd-cli:7.14.0";
 pub(crate) const PMD_JAVA_COORD: &str = "net.sourceforge.pmd:pmd-java:7.14.0";
 pub(crate) const PMD_MAIN_CLASS: &str = "net.sourceforge.pmd.cli.PmdCli";
 
+pub(crate) const KTLINT_COORD: &str = "com.pinterest.ktlint:ktlint-cli:1.5.0:all";
+
+pub(crate) const DETEKT_CLI_COORD: &str = "io.gitlab.arturbosch.detekt:detekt-cli:1.23.8:all";
+pub(crate) const DETEKT_MAIN_CLASS: &str = "io.gitlab.arturbosch.detekt.cli.Main";
+
+pub(crate) const DEFAULT_DETEKT_CONFIG: &str = r#"build:
+  maxIssues: 0
+
+complexity:
+  active: true
+  LongMethod:
+    active: true
+    threshold: 60
+  LargeClass:
+    active: true
+    threshold: 600
+
+style:
+  active: true
+  MagicNumber:
+    active: false
+  WildcardImport:
+    active: true
+
+exceptions:
+  active: true
+  TooGenericExceptionCaught:
+    active: true
+"#;
+
 pub(crate) const DEFAULT_PMD_RULESET: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <ruleset name="jot-java"
     xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
@@ -65,27 +95,6 @@ impl DevTools {
                 .timeout(Duration::from_secs(20))
                 .build()?,
         })
-    }
-
-    pub(crate) fn resolve_tool_classpath(
-        &self,
-        coordinates: &[&str],
-    ) -> Result<Vec<PathBuf>, DevToolsError> {
-        let mut classpath = self
-            .resolver
-            .resolve_artifacts(
-                &coordinates
-                    .iter()
-                    .map(|value| (*value).to_owned())
-                    .collect::<Vec<_>>(),
-                DEFAULT_RESOLVE_DEPTH,
-            )?
-            .into_iter()
-            .map(|artifact| artifact.path)
-            .collect::<Vec<_>>();
-        classpath.sort();
-        classpath.dedup();
-        Ok(classpath)
     }
 
     pub(crate) fn resolve_exact_tool_artifact(

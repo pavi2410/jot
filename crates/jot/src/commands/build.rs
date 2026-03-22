@@ -165,7 +165,7 @@ pub(crate) fn handle_lint(
 
 fn print_format_report(report: &FormatReport, color: bool) {
     println!(
-        "{}: scanned {} Java files, {} {}",
+        "{}: scanned {} files, {} {}",
         report.project.name,
         report.files_scanned,
         report.changed_files.len(),
@@ -189,7 +189,7 @@ fn print_format_report(report: &FormatReport, color: bool) {
 
 fn print_lint_report(report: &LintReport, color: bool) {
     println!(
-        "{}: scanned {} Java files, {} violations",
+        "{}: scanned {} files, {} violations",
         report.project.name,
         report.files_scanned,
         report.violations.len()

@@ -26,6 +26,7 @@ enum TemplateKind {
     JavaCli,
     JavaServer,
     JavaWorkspace,
+    KotlinMinimal,
 }
 
 pub fn scaffold(cwd: &Path, options: InitOptions) -> Result<InitOutput, Box<dyn Error>> {
@@ -79,11 +80,12 @@ fn parse_template(value: Option<&str>) -> Result<TemplateKind, io::Error> {
         "java-cli" | "cli" => TemplateKind::JavaCli,
         "java-server" | "server" => TemplateKind::JavaServer,
         "java-workspace" | "workspace" => TemplateKind::JavaWorkspace,
+        "kotlin-minimal" | "kotlin" => TemplateKind::KotlinMinimal,
         _ => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
-                    "unknown template `{normalized}` (expected one of: java-minimal, java-lib, java-cli, java-server, java-workspace)"
+                    "unknown template `{normalized}` (expected one of: java-minimal, java-lib, java-cli, java-server, java-workspace, kotlin-minimal)"
                 ),
             ));
         }
@@ -98,6 +100,7 @@ fn default_project_name(template: TemplateKind) -> &'static str {
         TemplateKind::JavaCli => "demo-cli",
         TemplateKind::JavaServer => "demo-server",
         TemplateKind::JavaWorkspace => "shopflow",
+        TemplateKind::KotlinMinimal => "hello-kotlin",
     }
 }
 
@@ -168,6 +171,7 @@ fn render_template(
         TemplateKind::JavaCli => render_java_cli(project_name, group, package_name),
         TemplateKind::JavaServer => render_java_server(project_name, group, package_name),
         TemplateKind::JavaWorkspace => render_java_workspace(project_name, group, package_name)?,
+        TemplateKind::KotlinMinimal => render_kotlin_minimal(project_name, package_name),
     };
     Ok(files)
 }
@@ -411,6 +415,40 @@ fn render_java_workspace(
     ])
 }
 
+fn render_kotlin_minimal(project_name: &str, package_name: &str) -> Vec<(PathBuf, String)> {
+    let package_path = package_path(package_name);
+    vec![
+        (
+            PathBuf::from("jot.toml"),
+            format!(
+                "[project]\nname = \"{project_name}\"\nversion = \"0.1.0\"\nmain-class = \"{package_name}.MainKt\"\n\n[toolchains]\njava = \"21\"\nkotlin = \"2.1.0\"\n\n[test-dependencies]\njunit = \"org.junit.jupiter:junit-jupiter:5.11.0\"\n",
+            ),
+        ),
+        (
+            PathBuf::from(".gitignore"),
+            "target/\n.jot.lock\n".to_owned(),
+        ),
+        (
+            PathBuf::from("README.md"),
+            format!(
+                "# {project_name}\n\nMinimal single-project Kotlin app for jot.\n\n## Commands\n\n```bash\njot build\njot test\njot run\n```\n"
+            ),
+        ),
+        (
+            PathBuf::from(format!("src/main/kotlin/{package_path}/Main.kt")),
+            format!(
+                "package {package_name}\n\nfun main(args: Array<String>) {{\n    val name = args.firstOrNull() ?: \"world\"\n    println(\"hello $name\")\n}}\n"
+            ),
+        ),
+        (
+            PathBuf::from(format!("src/test/kotlin/{package_path}/MainTest.kt")),
+            format!(
+                "package {package_name}\n\nimport org.junit.jupiter.api.Assertions.assertTrue\nimport org.junit.jupiter.api.Test\n\nclass MainTest {{\n    @Test\n    fun sanityCheck() {{\n        assertTrue(true)\n    }}\n}}\n"
+            ),
+        ),
+    ]
+}
+
 fn package_path(package_name: &str) -> String {
     package_name.replace('.', "/")
 }
@@ -423,6 +461,7 @@ impl TemplateKind {
             TemplateKind::JavaCli => "java-cli",
             TemplateKind::JavaServer => "java-server",
             TemplateKind::JavaWorkspace => "java-workspace",
+            TemplateKind::KotlinMinimal => "kotlin-minimal",
         }
     }
 }

@@ -17,7 +17,7 @@ use jot_resolver::{MavenResolver, ResolvedArtifact};
 use jot_toolchain::{InstalledJdk, InstalledKotlin, ToolchainManager};
 
 use compile::{
-    AnnotationProcessingConfig, compile_kotlin_sources, compile_sources, join_paths_for_classpath,
+    build_compiler_chain, compile_pipeline, join_paths_for_classpath, resolve_annotation_processing,
 };
 use package::{build_fat_jar, copy_resources, package_jar};
 
@@ -69,9 +69,8 @@ impl JavaProjectBuilder {
         let classes_dir = target_dir.join("classes");
         prepare_directory(&classes_dir)?;
 
-        let java_sources = collect_java_sources(&project.source_dirs)?;
-        let kotlin_sources = collect_sources_by_extension(&project.source_dirs, "kt")?;
-
+        let java_sources = compile::collect_sources_by_extension(&project.source_dirs, "java")?;
+        let kotlin_sources = compile::collect_sources_by_extension(&project.source_dirs, "kt")?;
         if java_sources.is_empty() && kotlin_sources.is_empty() {
             return Err(BuildError::NoSources(project.project_root.clone()));
         }
@@ -94,64 +93,22 @@ impl JavaProjectBuilder {
             .as_ref()
             .map(|value| value.version.as_str());
 
-        // Compile Kotlin sources first (if any)
-        if !kotlin_sources.is_empty() {
-            let kotlin = installed_kotlin
-                .as_ref()
-                .ok_or_else(|| BuildError::MissingKotlinToolchain(project.config_path.clone()))?;
-
-            let java_source_roots = if !java_sources.is_empty() {
-                Some(project.source_dirs.as_slice())
-            } else {
-                None
-            };
-
-            compile_kotlin_sources(
-                kotlin,
-                jvm_target,
-                &project.project_root,
-                &dependency_paths,
-                &classes_dir,
-                &kotlin_sources,
-                java_source_roots,
-            )?;
-        }
-
-        // Compile Java sources (if any)
-        if !java_sources.is_empty() {
-            let mut java_classpath = dependency_paths.clone();
-            if !kotlin_sources.is_empty() {
-                java_classpath.push(classes_dir.clone());
-            }
-
-            let annotation_processing = if !project.processors.is_empty() {
-                let processor_artifacts = self
-                    .resolver
-                    .resolve_artifacts(&project.processors, DEFAULT_RESOLVE_DEPTH)?;
-                let generated_sources_dir = target_dir.join("generated-sources");
-                prepare_directory(&generated_sources_dir)?;
-                Some(AnnotationProcessingConfig {
-                    processor_paths: processor_artifacts
-                        .iter()
-                        .map(|artifact| artifact.path.clone())
-                        .collect(),
-                    options: project.processor_options.clone(),
-                    generated_sources_dir,
-                })
-            } else {
-                None
-            };
-
-            compile_sources(
-                &installed_jdk,
-                jvm_target,
-                &project.project_root,
-                &java_classpath,
-                &classes_dir,
-                &java_sources,
-                annotation_processing.as_ref(),
-            )?;
-        }
+        let annotation_processing =
+            resolve_annotation_processing(&project, &self.resolver, &target_dir)?;
+        let compilers = build_compiler_chain(
+            installed_kotlin.as_ref(),
+            &installed_jdk,
+            Some(project.source_dirs.as_slice()),
+            annotation_processing,
+        );
+        compile_pipeline(
+            &compilers,
+            &project.source_dirs,
+            &dependency_paths,
+            &classes_dir,
+            &project.project_root,
+            jvm_target,
+        )?;
 
         copy_resources(&project.resource_dir, &classes_dir)?;
         let jar_path = target_dir.join(format!("{}-{}.jar", project.name, project.version));
@@ -275,8 +232,10 @@ impl JavaProjectBuilder {
         let classes_dir = target_dir.join("classes");
         prepare_directory(&classes_dir)?;
 
-        let main_java_sources = collect_java_sources(&project.source_dirs)?;
-        let main_kotlin_sources = collect_sources_by_extension(&project.source_dirs, "kt")?;
+        let main_java_sources =
+            compile::collect_sources_by_extension(&project.source_dirs, "java")?;
+        let main_kotlin_sources =
+            compile::collect_sources_by_extension(&project.source_dirs, "kt")?;
 
         let jvm_target = project
             .toolchain
@@ -297,68 +256,30 @@ impl JavaProjectBuilder {
                 }
             }
 
-            // Compile main Kotlin sources
-            if !main_kotlin_sources.is_empty() {
-                let kotlin = installed_kotlin.as_ref().ok_or_else(|| {
-                    BuildError::MissingKotlinToolchain(project.config_path.clone())
-                })?;
-                let java_source_roots = if !main_java_sources.is_empty() {
-                    Some(project.source_dirs.as_slice())
-                } else {
-                    None
-                };
-                compile_kotlin_sources(
-                    kotlin,
-                    jvm_target,
-                    &project.project_root,
-                    &main_compile_classpath,
-                    &classes_dir,
-                    &main_kotlin_sources,
-                    java_source_roots,
-                )?;
-            }
-
-            // Compile main Java sources
-            if !main_java_sources.is_empty() {
-                let mut java_classpath = main_compile_classpath.clone();
-                if !main_kotlin_sources.is_empty() {
-                    java_classpath.push(classes_dir.clone());
-                }
-
-                let annotation_processing = if !project.processors.is_empty() {
-                    let processor_artifacts = self
-                        .resolver
-                        .resolve_artifacts(&project.processors, DEFAULT_RESOLVE_DEPTH)?;
-                    let generated_sources_dir = target_dir.join("generated-sources");
-                    prepare_directory(&generated_sources_dir)?;
-                    Some(AnnotationProcessingConfig {
-                        processor_paths: processor_artifacts
-                            .iter()
-                            .map(|artifact| artifact.path.clone())
-                            .collect(),
-                        options: project.processor_options.clone(),
-                        generated_sources_dir,
-                    })
-                } else {
-                    None
-                };
-
-                compile_sources(
-                    &installed_jdk,
-                    jvm_target,
-                    &project.project_root,
-                    &java_classpath,
-                    &classes_dir,
-                    &main_java_sources,
-                    annotation_processing.as_ref(),
-                )?;
-            }
+            let annotation_processing =
+                resolve_annotation_processing(&project, &self.resolver, &target_dir)?;
+            let main_compilers = build_compiler_chain(
+                installed_kotlin.as_ref(),
+                &installed_jdk,
+                Some(project.source_dirs.as_slice()),
+                annotation_processing,
+            );
+            compile_pipeline(
+                &main_compilers,
+                &project.source_dirs,
+                &main_compile_classpath,
+                &classes_dir,
+                &project.project_root,
+                jvm_target,
+            )?;
 
             copy_resources(&project.resource_dir, &classes_dir)?;
         }
 
-        let test_java_sources = collect_java_sources(&project.test_source_dirs)?;
-        let test_kotlin_sources = collect_sources_by_extension(&project.test_source_dirs, "kt")?;
+        let test_java_sources =
+            compile::collect_sources_by_extension(&project.test_source_dirs, "java")?;
+        let test_kotlin_sources =
+            compile::collect_sources_by_extension(&project.test_source_dirs, "kt")?;
 
         if test_java_sources.is_empty() && test_kotlin_sources.is_empty() {
             return Ok(TestOutput {
@@ -381,43 +302,21 @@ impl JavaProjectBuilder {
             }
         }
 
-        // Compile test Kotlin sources
-        if !test_kotlin_sources.is_empty() {
-            let kotlin = installed_kotlin
-                .as_ref()
-                .ok_or_else(|| BuildError::MissingKotlinToolchain(project.config_path.clone()))?;
-            let java_source_roots = if !test_java_sources.is_empty() {
-                Some(project.test_source_dirs.as_slice())
-            } else {
-                None
-            };
-            compile_kotlin_sources(
-                kotlin,
-                jvm_target,
-                &project.project_root,
-                &test_compile_classpath,
-                &test_classes_dir,
-                &test_kotlin_sources,
-                java_source_roots,
-            )?;
-        }
-
-        // Compile test Java sources
-        if !test_java_sources.is_empty() {
-            let mut java_test_classpath = test_compile_classpath.clone();
-            if !test_kotlin_sources.is_empty() {
-                java_test_classpath.push(test_classes_dir.clone());
-            }
-            compile_sources(
-                &installed_jdk,
-                jvm_target,
-                &project.project_root,
-                &java_test_classpath,
-                &test_classes_dir,
-                &test_java_sources,
-                None,
-            )?;
-        }
+        // Test sources: no annotation processing
+        let test_compilers = build_compiler_chain(
+            installed_kotlin.as_ref(),
+            &installed_jdk,
+            Some(project.test_source_dirs.as_slice()),
+            None,
+        );
+        compile_pipeline(
+            &test_compilers,
+            &project.test_source_dirs,
+            &test_compile_classpath,
+            &test_classes_dir,
+            &project.project_root,
+            jvm_target,
+        )?;
 
         let console_jar = test_dependencies
             .iter()
@@ -493,70 +392,9 @@ fn prepare_directory(path: &Path) -> Result<(), BuildError> {
     Ok(())
 }
 
-fn collect_java_sources(source_dirs: &[PathBuf]) -> Result<Vec<PathBuf>, BuildError> {
-    let mut files = Vec::new();
-    for source_dir in source_dirs {
-        collect_java_sources_in_dir(source_dir, &mut files)?;
-    }
-    files.sort();
-    Ok(files)
-}
-
-fn collect_sources_by_extension(
-    source_dirs: &[PathBuf],
-    extension: &str,
-) -> Result<Vec<PathBuf>, BuildError> {
-    let mut files = Vec::new();
-    for source_dir in source_dirs {
-        collect_sources_in_dir(source_dir, extension, &mut files)?;
-    }
-    files.sort();
-    Ok(files)
-}
-
-fn collect_sources_in_dir(
-    path: &Path,
-    extension: &str,
-    files: &mut Vec<PathBuf>,
-) -> Result<(), BuildError> {
-    if !path.exists() {
-        return Ok(());
-    }
-
-    for entry in fs::read_dir(path)? {
-        let entry = entry?;
-        let entry_path = entry.path();
-        if entry.file_type()?.is_dir() {
-            collect_sources_in_dir(&entry_path, extension, files)?;
-        } else if entry_path.extension().and_then(|value| value.to_str()) == Some(extension) {
-            files.push(entry_path);
-        }
-    }
-
-    Ok(())
-}
-
-fn collect_java_sources_in_dir(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), BuildError> {
-    if !path.exists() {
-        return Ok(());
-    }
-
-    for entry in fs::read_dir(path)? {
-        let entry = entry?;
-        let entry_path = entry.path();
-        if entry.file_type()?.is_dir() {
-            collect_java_sources_in_dir(&entry_path, files)?;
-        } else if entry_path.extension().and_then(|value| value.to_str()) == Some("java") {
-            files.push(entry_path);
-        }
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::collect_java_sources;
+    use super::compile::collect_sources_by_extension;
     use super::compile::java_release_flag;
     use super::diagnostics::{caret_span, format_javac_stderr, parse_javac_diagnostics};
     use super::package::merge_service_contents;
@@ -579,8 +417,8 @@ mod tests {
         fs::write(src.join("Main.java"), "class Main {} ").expect("write java");
         fs::write(src.join("README.txt"), "ignore").expect("write text");
 
-        let sources =
-            collect_java_sources(&[temp.path().join("src/main/java")]).expect("collect sources");
+        let sources = collect_sources_by_extension(&[temp.path().join("src/main/java")], "java")
+            .expect("collect sources");
         assert_eq!(sources.len(), 1);
         assert!(sources[0].ends_with("Main.java"));
     }

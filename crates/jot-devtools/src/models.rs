@@ -46,6 +46,36 @@ pub(crate) struct PmdError {
     pub message: String,
 }
 
+// ── Checkstyle XML models (used by detekt) ───────────────────────────────────
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct CheckstyleReport {
+    #[serde(rename = "file", default)]
+    pub files: Vec<CheckstyleFile>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct CheckstyleFile {
+    #[serde(rename = "@name")]
+    pub name: String,
+    #[serde(rename = "error", default)]
+    pub errors: Vec<CheckstyleError>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct CheckstyleError {
+    #[serde(rename = "@line")]
+    pub line: usize,
+    #[serde(rename = "@column", default)]
+    pub column: usize,
+    #[serde(rename = "@severity")]
+    pub severity: String,
+    #[serde(rename = "@message")]
+    pub message: String,
+    #[serde(rename = "@source")]
+    pub source: String,
+}
+
 // ── OSV API models ──────────────────────────────────────────────────────────
 
 #[derive(Debug, serde::Serialize)]
