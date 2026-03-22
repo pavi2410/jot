@@ -200,3 +200,14 @@ If something's missing from cache, jot tells you exactly what to fetch first.
 - [Design Proposal](docs/DESIGN_PROPOSAL.md)
 - [Implementation Plan](docs/IMPL_PLAN.md)
 
+---
+
+## License
+
+Licensed under either of:
+
+- [MIT License](LICENSE-MIT)
+- [Apache License, Version 2.0](LICENSE-APACHE)
+
+at your option.
+

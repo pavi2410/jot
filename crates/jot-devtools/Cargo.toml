@@ -2,6 +2,7 @@
 name = "jot-devtools"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 fs2.workspace = true

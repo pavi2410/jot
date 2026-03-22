@@ -2,6 +2,7 @@
 name = "jot-builder"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 annotate-snippets = "0.12.13"
