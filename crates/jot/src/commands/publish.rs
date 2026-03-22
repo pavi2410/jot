@@ -1042,7 +1042,9 @@ mod tests {
 
         let server = TestRepoServer::spawn(repo_root.clone()).expect("start test repo server");
         let _guard = MavenRepositoryEnvGuard::set(server.base_url());
-        let resolver = MavenResolver::new(JotPaths::new().expect("jot paths")).expect("resolver");
+        let paths = JotPaths::new().expect("jot paths");
+        paths.ensure_exists().expect("ensure jot paths");
+        let resolver = MavenResolver::new(paths).expect("resolver");
         let artifacts = resolver
             .resolve_artifacts(&["io.github.demo:demo:1.2.3".to_owned()], 1)
             .expect("resolve published artifact");
