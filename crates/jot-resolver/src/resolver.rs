@@ -261,93 +261,74 @@ impl MavenResolver {
         for dependency in dependencies {
             let scope = dependency.scope.clone();
             let optional = dependency.optional;
+            let dependency_coordinate = dependency_coordinate(&dependency);
 
             if !include_classpath_scope(scope.as_deref()) {
-                out.push(TreeEntry {
+                out.push(tree_entry(
                     depth,
-                    coordinate: MavenCoordinate {
-                        group: dependency.group,
-                        artifact: dependency.artifact,
-                        version: dependency.version,
-                        classifier: dependency.classifier,
-                    },
+                    dependency_coordinate,
                     scope,
                     optional,
-                    note: Some("scope omitted".to_owned()),
-                });
+                    Some("scope omitted"),
+                ));
                 continue;
             }
 
             if inherited_exclusions
                 .contains(&(dependency.group.clone(), dependency.artifact.clone()))
             {
-                out.push(TreeEntry {
+                out.push(tree_entry(
                     depth,
-                    coordinate: MavenCoordinate {
-                        group: dependency.group,
-                        artifact: dependency.artifact,
-                        version: dependency.version,
-                        classifier: dependency.classifier,
-                    },
+                    dependency_coordinate,
                     scope,
                     optional,
-                    note: Some("excluded".to_owned()),
-                });
+                    Some("excluded"),
+                ));
                 continue;
             }
 
             if optional && depth > 1 {
-                out.push(TreeEntry {
+                out.push(tree_entry(
                     depth,
-                    coordinate: MavenCoordinate {
-                        group: dependency.group,
-                        artifact: dependency.artifact,
-                        version: dependency.version,
-                        classifier: dependency.classifier,
-                    },
+                    dependency_coordinate,
                     scope,
                     optional,
-                    note: Some("optional omitted".to_owned()),
-                });
+                    Some("optional omitted"),
+                ));
                 continue;
             }
 
             let Some(next_coordinate) = self.resolve_dependency_coordinate(&dependency)? else {
-                out.push(TreeEntry {
+                out.push(tree_entry(
                     depth,
-                    coordinate: MavenCoordinate {
-                        group: dependency.group,
-                        artifact: dependency.artifact,
-                        version: dependency.version,
-                        classifier: dependency.classifier,
-                    },
+                    dependency_coordinate,
                     scope,
                     optional,
-                    note: Some("unresolved version".to_owned()),
-                });
+                    Some("unresolved version"),
+                ));
                 continue;
             };
 
             let key = next_coordinate.to_string();
             if seen.contains(&key) {
-                out.push(TreeEntry {
+                out.push(tree_entry(
                     depth,
-                    coordinate: next_coordinate,
+                    next_coordinate,
                     scope,
                     optional,
-                    note: Some("cycle detected".to_owned()),
-                });
+                    Some("cycle detected"),
+                ));
                 continue;
             }
 
             seen.insert(key);
-            out.push(TreeEntry {
+            out.push(tree_entry(
                 depth,
-                coordinate: next_coordinate.clone(),
+                next_coordinate.clone(),
                 scope,
                 optional,
-                note: None,
-            });
+                None,
+            ));
             let mut next_exclusions = inherited_exclusions.clone();
             next_exclusions.extend(dependency.exclusions);
             self.walk_dependencies(
@@ -839,6 +820,31 @@ impl MavenResolver {
             .persist(destination)
             .map_err(|error| ResolverError::Io(error.error))?;
         Ok(())
+    }
+}
+
+fn tree_entry(
+    depth: usize,
+    coordinate: MavenCoordinate,
+    scope: Option<String>,
+    optional: bool,
+    note: Option<&str>,
+) -> TreeEntry {
+    TreeEntry {
+        depth,
+        coordinate,
+        scope,
+        optional,
+        note: note.map(str::to_owned),
+    }
+}
+
+fn dependency_coordinate(dependency: &ResolvedDependency) -> MavenCoordinate {
+    MavenCoordinate {
+        group: dependency.group.clone(),
+        artifact: dependency.artifact.clone(),
+        version: dependency.version.clone(),
+        classifier: dependency.classifier.clone(),
     }
 }
 
