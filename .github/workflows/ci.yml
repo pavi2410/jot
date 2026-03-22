@@ -31,11 +31,14 @@ jobs:
 
   sample:
     needs: test
-    name: ${{ matrix.sample.name }}
-    runs-on: ubuntu-latest
+    name: "${{ matrix.sample.name }} (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
         sample:
           - name: CLI sample
             path: samples/java/cli
@@ -47,6 +50,11 @@ jobs:
             path: samples/java/multi-module-workspace
           - name: Webserver sample
             path: samples/java/webserver
+        include:
+          - os: ubuntu-latest
+            binary: target/debug/jot
+          - os: windows-latest
+            binary: target/debug/jot.exe
 
     steps:
       - uses: actions/checkout@v6
@@ -56,7 +64,7 @@ jobs:
         run: cargo build --locked -p jot --verbose
       - name: Build sample
         working-directory: ${{ matrix.sample.path }}
-        run: ${{ github.workspace }}/target/debug/jot build
+        run: ${{ github.workspace }}/${{ matrix.binary }} build
       - name: Test sample
         working-directory: ${{ matrix.sample.path }}
-        run: ${{ github.workspace }}/target/debug/jot test
+        run: ${{ github.workspace }}/${{ matrix.binary }} test
