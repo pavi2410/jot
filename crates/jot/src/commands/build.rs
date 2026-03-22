@@ -11,7 +11,7 @@ use jot_resolver::MavenResolver;
 use jot_toolchain::ToolchainManager;
 
 use crate::commands::render::{
-    StatusTone, print_status_stderr, print_status_stdout, read_source_line,
+    StatusTone, display_path, print_status_stderr, print_status_stdout, read_source_line,
     render_lint_processing_error as render_lint_processing_error_line, render_source_diagnostic,
     resolve_report_path, stderr_color, style,
 };
@@ -35,14 +35,14 @@ pub(crate) fn handle_build(
                     "{} {} -> {}",
                     module.build.project.name,
                     module.build.project.version,
-                    module.build.jar_path.display()
+                    display_path(&module.build.jar_path)
                 ),
             );
             if let Some(path) = module.build.fat_jar_path {
                 print_status_stdout(
                     "fat-jar",
                     StatusTone::Accent,
-                    format!("{} -> {}", module.module_name, path.display()),
+                    format!("{} -> {}", module.module_name, display_path(&path)),
                 );
             }
             for warning in module.build.fat_jar_warnings {
@@ -64,11 +64,11 @@ pub(crate) fn handle_build(
             "{} {} -> {}",
             output.project.name,
             output.project.version,
-            output.jar_path.display()
+            display_path(&output.jar_path)
         ),
     );
     if let Some(path) = output.fat_jar_path {
-        print_status_stdout("fat-jar", StatusTone::Accent, path.display().to_string());
+        print_status_stdout("fat-jar", StatusTone::Accent, display_path(&path));
     }
     for warning in output.fat_jar_warnings {
         print_status_stderr("warn", StatusTone::Warning, warning);
@@ -203,7 +203,7 @@ fn print_format_report(report: &FormatReport, color: bool) {
         }
     } else {
         for path in &report.changed_files {
-            print_status_stdout("changed", StatusTone::Accent, path.display().to_string());
+            print_status_stdout("changed", StatusTone::Accent, display_path(path));
         }
     }
 }

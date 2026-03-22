@@ -3,7 +3,9 @@ use jot_config::{pin_java_toolchain, read_toolchain_request};
 use jot_toolchain::{InstallOptions, JavaToolchainRequest, ToolchainManager};
 
 use crate::cli::{JavaCommand, JavaSubcommand};
-use crate::commands::render::{StatusTone, print_status_stdout};
+use crate::commands::render::{
+    StatusTone, display_path, print_sharp_table, print_status_stdout, stdout_color, style,
+};
 use crate::utils::{nearest_project_file, workspace_project_file};
 
 pub(crate) fn handle_java(
@@ -47,33 +49,29 @@ pub(crate) fn handle_java(
                 return Ok(());
             }
 
-            for installation in installations {
-                let marker = if active_request
-                    .as_ref()
-                    .is_some_and(|request| installation.matches_request(request))
-                {
-                    "*"
-                } else {
-                    " "
-                };
+            let color = stdout_color();
+            let mut rows = Vec::with_capacity(installations.len());
 
-                print_status_stdout(
-                    "java",
-                    if marker == "*" {
-                        StatusTone::Accent
-                    } else {
-                        StatusTone::Info
-                    },
-                    format!(
-                        "{} {:<9} {:<16} {:<18} {}",
-                        marker,
-                        installation.vendor,
-                        installation.requested_version,
-                        installation.release_name,
-                        installation.java_home.display()
-                    ),
-                );
+            for installation in installations {
+                let is_active = active_request
+                    .as_ref()
+                    .is_some_and(|request| installation.matches_request(request));
+                let active = if is_active {
+                    style("active", StatusTone::Success, color)
+                } else {
+                    style("installed", StatusTone::Dim, color)
+                };
+                rows.push(vec![
+                    active,
+                    installation.vendor.to_string(),
+                    installation.requested_version,
+                    installation.release_name,
+                    display_path(&installation.java_home),
+                ]);
             }
+
+            print_status_stdout("java", StatusTone::Info, "installed toolchains");
+            print_sharp_table(&["status", "vendor", "request", "release", "home"], &rows);
         }
         JavaSubcommand::Pin {
             version,
@@ -90,7 +88,7 @@ pub(crate) fn handle_java(
             print_status_stdout(
                 "pin",
                 StatusTone::Success,
-                format!("updated {}", config_path.display()),
+                format!("updated {}", display_path(&config_path)),
             );
         }
     }

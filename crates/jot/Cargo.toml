@@ -28,6 +28,7 @@ zip.workspace = true
 self-replace = "1.5.0"
 semver = "1.0.27"
 tabled.workspace = true
+termtree = "0.5.1"
 
 [dev-dependencies]
 jot-platform = { path = "../jot-platform" }

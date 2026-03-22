@@ -18,7 +18,7 @@ use reqwest::StatusCode;
 use reqwest::blocking::Client;
 use tempfile::TempDir;
 
-use crate::commands::render::{StatusTone, print_status_stdout};
+use crate::commands::render::{StatusTone, display_path_with_roots, print_status_stdout};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_publish(
@@ -145,7 +145,10 @@ fn publish_project(
         print_status_stdout(
             "dry-run",
             StatusTone::Info,
-            format!("staged publish bundle at {}", staged.stage_dir.display()),
+            format!(
+                "staged publish bundle at {}",
+                display_path_with_roots(&staged.stage_dir, &[build.project.project_root.as_path()])
+            ),
         );
         return Ok(());
     }

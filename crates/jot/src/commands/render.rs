@@ -42,8 +42,21 @@ pub(crate) fn style(text: &str, tone: StatusTone, color: bool) -> String {
 }
 
 pub(crate) fn status_badge(label: &str, tone: StatusTone, color: bool) -> String {
-    let raw = format!("[{label}]");
-    style(&raw, tone, color)
+    let label = label.to_ascii_uppercase();
+    if !color {
+        return label;
+    }
+
+    let color_code = match tone {
+        StatusTone::Success => "1;32",
+        StatusTone::Info => "1;36",
+        StatusTone::Warning => "1;33",
+        StatusTone::Error => "1;31",
+        StatusTone::Accent => "1;34",
+        StatusTone::Dim => "1;2",
+    };
+
+    format!("\u{1b}[{color_code}m{label}\u{1b}[0m")
 }
 
 pub(crate) fn print_status_stdout(label: &str, tone: StatusTone, message: impl AsRef<str>) {
@@ -66,6 +79,47 @@ pub(crate) fn print_sharp_table(headers: &[&str], rows: &[Vec<String>]) {
     println!("{}", builder.build().with(Style::sharp()));
 }
 
+pub(crate) fn display_path(path: &Path) -> String {
+    let cwd = std::env::current_dir().ok();
+    let roots = cwd.as_deref().into_iter().collect::<Vec<_>>();
+    display_path_with_roots(path, &roots)
+}
+
+pub(crate) fn display_path_with_roots(path: &Path, roots: &[&Path]) -> String {
+    if !path.is_absolute() {
+        return path.display().to_string();
+    }
+
+    let mut best = path.display().to_string();
+    for root in roots {
+        if let Ok(relative) = path.strip_prefix(root) {
+            let candidate = if relative.as_os_str().is_empty() {
+                ".".to_owned()
+            } else {
+                relative.display().to_string()
+            };
+            if candidate.len() < best.len() {
+                best = candidate;
+            }
+        }
+    }
+
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from)
+        && let Ok(relative) = path.strip_prefix(&home)
+    {
+        let candidate = if relative.as_os_str().is_empty() {
+            "~".to_owned()
+        } else {
+            format!("~/{}", relative.display())
+        };
+        if candidate.len() < best.len() {
+            best = candidate;
+        }
+    }
+
+    best
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_source_diagnostic(
     path: &Path,
@@ -84,7 +138,7 @@ pub(crate) fn render_source_diagnostic(
         Renderer::plain()
     };
     let (start, end) = snippet_span(source_line, begin_column, end_column);
-    let rendered_path = path.display().to_string();
+    let rendered_path = display_path(path);
     let snippet = Snippet::source(source_line)
         .line_start(line)
         .path(&rendered_path)
@@ -100,7 +154,11 @@ pub(crate) fn render_lint_processing_error(
     message: &str,
 ) -> String {
     let resolved_path = resolve_report_path(project_root, path);
-    format!("error: {}: {}", resolved_path.display(), message)
+    format!(
+        "error: {}: {}",
+        display_path_with_roots(&resolved_path, &[project_root]),
+        message
+    )
 }
 
 pub(crate) fn resolve_report_path(project_root: &Path, path: &Path) -> PathBuf {
@@ -119,27 +177,23 @@ pub(crate) fn read_source_line(path: &Path, line_number: usize) -> Option<String
         .map(|line| line.to_owned())
 }
 
-pub(crate) fn format_tree_entry(entry: &TreeEntry, base_depth: usize) -> String {
-    let indent = "  ".repeat(entry.depth + base_depth);
+pub(crate) fn format_tree_label(entry: &TreeEntry) -> String {
+    let color = stdout_color();
     let scope = entry.scope.clone().unwrap_or_else(|| "compile".to_owned());
     let optional = if entry.optional { " optional" } else { "" };
     let note = entry
         .note
         .as_ref()
-        .map(|value| format!(" ({value})"))
+        .map(|value| format!(" {}", style(value, StatusTone::Dim, color)))
         .unwrap_or_default();
+    let coordinate = style(&entry.coordinate.to_string(), StatusTone::Accent, color);
+    let scope_label = style(&format!("[{scope}{optional}]"), StatusTone::Dim, color);
 
     if entry.depth == 0 {
-        if base_depth == 0 {
-            return entry.coordinate.to_string();
-        }
-        return format!("{}- {}", indent, entry.coordinate);
+        return coordinate;
     }
 
-    format!(
-        "{}- {} [{}{}]{}",
-        indent, entry.coordinate, scope, optional, note
-    )
+    format!("{coordinate} {scope_label}{note}")
 }
 
 fn snippet_span(source_line: &str, begin_column: usize, end_column: usize) -> (usize, usize) {

@@ -4,12 +4,14 @@ use jot_config::{
     read_declared_dependencies, read_declared_dependency_entries, remove_dependency,
 };
 use jot_resolver::{LockedPackage, Lockfile, MavenCoordinate, MavenResolver, TreeEntry};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
+use termtree::Tree;
 
 use crate::commands::render::{
-    StatusTone, format_tree_entry, print_sharp_table, print_status_stdout, stdout_color, style,
+    StatusTone, display_path, display_path_with_roots, format_tree_label, print_sharp_table,
+    print_status_stdout, stdout_color, style,
 };
 use crate::utils::nearest_project_file;
 use crate::utils::write_locked_file;
@@ -69,11 +71,7 @@ pub(crate) fn handle_lock(
         output.clone()
     };
     write_locked_file(&paths, &output_path, content.as_bytes())?;
-    print_status_stdout(
-        "lock",
-        StatusTone::Success,
-        output_path.display().to_string(),
-    );
+    print_status_stdout("lock", StatusTone::Success, display_path(&output_path));
     Ok(())
 }
 
@@ -130,9 +128,8 @@ pub(crate) fn handle_tree(
 
     let dependency = dependency.ok_or("tree requires a dependency coordinate or --workspace")?;
     let entries = resolver.resolve_dependency_tree(dependency, depth)?;
-    for entry in entries {
-        print_tree_entry(&entry, 0);
-    }
+    let tree = dependency_tree(&entries)?;
+    println!("{tree}");
     Ok(())
 }
 
@@ -154,7 +151,7 @@ pub(crate) fn handle_add(
         format!(
             "{} -> {} [{}]",
             dependency_name,
-            project_file.display(),
+            display_path(&project_file),
             if test {
                 "test-dependencies"
             } else {
@@ -189,7 +186,7 @@ pub(crate) fn handle_remove(name: &str, test: bool) -> Result<(), Box<dyn std::e
         format!(
             "{} from {} [{}]",
             name,
-            project_file.display(),
+            display_path(&project_file),
             if test {
                 "test-dependencies"
             } else {
@@ -294,8 +291,10 @@ pub(crate) fn handle_outdated(module: Option<&str>) -> Result<(), Box<dyn std::e
         return Ok(());
     }
 
+    let scope_index = build_scope_index(&resolver, &selection.rows, module);
     let mut rows = Vec::with_capacity(packages.len());
     for package in packages {
+        let scope = package_scope(&package, &scope_index);
         let coordinate = MavenCoordinate {
             group: package.group.clone(),
             artifact: package.artifact.clone(),
@@ -306,20 +305,26 @@ pub(crate) fn handle_outdated(module: Option<&str>) -> Result<(), Box<dyn std::e
         let name = format!("{}:{}", package.group, package.artifact);
         match resolver.latest_available_version(&coordinate) {
             Ok(Some(latest)) => {
-                let status = if latest == current {
-                    "up-to-date"
-                } else {
-                    "outdated"
-                };
-                rows.push((name, current, latest, status.to_owned()));
+                if latest != current {
+                    rows.push((name, current, latest, scope));
+                }
             }
             Ok(None) => {
-                rows.push((name, current, "<unknown>".to_owned(), "unknown".to_owned()));
+                rows.push((name, current, "<unknown>".to_owned(), scope));
             }
             Err(_) => {
-                rows.push((name, current, "<error>".to_owned(), "unknown".to_owned()));
+                rows.push((name, current, "<error>".to_owned(), scope));
             }
         }
+    }
+
+    if rows.is_empty() {
+        print_status_stdout(
+            "outdated",
+            StatusTone::Success,
+            "all locked packages are up to date",
+        );
+        return Ok(());
     }
 
     print_outdated_table(&rows);
@@ -388,7 +393,7 @@ fn load_lockfile(path: &PathBuf) -> Result<Lockfile, Box<dyn std::error::Error>>
     let content = fs::read_to_string(path).map_err(|_| {
         format!(
             "could not read lockfile at {}; run `jot lock` first",
-            path.display()
+            display_path(path)
         )
     })?;
     let lockfile = toml::from_str::<Lockfile>(&content)?;
@@ -453,14 +458,14 @@ fn print_deps_table(rows: &[(DirectDependencyRow, String)], include_module_colum
 }
 
 fn print_outdated_table(rows: &[(String, String, String, String)]) {
-    let headers = ["name", "current", "latest", "status"];
+    let headers = ["name", "current", "latest", "scope"];
     let mut table_rows = Vec::with_capacity(rows.len());
-    for (name, current, latest, status) in rows {
+    for (name, current, latest, scope) in rows {
         table_rows.push(vec![
             name.to_owned(),
             current.to_owned(),
             latest.to_owned(),
-            status.to_owned(),
+            scope.to_owned(),
         ]);
     }
 
@@ -522,8 +527,86 @@ fn select_packages_for_module(
     Ok(selected)
 }
 
-fn print_tree_entry(entry: &TreeEntry, base_depth: usize) {
-    println!("{}", format_tree_entry(entry, base_depth));
+fn build_scope_index(
+    resolver: &MavenResolver,
+    rows: &[DirectDependencyRow],
+    selected_module: Option<&str>,
+) -> HashMap<String, BTreeSet<String>> {
+    let mut index: HashMap<String, BTreeSet<String>> = HashMap::new();
+    let selected_rows = rows
+        .iter()
+        .filter(|row| selected_module.is_none_or(|module| row.module.as_deref() == Some(module)));
+
+    for row in selected_rows {
+        if let Ok(root) = resolver.resolve_coordinate(&row.coordinate) {
+            index
+                .entry(root.to_string())
+                .or_default()
+                .insert(row.scope.to_owned());
+        }
+
+        if let Ok(entries) = resolver.resolve_dependency_tree(&row.coordinate, DEFAULT_LOCK_DEPTH) {
+            for entry in entries {
+                if entry.depth == 0 {
+                    continue;
+                }
+                if entry.note.is_some() {
+                    continue;
+                }
+                let scope = entry.scope.unwrap_or_else(|| "compile".to_owned());
+                index.entry(entry.coordinate.to_string()).or_default().insert(scope);
+            }
+        }
+    }
+
+    index
+}
+
+fn package_scope(package: &LockedPackage, index: &HashMap<String, BTreeSet<String>>) -> String {
+    let key = MavenCoordinate {
+        group: package.group.clone(),
+        artifact: package.artifact.clone(),
+        version: Some(package.version.clone()),
+        classifier: package.classifier.clone(),
+    }
+    .to_string();
+
+    index
+        .get(&key)
+        .map(|scopes| scopes.iter().cloned().collect::<Vec<_>>().join(","))
+        .unwrap_or_else(|| "transitive".to_owned())
+}
+
+fn dependency_tree(entries: &[TreeEntry]) -> Result<Tree<String>, Box<dyn std::error::Error>> {
+    if entries.is_empty() {
+        return Err("dependency tree contained no entries".into());
+    }
+
+    let (tree, _) = build_dependency_subtree(entries, 0);
+    Ok(tree)
+}
+
+fn build_dependency_subtree(entries: &[TreeEntry], index: usize) -> (Tree<String>, usize) {
+    let entry = &entries[index];
+    let mut tree = Tree::new(format_tree_label(entry));
+    let mut next = index + 1;
+
+    while next < entries.len() {
+        let next_entry = &entries[next];
+        if next_entry.depth <= entry.depth {
+            break;
+        }
+
+        if next_entry.depth == entry.depth + 1 {
+            let (child, consumed) = build_dependency_subtree(entries, next);
+            tree.push(child);
+            next = consumed;
+        } else {
+            next += 1;
+        }
+    }
+
+    (tree, next)
 }
 
 fn print_workspace_tree(
@@ -548,36 +631,34 @@ fn print_workspace_tree(
         .map(|member| (member.project_root.clone(), member.module_name.clone()))
         .collect::<std::collections::BTreeMap<_, _>>();
 
-    print_status_stdout("tree", StatusTone::Info, "workspace");
+    let mut root = Tree::new(style("workspace", StatusTone::Info, stdout_color()));
     let color = stdout_color();
     for member in workspace.members {
         if module.is_some_and(|selected| selected != member.module_name) {
             continue;
         }
 
-        println!(
-            "- {}",
-            style(&member.module_name, StatusTone::Accent, color)
-        );
+        let mut member_tree = Tree::new(style(&member.module_name, StatusTone::Accent, color));
         for path_dependency in &member.path_dependencies {
-            let dependency_name = by_root
-                .get(path_dependency)
-                .cloned()
-                .unwrap_or_else(|| path_dependency.display().to_string());
-            println!(
-                "  - {} {}",
+            let dependency_name = by_root.get(path_dependency).cloned().unwrap_or_else(|| {
+                display_path_with_roots(path_dependency, &[workspace.root_dir.as_path()])
+            });
+            member_tree.push(Tree::new(format!(
+                "{} {}",
                 dependency_name,
                 style("(workspace)", StatusTone::Dim, color)
-            );
+            )));
         }
 
         for dependency in &member.external_dependencies {
             let entries = resolver.resolve_dependency_tree(dependency, depth)?;
-            for entry in entries {
-                print_tree_entry(&entry, 1);
-            }
+            member_tree.push(dependency_tree(&entries)?);
         }
+
+        root.push(member_tree);
     }
+
+    println!("{root}");
 
     Ok(())
 }

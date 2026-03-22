@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use jot_cache::JotPaths;
 use jot_config::load_workspace_build_config;
 
-use crate::commands::render::{StatusTone, print_status_stdout};
+use crate::commands::render::{StatusTone, display_path_with_roots, print_status_stdout};
 use crate::init_templates;
 use crate::utils::nearest_project_file;
 
@@ -28,7 +28,7 @@ pub(crate) fn handle_init(
         format!(
             "{} template at {} ({} files)",
             output.template,
-            output.root.display(),
+            display_path_with_roots(&output.root, &[cwd]),
             output.created_files
         ),
     );
@@ -87,7 +87,11 @@ pub(crate) fn handle_clean(
         );
     } else {
         for path in deleted {
-            print_status_stdout("clean", StatusTone::Success, path.display().to_string());
+            print_status_stdout(
+                "clean",
+                StatusTone::Success,
+                display_path_with_roots(&path, &[cwd.as_path()]),
+            );
         }
     }
 
