@@ -70,6 +70,55 @@ struct EffectivePomModel {
     dependencies: Vec<ResolvedDependency>,
 }
 
+struct CoordinateCacheKey {
+    group: String,
+    artifact: String,
+    version: Option<String>,
+    classifier_suffix: String,
+}
+
+impl CoordinateCacheKey {
+    fn from_coordinate(coordinate: &MavenCoordinate) -> Self {
+        let classifier_suffix = coordinate
+            .classifier
+            .as_deref()
+            .map(|value| format!("-{value}"))
+            .unwrap_or_default();
+
+        Self {
+            group: sanitize_for_filename(&coordinate.group),
+            artifact: sanitize_for_filename(&coordinate.artifact),
+            version: coordinate.version.as_deref().map(sanitize_for_filename),
+            classifier_suffix: sanitize_for_filename(&classifier_suffix),
+        }
+    }
+
+    fn version_for_pom<'a>(
+        &'a self,
+        coordinate: &MavenCoordinate,
+    ) -> Result<&'a str, ResolverError> {
+        self.version
+            .as_deref()
+            .ok_or_else(|| ResolverError::MissingVersionForPom(coordinate.to_string()))
+    }
+
+    fn version_for_artifact<'a>(
+        &'a self,
+        coordinate: &MavenCoordinate,
+    ) -> Result<&'a str, ResolverError> {
+        self.version
+            .as_deref()
+            .ok_or_else(|| ResolverError::MissingVersionForArtifact(coordinate.to_string()))
+    }
+
+    fn artifact_basename(&self, version: &str) -> String {
+        format!(
+            "jar-{}-{}-{}{}",
+            self.group, self.artifact, version, self.classifier_suffix
+        )
+    }
+}
+
 struct InterpolationContext<'a> {
     properties: &'a BTreeMap<String, String>,
 }
@@ -644,68 +693,43 @@ impl MavenResolver {
     }
 
     fn metadata_cache_path(&self, coordinate: &MavenCoordinate) -> PathBuf {
-        self.paths.resolve_cache_dir().join(format!(
-            "maven-metadata-{}-{}.xml",
-            sanitize_for_filename(&coordinate.group),
-            sanitize_for_filename(&coordinate.artifact),
-        ))
+        let key = CoordinateCacheKey::from_coordinate(coordinate);
+        self.paths
+            .resolve_cache_dir()
+            .join(format!("maven-metadata-{}-{}.xml", key.group, key.artifact,))
     }
 
     fn pom_cache_path(&self, coordinate: &MavenCoordinate) -> Result<PathBuf, ResolverError> {
+        let key = CoordinateCacheKey::from_coordinate(coordinate);
+        let version = key.version_for_pom(coordinate)?;
+
         Ok(self.paths.resolve_cache_dir().join(format!(
             "pom-{}-{}-{}.xml",
-            sanitize_for_filename(&coordinate.group),
-            sanitize_for_filename(&coordinate.artifact),
-            sanitize_for_filename(
-                coordinate
-                    .version
-                    .as_deref()
-                    .ok_or_else(|| ResolverError::MissingVersionForPom(coordinate.to_string()))?
-            ),
+            key.group, key.artifact, version,
         )))
     }
 
     fn artifact_cache_path(&self, coordinate: &MavenCoordinate) -> Result<PathBuf, ResolverError> {
-        let version = coordinate
-            .version
-            .as_deref()
-            .ok_or_else(|| ResolverError::MissingVersionForArtifact(coordinate.to_string()))?;
-        let classifier_suffix = coordinate
-            .classifier
-            .as_deref()
-            .map(|value| format!("-{value}"))
-            .unwrap_or_default();
+        let key = CoordinateCacheKey::from_coordinate(coordinate);
+        let version = key.version_for_artifact(coordinate)?;
 
-        Ok(self.paths.downloads_dir().join(format!(
-            "jar-{}-{}-{}{}.jar",
-            sanitize_for_filename(&coordinate.group),
-            sanitize_for_filename(&coordinate.artifact),
-            sanitize_for_filename(version),
-            sanitize_for_filename(&classifier_suffix),
-        )))
+        Ok(self
+            .paths
+            .downloads_dir()
+            .join(format!("{}.jar", key.artifact_basename(version))))
     }
 
     fn artifact_checksum_cache_path(
         &self,
         coordinate: &MavenCoordinate,
     ) -> Result<PathBuf, ResolverError> {
-        let version = coordinate
-            .version
-            .as_deref()
-            .ok_or_else(|| ResolverError::MissingVersionForArtifact(coordinate.to_string()))?;
-        let classifier_suffix = coordinate
-            .classifier
-            .as_deref()
-            .map(|value| format!("-{value}"))
-            .unwrap_or_default();
+        let key = CoordinateCacheKey::from_coordinate(coordinate);
+        let version = key.version_for_artifact(coordinate)?;
 
-        Ok(self.paths.resolve_cache_dir().join(format!(
-            "jar-{}-{}-{}{}.sha256",
-            sanitize_for_filename(&coordinate.group),
-            sanitize_for_filename(&coordinate.artifact),
-            sanitize_for_filename(version),
-            sanitize_for_filename(&classifier_suffix),
-        )))
+        Ok(self
+            .paths
+            .resolve_cache_dir()
+            .join(format!("{}.sha256", key.artifact_basename(version))))
     }
 
     fn cache_artifact_and_hash(
