@@ -16,7 +16,7 @@ use jot_config::{ProjectBuildConfig, load_project_build_config};
 use jot_resolver::{MavenResolver, ResolvedArtifact};
 use jot_toolchain::{InstalledJdk, ToolchainManager};
 
-use compile::{compile_sources, join_paths_for_classpath};
+use compile::{AnnotationProcessingConfig, compile_sources, join_paths_for_classpath};
 use package::{build_fat_jar, copy_resources, package_jar};
 
 const DEFAULT_RESOLVE_DEPTH: usize = 8;
@@ -71,6 +71,25 @@ impl JavaProjectBuilder {
             .map(|artifact| artifact.path.clone())
             .collect::<Vec<_>>();
         dependency_paths.extend(extra_classpath.iter().cloned());
+
+        let annotation_processing = if !project.processors.is_empty() {
+            let processor_artifacts = self
+                .resolver
+                .resolve_artifacts(&project.processors, DEFAULT_RESOLVE_DEPTH)?;
+            let generated_sources_dir = target_dir.join("generated-sources");
+            prepare_directory(&generated_sources_dir)?;
+            Some(AnnotationProcessingConfig {
+                processor_paths: processor_artifacts
+                    .iter()
+                    .map(|artifact| artifact.path.clone())
+                    .collect(),
+                options: project.processor_options.clone(),
+                generated_sources_dir,
+            })
+        } else {
+            None
+        };
+
         compile_sources(
             &installed_jdk,
             project
@@ -81,6 +100,7 @@ impl JavaProjectBuilder {
             &dependency_paths,
             &classes_dir,
             &source_files,
+            annotation_processing.as_ref(),
         )?;
         copy_resources(&project.resource_dir, &classes_dir)?;
         let jar_path = target_dir.join(format!("{}-{}.jar", project.name, project.version));
@@ -193,6 +213,24 @@ impl JavaProjectBuilder {
                 .collect::<Vec<_>>();
             let mut main_compile_classpath = compile_dependency_paths;
             main_compile_classpath.extend(path_dependency_jars.iter().cloned());
+            let annotation_processing = if !project.processors.is_empty() {
+                let processor_artifacts = self
+                    .resolver
+                    .resolve_artifacts(&project.processors, DEFAULT_RESOLVE_DEPTH)?;
+                let generated_sources_dir = target_dir.join("generated-sources");
+                prepare_directory(&generated_sources_dir)?;
+                Some(AnnotationProcessingConfig {
+                    processor_paths: processor_artifacts
+                        .iter()
+                        .map(|artifact| artifact.path.clone())
+                        .collect(),
+                    options: project.processor_options.clone(),
+                    generated_sources_dir,
+                })
+            } else {
+                None
+            };
+
             compile_sources(
                 &installed_jdk,
                 project
@@ -203,6 +241,7 @@ impl JavaProjectBuilder {
                 &main_compile_classpath,
                 &classes_dir,
                 &main_sources,
+                annotation_processing.as_ref(),
             )?;
             copy_resources(&project.resource_dir, &classes_dir)?;
         }
@@ -231,6 +270,7 @@ impl JavaProjectBuilder {
             &test_compile_classpath,
             &test_classes_dir,
             &test_sources,
+            None,
         )?;
 
         let console_jar = test_dependencies

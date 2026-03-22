@@ -915,6 +915,8 @@ mod tests {
             dependencies: vec!["org.slf4j:slf4j-api:2.0.16".into()],
             path_dependencies: Vec::new(),
             test_dependencies: Vec::new(),
+            processors: Vec::new(),
+            processor_options: std::collections::BTreeMap::new(),
             toolchain: None,
             publish: Some(PublishConfig {
                 license: Some("Apache-2.0".into()),
@@ -994,6 +996,8 @@ mod tests {
             dependencies: Vec::new(),
             path_dependencies: Vec::new(),
             test_dependencies: Vec::new(),
+            processors: Vec::new(),
+            processor_options: std::collections::BTreeMap::new(),
             toolchain: None,
             publish: Some(PublishConfig {
                 license: Some("Apache-2.0".into()),

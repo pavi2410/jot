@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use jot_toolchain::JavaToolchainRequest;
@@ -51,6 +52,8 @@ pub struct ProjectBuildConfig {
     pub dependencies: Vec<String>,
     pub path_dependencies: Vec<PathBuf>,
     pub test_dependencies: Vec<String>,
+    pub processors: Vec<String>,
+    pub processor_options: BTreeMap<String, String>,
     pub toolchain: Option<JavaToolchainRequest>,
     pub publish: Option<PublishConfig>,
     pub format: FormatConfig,

@@ -5,7 +5,7 @@ use toml::Value as TomlValue;
 
 use crate::errors::ConfigError;
 use crate::models::WorkspaceMemberBuildConfig;
-use crate::raw::{RawCatalog, RawCatalogVersion, RawConfig, RawDependencySpec};
+use crate::raw::{RawCatalog, RawCatalogVersion, RawConfig, RawDependencySpec, RawProcessorSpec};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeclaredDependencyEntry {
@@ -318,6 +318,49 @@ pub(crate) fn detect_workspace_path_cycles(
     }
 
     Ok(())
+}
+
+pub(crate) fn extract_processor_specs(
+    processors: Option<std::collections::BTreeMap<String, RawProcessorSpec>>,
+    catalog_path: Option<&Path>,
+) -> Result<(Vec<String>, std::collections::BTreeMap<String, String>), ConfigError> {
+    let mut coordinates = Vec::new();
+    let mut options = std::collections::BTreeMap::new();
+    let catalog = load_catalog(catalog_path)?;
+
+    for (name, spec) in processors.unwrap_or_default() {
+        match spec {
+            RawProcessorSpec::Coords(coords) => coordinates.push(coords),
+            RawProcessorSpec::Detailed {
+                coords: Some(coords),
+                options: proc_options,
+                ..
+            } => {
+                coordinates.push(coords);
+                if let Some(proc_options) = proc_options {
+                    options.extend(proc_options);
+                }
+            }
+            RawProcessorSpec::Detailed {
+                catalog: Some(alias),
+                options: proc_options,
+                ..
+            } => {
+                coordinates.push(resolve_catalog_dependency(&name, &alias, catalog.as_ref())?);
+                if let Some(proc_options) = proc_options {
+                    options.extend(proc_options);
+                }
+            }
+            RawProcessorSpec::Detailed { .. } => {
+                return Err(ConfigError::UnsupportedDependencyDeclaration {
+                    name,
+                    reason: "processor declaration must include `coords` or `catalog`".to_owned(),
+                });
+            }
+        }
+    }
+
+    Ok((coordinates, options))
 }
 
 pub(crate) fn module_name_from_member(member: &str) -> Result<String, ConfigError> {

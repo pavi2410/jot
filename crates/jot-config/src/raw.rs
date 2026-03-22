@@ -10,6 +10,7 @@ pub(crate) struct RawConfig {
     pub(crate) dependencies: Option<std::collections::BTreeMap<String, RawDependencySpec>>,
     #[serde(rename = "test-dependencies")]
     pub(crate) test_dependencies: Option<std::collections::BTreeMap<String, RawDependencySpec>>,
+    pub(crate) processors: Option<std::collections::BTreeMap<String, RawProcessorSpec>>,
     pub(crate) toolchains: Option<RawToolchains>,
     pub(crate) publish: Option<RawPublish>,
     pub(crate) format: Option<RawFormat>,
@@ -77,6 +78,17 @@ pub(crate) enum RawDependencySpec {
         coords: Option<String>,
         path: Option<String>,
         catalog: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum RawProcessorSpec {
+    Coords(String),
+    Detailed {
+        coords: Option<String>,
+        catalog: Option<String>,
+        options: Option<std::collections::BTreeMap<String, String>>,
     },
 }
 

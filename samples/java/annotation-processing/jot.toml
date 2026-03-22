@@ -1,0 +1,13 @@
+[project]
+name = "annotation-processing"
+version = "0.1.0"
+main-class = "com.jot.samples.ap.Main"
+
+[toolchains]
+java = "21"
+
+[dependencies]
+mapstruct = "org.mapstruct:mapstruct:1.6.3"
+
+[processors]
+mapstruct = "org.mapstruct:mapstruct-processor:1.6.3"

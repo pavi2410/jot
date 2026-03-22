@@ -26,7 +26,7 @@ use jot_toolchain::JavaToolchainRequest;
 
 use crate::dependencies::{
     catalog_path_for_root, detect_workspace_path_cycles, extract_dependency_coordinates,
-    extract_path_dependencies, module_name_from_member,
+    extract_path_dependencies, extract_processor_specs, module_name_from_member,
 };
 use crate::models::WorkspaceInheritance;
 use crate::raw::{
@@ -217,6 +217,8 @@ fn load_project_build_config_from_file_with_inheritance(
     let module_name = inherited.and_then(|ctx| ctx.module_name);
     let path_dependencies = extract_path_dependencies(config.dependencies.clone(), &project_root)?;
     let catalog_path = inherited_catalog_path.or_else(|| catalog_path_for_root(&project_root));
+    let (processors, processor_options) =
+        extract_processor_specs(config.processors, catalog_path.as_deref())?;
 
     Ok(ProjectBuildConfig {
         config_path: config_path.clone(),
@@ -240,6 +242,8 @@ fn load_project_build_config_from_file_with_inheritance(
             config.test_dependencies,
             catalog_path.as_deref(),
         )?,
+        processors,
+        processor_options,
         toolchain: parse_toolchain_request(config.toolchains).or(inherited_toolchain),
         publish: parse_publish_config(config.publish, inherited_publish),
         format: parse_format_config(config.format, inherited_format),
