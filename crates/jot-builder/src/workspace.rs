@@ -90,13 +90,17 @@ impl JavaProjectBuilder {
     }
 }
 
+fn canonical_root(path: &std::path::Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
 fn workspace_build_order(workspace: &WorkspaceBuildConfig) -> Result<Vec<String>, BuildError> {
     let root_to_module = workspace
         .members
         .iter()
         .map(|member| {
             (
-                member.project.project_root.clone(),
+                canonical_root(&member.project.project_root),
                 member.module_name.clone(),
             )
         })
@@ -116,7 +120,7 @@ fn workspace_build_order(workspace: &WorkspaceBuildConfig) -> Result<Vec<String>
     for member in &workspace.members {
         for dependency_path in &member.project.path_dependencies {
             let dependency = root_to_module
-                .get(dependency_path)
+                .get(&canonical_root(dependency_path))
                 .ok_or_else(|| BuildError::UnknownWorkspaceDependency {
                     module: member.module_name.clone(),
                     path: dependency_path.clone(),
@@ -169,7 +173,7 @@ fn select_modules_for_build(
         .map(|member| {
             (
                 member.module_name.clone(),
-                member.project.project_root.clone(),
+                canonical_root(&member.project.project_root),
             )
         })
         .collect::<BTreeMap<_, _>>();
@@ -188,7 +192,7 @@ fn select_modules_for_build(
         .iter()
         .map(|member| {
             (
-                member.project.project_root.clone(),
+                canonical_root(&member.project.project_root),
                 member.module_name.clone(),
             )
         })
@@ -217,7 +221,7 @@ fn select_modules_for_build(
             .ok_or_else(|| BuildError::UnknownWorkspaceModule(next.clone()))?;
         for dep_root in &member.project.path_dependencies {
             let dep = by_root
-                .get(dep_root)
+                .get(&canonical_root(dep_root))
                 .ok_or_else(|| BuildError::UnknownWorkspaceDependency {
                     module: next.clone(),
                     path: dep_root.clone(),
