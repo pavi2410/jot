@@ -1,6 +1,7 @@
 mod compile;
 mod diagnostics;
 pub mod errors;
+mod graph;
 mod package;
 mod workspace;
 
