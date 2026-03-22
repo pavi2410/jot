@@ -61,6 +61,14 @@ pub(crate) enum Command {
         #[arg(long)]
         test: bool,
     },
+    Deps {
+        #[arg(long)]
+        module: Option<String>,
+    },
+    Outdated {
+        #[arg(long)]
+        module: Option<String>,
+    },
     Lock {
         dependencies: Vec<String>,
         #[arg(long, default_value_t = 8)]

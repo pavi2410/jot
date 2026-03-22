@@ -5,7 +5,9 @@ mod errors;
 mod models;
 mod raw;
 
-pub use dependencies::read_declared_dependencies;
+pub use dependencies::{
+    DeclaredDependencyEntry, read_declared_dependencies, read_declared_dependency_entries,
+};
 pub use discovery::{
     find_jot_toml, find_workspace_jot_toml, find_workspace_root_jot_toml, read_toolchain_request,
 };
@@ -136,7 +138,14 @@ pub fn load_workspace_dependency_set(
     let mut external_dependencies = workspace
         .members
         .iter()
-        .flat_map(|member| member.project.dependencies.iter().cloned())
+        .flat_map(|member| {
+            member
+                .project
+                .dependencies
+                .iter()
+                .chain(member.project.test_dependencies.iter())
+                .cloned()
+        })
         .collect::<Vec<_>>();
     external_dependencies.sort();
     external_dependencies.dedup();
@@ -399,8 +408,11 @@ mod tests {
     fn adds_and_removes_main_dependency_entry() {
         let temp = tempdir().expect("tempdir");
         let config_path = temp.path().join("jot.toml");
-        fs::write(&config_path, "[project]\nname = \"demo\"\nversion = \"0.1.0\"\n")
-            .expect("write config");
+        fs::write(
+            &config_path,
+            "[project]\nname = \"demo\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("write config");
 
         add_dependency(
             &config_path,
@@ -425,8 +437,11 @@ mod tests {
     fn adds_test_catalog_dependency_entry() {
         let temp = tempdir().expect("tempdir");
         let config_path = temp.path().join("jot.toml");
-        fs::write(&config_path, "[project]\nname = \"demo\"\nversion = \"0.1.0\"\n")
-            .expect("write config");
+        fs::write(
+            &config_path,
+            "[project]\nname = \"demo\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("write config");
 
         add_dependency(
             &config_path,

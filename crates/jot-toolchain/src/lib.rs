@@ -73,10 +73,10 @@ pub struct InstalledJdk {
 
 impl InstalledJdk {
     pub fn matches_request(&self, request: &impl ToolchainRequest) -> bool {
-        if let Some(vendor) = request.vendor() {
-            if vendor != self.vendor {
-                return false;
-            }
+        if let Some(vendor) = request.vendor()
+            && vendor != self.vendor
+        {
+            return false;
         }
 
         let expected = request.version();
@@ -499,6 +499,7 @@ impl InstallLock {
             paths.install_lock_path(&vendor.to_string(), version, &platform.to_string());
         let file = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(&lock_path)?;

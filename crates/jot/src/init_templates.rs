@@ -19,6 +19,7 @@ pub struct InitOutput {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[allow(clippy::enum_variant_names)]
 enum TemplateKind {
     JavaMinimal,
     JavaLib,

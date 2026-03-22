@@ -7,6 +7,13 @@ use crate::errors::ConfigError;
 use crate::models::WorkspaceMemberBuildConfig;
 use crate::raw::{RawCatalog, RawCatalogVersion, RawConfig, RawDependencySpec};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeclaredDependencyEntry {
+    pub name: String,
+    pub coordinate: String,
+    pub test: bool,
+}
+
 pub fn read_declared_dependencies(start: &Path) -> Result<Vec<String>, ConfigError> {
     let Some(path) = crate::discovery::find_jot_toml(start)? else {
         return Ok(Vec::new());
@@ -18,7 +25,95 @@ pub fn read_declared_dependencies(start: &Path) -> Result<Vec<String>, ConfigErr
     let catalog_path = inherited
         .and_then(|ctx| ctx.catalog_path)
         .or_else(|| path.parent().and_then(catalog_path_for_root));
-    extract_dependency_coordinates(config.dependencies, catalog_path.as_deref())
+    let mut coords = extract_dependency_coordinates(config.dependencies, catalog_path.as_deref())?;
+    coords.extend(extract_dependency_coordinates(
+        config.test_dependencies,
+        catalog_path.as_deref(),
+    )?);
+    Ok(coords)
+}
+
+pub fn read_declared_dependency_entries(
+    start: &Path,
+) -> Result<Vec<DeclaredDependencyEntry>, ConfigError> {
+    let Some(path) = crate::discovery::find_jot_toml(start)? else {
+        return Ok(Vec::new());
+    };
+
+    let content = fs::read_to_string(&path)?;
+    let config: RawConfig = toml::from_str(&content)?;
+    let inherited = crate::inherited_workspace_context(path.parent().unwrap_or(start))?;
+    let catalog_path = inherited
+        .and_then(|ctx| ctx.catalog_path)
+        .or_else(|| path.parent().and_then(catalog_path_for_root));
+    let catalog = load_catalog(catalog_path.as_deref())?;
+
+    let mut entries = Vec::new();
+    entries.extend(resolve_dependency_entries(
+        config.dependencies,
+        false,
+        catalog.as_ref(),
+    )?);
+    entries.extend(resolve_dependency_entries(
+        config.test_dependencies,
+        true,
+        catalog.as_ref(),
+    )?);
+    entries.sort_by(|left, right| {
+        left.test
+            .cmp(&right.test)
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    Ok(entries)
+}
+
+fn resolve_dependency_entries(
+    dependencies: Option<std::collections::BTreeMap<String, RawDependencySpec>>,
+    test: bool,
+    catalog: Option<&RawCatalog>,
+) -> Result<Vec<DeclaredDependencyEntry>, ConfigError> {
+    let mut result = Vec::new();
+
+    for (name, spec) in dependencies.unwrap_or_default() {
+        match spec {
+            RawDependencySpec::Coords(coords) => {
+                result.push(DeclaredDependencyEntry {
+                    name,
+                    coordinate: coords,
+                    test,
+                });
+            }
+            RawDependencySpec::Detailed {
+                coords: Some(coords),
+                ..
+            } => {
+                result.push(DeclaredDependencyEntry {
+                    name,
+                    coordinate: coords,
+                    test,
+                });
+            }
+            RawDependencySpec::Detailed { path: Some(_), .. } => {}
+            RawDependencySpec::Detailed {
+                catalog: Some(alias),
+                ..
+            } => {
+                result.push(DeclaredDependencyEntry {
+                    coordinate: resolve_catalog_dependency(&name, &alias, catalog)?,
+                    name,
+                    test,
+                });
+            }
+            RawDependencySpec::Detailed { .. } => {
+                return Err(ConfigError::UnsupportedDependencyDeclaration {
+                    name,
+                    reason: "dependency declaration must include `coords`".to_owned(),
+                });
+            }
+        }
+    }
+
+    Ok(result)
 }
 
 pub(crate) fn extract_dependency_coordinates(

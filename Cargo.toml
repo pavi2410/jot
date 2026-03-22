@@ -28,6 +28,7 @@ quick-xml = { version = "0.38.1", features = ["serialize"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 sha2 = "0.10.8"
+tabled = "0.17"
 tar = "0.4.44"
 tempfile = "3.19.1"
 thiserror = "2.0.12"

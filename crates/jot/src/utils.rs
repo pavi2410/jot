@@ -6,17 +6,17 @@ use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
 use jot_cache::JotPaths;
-use jot_config::{find_workspace_jot_toml, find_jot_toml};
+use jot_config::{find_jot_toml, find_workspace_jot_toml};
 use tempfile::NamedTempFile;
 
-pub(crate) fn workspace_project_file(start: &PathBuf) -> Result<PathBuf, Box<dyn std::error::Error>> {
+pub(crate) fn workspace_project_file(start: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
     find_workspace_jot_toml(start)?.ok_or_else(|| {
         "could not find a workspace jot.toml in the current directory or any parent directory"
             .into()
     })
 }
 
-pub(crate) fn nearest_project_file(start: &PathBuf) -> Result<PathBuf, Box<dyn std::error::Error>> {
+pub(crate) fn nearest_project_file(start: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
     find_jot_toml(start)?.ok_or_else(|| {
         "could not find jot.toml in the current directory or any parent directory".into()
     })
@@ -33,6 +33,7 @@ pub(crate) fn write_locked_file(
     ));
     let lock_file = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(&lock_path)?;

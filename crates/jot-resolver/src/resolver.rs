@@ -2,7 +2,7 @@ use fs2::FileExt;
 use jot_cache::JotPaths;
 use quick_xml::de::from_str;
 use reqwest::blocking::Client;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
@@ -46,14 +46,14 @@ pub struct TreeEntry {
     pub note: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Lockfile {
     pub version: u32,
     pub roots: Vec<MavenCoordinate>,
     pub package: Vec<LockedPackage>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct LockedPackage {
     pub group: String,
     pub artifact: String,
@@ -229,6 +229,14 @@ impl MavenResolver {
                 Ok(ResolvedArtifact { coordinate, path })
             })
             .collect()
+    }
+
+    pub fn latest_available_version(
+        &self,
+        coordinate: &MavenCoordinate,
+    ) -> Result<Option<String>, ResolverError> {
+        let metadata = self.fetch_metadata(coordinate)?;
+        Ok(metadata.versioning.as_ref().and_then(resolve_best_version))
     }
 
     pub fn cache_artifact(&self, coordinate: &MavenCoordinate) -> Result<PathBuf, ResolverError> {
@@ -842,6 +850,7 @@ impl CacheWriteLock {
     pub(crate) fn acquire(path: &Path) -> Result<Self, ResolverError> {
         let file = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(path)?;

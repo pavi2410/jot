@@ -1,17 +1,32 @@
-use std::path::PathBuf;
-
 use jot_cache::JotPaths;
 use jot_config::{
-    DependencySpec, add_dependency, load_workspace_dependency_set, read_declared_dependencies,
-    remove_dependency,
+    DependencySpec, add_dependency, load_workspace_build_config, load_workspace_dependency_set,
+    read_declared_dependencies, read_declared_dependency_entries, remove_dependency,
 };
-use jot_resolver::{MavenCoordinate, MavenResolver, TreeEntry};
+use jot_resolver::{LockedPackage, Lockfile, MavenCoordinate, MavenResolver, TreeEntry};
+use std::collections::HashSet;
+use std::fs;
+use std::path::PathBuf;
 
 use crate::utils::nearest_project_file;
 use crate::utils::write_locked_file;
 
 const DEFAULT_LOCK_DEPTH: usize = 8;
 const DEFAULT_LOCKFILE_NAME: &str = "jot.lock";
+
+#[derive(Debug, Clone)]
+struct DirectDependencyRow {
+    module: Option<String>,
+    name: String,
+    coordinate: String,
+    scope: &'static str,
+}
+
+#[derive(Debug)]
+struct DepsSelection {
+    rows: Vec<DirectDependencyRow>,
+    lockfile_path: PathBuf,
+}
 
 pub(crate) fn handle_lock(
     dependencies: &[String],
@@ -176,7 +191,9 @@ fn resolve_add_input(
         (Some(_), Some(_)) => {
             Err("use either a coordinate argument or --catalog, but not both".into())
         }
-        (None, None) => Err("missing dependency input: provide <group:artifact:version> or --catalog <name>".into()),
+        (None, None) => Err(
+            "missing dependency input: provide <group:artifact:version> or --catalog <name>".into(),
+        ),
         (Some(raw), None) => {
             let parsed = MavenCoordinate::parse(raw)?;
             if parsed.version.is_none() {
@@ -189,7 +206,9 @@ fn resolve_add_input(
             Ok((dependency_name, DependencySpec::Coords(parsed.to_string())))
         }
         (None, Some(alias)) => {
-            let dependency_name = name.map(ToOwned::to_owned).unwrap_or_else(|| alias.to_owned());
+            let dependency_name = name
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| alias.to_owned());
             Ok((dependency_name, DependencySpec::Catalog(alias.to_owned())))
         }
     }
@@ -210,6 +229,278 @@ fn regenerate_lockfile_if_possible() -> Result<(), Box<dyn std::error::Error>> {
             Err(error)
         }
     }
+}
+
+pub(crate) fn handle_deps(module: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+    let selection = collect_dependency_rows(module)?;
+    let lockfile = load_lockfile(&selection.lockfile_path)?;
+
+    if selection.rows.is_empty() {
+        println!("no declared dependencies found");
+        return Ok(());
+    }
+
+    let include_module_column = selection.rows.iter().any(|row| row.module.is_some());
+    let mut table = Vec::with_capacity(selection.rows.len());
+    for row in selection.rows {
+        let resolved_version = resolve_locked_version(&lockfile, &row.coordinate)
+            .unwrap_or_else(|| "<unlocked>".to_owned());
+        table.push((row, resolved_version));
+    }
+
+    print_deps_table(&table, include_module_column);
+    Ok(())
+}
+
+pub(crate) fn handle_outdated(module: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+    let selection = collect_dependency_rows(module)?;
+    let lockfile = load_lockfile(&selection.lockfile_path)?;
+
+    let paths = JotPaths::new()?;
+    paths.ensure_exists()?;
+    let resolver = MavenResolver::new(paths)?;
+
+    let packages = if let Some(selected_module) = module {
+        select_packages_for_module(&resolver, &lockfile, &selection.rows, selected_module)?
+    } else {
+        lockfile.package.clone()
+    };
+
+    if packages.is_empty() {
+        println!("no locked packages found");
+        return Ok(());
+    }
+
+    let mut rows = Vec::with_capacity(packages.len());
+    for package in packages {
+        let coordinate = MavenCoordinate {
+            group: package.group.clone(),
+            artifact: package.artifact.clone(),
+            version: Some(package.version.clone()),
+            classifier: package.classifier.clone(),
+        };
+        let current = package.version;
+        let name = format!("{}:{}", package.group, package.artifact);
+        match resolver.latest_available_version(&coordinate) {
+            Ok(Some(latest)) => {
+                let status = if latest == current {
+                    "up-to-date"
+                } else {
+                    "outdated"
+                };
+                rows.push((name, current, latest, status.to_owned()));
+            }
+            Ok(None) => {
+                rows.push((name, current, "<unknown>".to_owned(), "unknown".to_owned()));
+            }
+            Err(_) => {
+                rows.push((name, current, "<error>".to_owned(), "unknown".to_owned()));
+            }
+        }
+    }
+
+    print_outdated_table(&rows);
+    Ok(())
+}
+
+fn collect_dependency_rows(
+    module: Option<&str>,
+) -> Result<DepsSelection, Box<dyn std::error::Error>> {
+    let cwd = std::env::current_dir()?;
+    if let Some(workspace) = load_workspace_build_config(&cwd)? {
+        if let Some(selected) = module
+            && !workspace
+                .members
+                .iter()
+                .any(|member| member.module_name == selected)
+        {
+            return Err(format!("unknown workspace module `{selected}`").into());
+        }
+
+        let mut rows = Vec::new();
+        for member in workspace.members {
+            if module.is_some_and(|selected| selected != member.module_name) {
+                continue;
+            }
+
+            let entries = read_declared_dependency_entries(&member.project.project_root)?;
+            rows.extend(entries.into_iter().map(|entry| DirectDependencyRow {
+                module: Some(member.module_name.clone()),
+                name: entry.name,
+                coordinate: entry.coordinate,
+                scope: if entry.test { "test" } else { "main" },
+            }));
+        }
+
+        return Ok(DepsSelection {
+            rows,
+            lockfile_path: workspace.root_dir.join(DEFAULT_LOCKFILE_NAME),
+        });
+    }
+
+    if module.is_some() {
+        return Err("--module can only be used from inside a workspace".into());
+    }
+
+    let project_file = nearest_project_file(&cwd)?;
+    let entries = read_declared_dependency_entries(&cwd)?;
+    Ok(DepsSelection {
+        rows: entries
+            .into_iter()
+            .map(|entry| DirectDependencyRow {
+                module: None,
+                name: entry.name,
+                coordinate: entry.coordinate,
+                scope: if entry.test { "test" } else { "main" },
+            })
+            .collect(),
+        lockfile_path: project_file
+            .parent()
+            .ok_or("project config path has no parent")?
+            .join(DEFAULT_LOCKFILE_NAME),
+    })
+}
+
+fn load_lockfile(path: &PathBuf) -> Result<Lockfile, Box<dyn std::error::Error>> {
+    let content = fs::read_to_string(path).map_err(|_| {
+        format!(
+            "could not read lockfile at {}; run `jot lock` first",
+            path.display()
+        )
+    })?;
+    let lockfile = toml::from_str::<Lockfile>(&content)?;
+    Ok(lockfile)
+}
+
+fn resolve_locked_version(lockfile: &Lockfile, coordinate: &str) -> Option<String> {
+    let parsed = MavenCoordinate::parse(coordinate).ok()?;
+
+    lockfile
+        .roots
+        .iter()
+        .find(|root| same_package(root, &parsed))
+        .and_then(|root| root.version.clone())
+        .or_else(|| {
+            lockfile
+                .package
+                .iter()
+                .find(|package| {
+                    package.group == parsed.group
+                        && package.artifact == parsed.artifact
+                        && package.classifier == parsed.classifier
+                })
+                .map(|package| package.version.clone())
+        })
+}
+
+fn same_package(left: &MavenCoordinate, right: &MavenCoordinate) -> bool {
+    left.group == right.group
+        && left.artifact == right.artifact
+        && left.classifier == right.classifier
+}
+
+fn print_deps_table(rows: &[(DirectDependencyRow, String)], include_module_column: bool) {
+    use tabled::{builder::Builder, settings::Style};
+
+    let mut builder = Builder::default();
+    if include_module_column {
+        builder.push_record(["module", "name", "coordinate", "version", "scope"]);
+    } else {
+        builder.push_record(["name", "coordinate", "version", "scope"]);
+    }
+
+    for (row, version) in rows {
+        if include_module_column {
+            builder.push_record([
+                row.module.as_deref().unwrap_or("-"),
+                &row.name,
+                &row.coordinate,
+                version,
+                row.scope,
+            ]);
+        } else {
+            builder.push_record([
+                row.name.as_str(),
+                row.coordinate.as_str(),
+                version,
+                row.scope,
+            ]);
+        }
+    }
+
+    println!("{}", builder.build().with(Style::sharp()));
+}
+
+fn print_outdated_table(rows: &[(String, String, String, String)]) {
+    use tabled::{builder::Builder, settings::Style};
+
+    let mut builder = Builder::default();
+    builder.push_record(["name", "current", "latest", "status"]);
+    for (name, current, latest, status) in rows {
+        builder.push_record([
+            name.as_str(),
+            current.as_str(),
+            latest.as_str(),
+            status.as_str(),
+        ]);
+    }
+
+    println!("{}", builder.build().with(Style::sharp()));
+}
+
+fn select_packages_for_module(
+    resolver: &MavenResolver,
+    lockfile: &Lockfile,
+    rows: &[DirectDependencyRow],
+    selected_module: &str,
+) -> Result<Vec<LockedPackage>, Box<dyn std::error::Error>> {
+    let selected_rows = rows
+        .iter()
+        .filter(|row| row.module.as_deref() == Some(selected_module))
+        .collect::<Vec<_>>();
+    if selected_rows.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut reachable = HashSet::new();
+    for row in selected_rows {
+        let root = resolver.resolve_coordinate(&row.coordinate)?;
+        reachable.insert(root.to_string());
+
+        for entry in resolver.resolve_dependency_tree(&row.coordinate, DEFAULT_LOCK_DEPTH)? {
+            if entry.note.is_none() {
+                reachable.insert(entry.coordinate.to_string());
+            }
+        }
+    }
+
+    let mut selected = lockfile
+        .package
+        .iter()
+        .filter(|package| {
+            let coord = MavenCoordinate {
+                group: package.group.clone(),
+                artifact: package.artifact.clone(),
+                version: Some(package.version.clone()),
+                classifier: package.classifier.clone(),
+            };
+            reachable.contains(&coord.to_string())
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    selected.sort_by(|left, right| {
+        left.group
+            .cmp(&right.group)
+            .then_with(|| left.artifact.cmp(&right.artifact))
+            .then_with(|| left.version.cmp(&right.version))
+    });
+    selected.dedup_by(|left, right| {
+        left.group == right.group
+            && left.artifact == right.artifact
+            && left.version == right.version
+            && left.classifier == right.classifier
+    });
+    Ok(selected)
 }
 
 fn print_tree_entry(entry: &TreeEntry, base_depth: usize) {

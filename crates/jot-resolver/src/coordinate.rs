@@ -1,11 +1,11 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 
 use crate::errors::ResolverError;
 
 pub(crate) const MAVEN_CENTRAL: &str = "https://repo1.maven.org/maven2";
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct MavenCoordinate {
     pub group: String,
     pub artifact: String,

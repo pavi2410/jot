@@ -46,8 +46,15 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             catalog,
             test,
             name,
-        } => deps::handle_add(coordinate.as_deref(), catalog.as_deref(), test, name.as_deref())?,
+        } => deps::handle_add(
+            coordinate.as_deref(),
+            catalog.as_deref(),
+            test,
+            name.as_deref(),
+        )?,
         Command::Remove { name, test } => deps::handle_remove(&name, test)?,
+        Command::Deps { module } => deps::handle_deps(module.as_deref())?,
+        Command::Outdated { module } => deps::handle_outdated(module.as_deref())?,
         Command::Fmt { check, module } => {
             build::handle_fmt(paths, manager, check, module.as_deref())?
         }

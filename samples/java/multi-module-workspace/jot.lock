@@ -1,0 +1,77 @@
+version = 1
+
+[[roots]]
+group = "com.fasterxml.jackson.core"
+artifact = "jackson-databind"
+version = "2.18.0"
+
+[[roots]]
+group = "org.junit.jupiter"
+artifact = "junit-jupiter"
+version = "5.11.0"
+
+[[package]]
+group = "com.fasterxml.jackson.core"
+artifact = "jackson-annotations"
+version = "2.18.0"
+sha256 = "a09367d2eeb526873abf737ff754c5085f82073a382ee72c3bbe15412217671f"
+
+[[package]]
+group = "com.fasterxml.jackson.core"
+artifact = "jackson-core"
+version = "2.18.0"
+sha256 = "215bbd7c8fd65be504cb92ff3aa1c4b790fc7b14cca72f4546aac4143c101bb5"
+
+[[package]]
+group = "com.fasterxml.jackson.core"
+artifact = "jackson-databind"
+version = "2.18.0"
+sha256 = "2bf1927b7f3224683ed0157a1ec3b0ede75179da3e597d78c572d56ed00f9f3c"
+
+[[package]]
+group = "org.apiguardian"
+artifact = "apiguardian-api"
+version = "1.1.2"
+sha256 = "b509448ac506d607319f182537f0b35d71007582ec741832a1f111e5b5b70b38"
+
+[[package]]
+group = "org.junit.jupiter"
+artifact = "junit-jupiter"
+version = "5.11.0"
+sha256 = "234fe3f9118628d6de625ecc3d69140515e786fdf3cef037fc6ec94823c23ab6"
+
+[[package]]
+group = "org.junit.jupiter"
+artifact = "junit-jupiter-api"
+version = "5.11.0"
+sha256 = "42aa202fc862f76cc5af65b47b1c0b1961cdd79cd2216405a6dfa2bd20b20974"
+
+[[package]]
+group = "org.junit.jupiter"
+artifact = "junit-jupiter-engine"
+version = "5.11.0"
+sha256 = "7012423383d0c79d0347c5cf2bd1996c30a12240fb729e0cdfa954852ec693cc"
+
+[[package]]
+group = "org.junit.jupiter"
+artifact = "junit-jupiter-params"
+version = "5.11.0"
+sha256 = "92ccae2d72e8cc7ac4d3a912fd1a8fecc5e3040a62ac6c667a07a6f55b8023eb"
+
+[[package]]
+group = "org.junit.platform"
+artifact = "junit-platform-commons"
+version = "1.11.0"
+sha256 = "609333a4545f9018eb0c59071efd30663a9e9fdce528121b65a04c27e5fc26a7"
+
+[[package]]
+group = "org.junit.platform"
+artifact = "junit-platform-engine"
+version = "1.11.0"
+sha256 = "a7e67279c651c516949512b506916475a6d9e284cd4f4c30d029b4ad73a944d8"
+
+[[package]]
+group = "org.opentest4j"
+artifact = "opentest4j"
+version = "1.3.0"
+sha256 = "48e2df636cab6563ced64dcdff8abb2355627cb236ef0bf37598682ddf742f1b"

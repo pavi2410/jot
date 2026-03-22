@@ -254,6 +254,7 @@ fn render_lint_processing_error(project_root: &Path, error: &LintProcessingError
     format!("error: {}: {}", path.display(), error.message)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_source_diagnostic(
     path: &Path,
     line: usize,
