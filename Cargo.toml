@@ -37,6 +37,7 @@ thiserror = "2.0.12"
 time = { version = "0.3.39", features = ["formatting", "macros", "parsing", "serde"] }
 toml = "0.8.20"
 toml_edit = "0.22.24"
+yansi = "1.0.1"
 zip = { version = "2.4.1", default-features = false, features = ["deflate"] }
 
 [profile.release]

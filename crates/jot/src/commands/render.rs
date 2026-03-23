@@ -5,6 +5,7 @@ use annotate_snippets::renderer::DecorStyle;
 use annotate_snippets::{AnnotationKind, Level, Renderer, Snippet};
 use jot_resolver::TreeEntry;
 use tabled::{builder::Builder, settings::Style};
+use yansi::Paint;
 
 #[derive(Clone, Copy)]
 pub(crate) enum StatusTone {
@@ -29,34 +30,20 @@ pub(crate) fn style(text: &str, tone: StatusTone, color: bool) -> String {
         return text.to_owned();
     }
 
-    let code = match tone {
-        StatusTone::Success => "1;32",
-        StatusTone::Info => "1;36",
-        StatusTone::Warning => "1;33",
-        StatusTone::Error => "1;31",
-        StatusTone::Accent => "1;34",
-        StatusTone::Dim => "2",
+    let painted = match tone {
+        StatusTone::Success => text.green().bold(),
+        StatusTone::Info => text.cyan().bold(),
+        StatusTone::Warning => text.yellow().bold(),
+        StatusTone::Error => text.red().bold(),
+        StatusTone::Accent => text.blue().bold(),
+        StatusTone::Dim => text.dim(),
     };
 
-    format!("\u{1b}[{code}m{text}\u{1b}[0m")
+    painted.to_string()
 }
 
 pub(crate) fn status_badge(label: &str, tone: StatusTone, color: bool) -> String {
-    let label = label.to_ascii_uppercase();
-    if !color {
-        return label;
-    }
-
-    let color_code = match tone {
-        StatusTone::Success => "1;32",
-        StatusTone::Info => "1;36",
-        StatusTone::Warning => "1;33",
-        StatusTone::Error => "1;31",
-        StatusTone::Accent => "1;34",
-        StatusTone::Dim => "1;2",
-    };
-
-    format!("\u{1b}[{color_code}m{label}\u{1b}[0m")
+    style(&label.to_ascii_uppercase(), tone, color)
 }
 
 pub(crate) fn print_status_stdout(label: &str, tone: StatusTone, message: impl AsRef<str>) {
