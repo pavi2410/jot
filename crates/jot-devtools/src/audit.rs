@@ -161,7 +161,8 @@ impl DevTools {
             package_ids.push(package.coordinate.clone());
         }
 
-        let batch_progress = jot_common::spinner(&format!("Querying OSV for {} packages", package_ids.len()));
+        let batch_progress =
+            jot_common::spinner(&format!("Querying OSV for {} packages", package_ids.len()));
         let response: OsvBatchResponse = self
             .osv
             .post("https://api.osv.dev/v1/querybatch")
@@ -476,7 +477,6 @@ fn write_locked_file(
     let _ = lock_file.unlock();
     Ok(())
 }
-
 
 pub(crate) fn rewrite_coordinate(
     coords: &str,

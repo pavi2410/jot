@@ -88,7 +88,10 @@ impl CoordinateCacheKey {
         Self {
             group: jot_common::sanitize_for_filename(&coordinate.group),
             artifact: jot_common::sanitize_for_filename(&coordinate.artifact),
-            version: coordinate.version.as_deref().map(jot_common::sanitize_for_filename),
+            version: coordinate
+                .version
+                .as_deref()
+                .map(jot_common::sanitize_for_filename),
             classifier_suffix: jot_common::sanitize_for_filename(&classifier_suffix),
         }
     }

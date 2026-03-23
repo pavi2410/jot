@@ -103,7 +103,6 @@ pub struct CacheCleanupSummary {
     pub removed_lock_entries: usize,
 }
 
-
 fn count_entries(path: &Path) -> Result<usize, CacheError> {
     if !path.exists() {
         return Ok(0);

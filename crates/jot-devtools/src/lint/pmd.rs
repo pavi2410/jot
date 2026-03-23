@@ -91,7 +91,8 @@ impl Linter for Pmd {
             .arg("--relativize-paths-with")
             .arg(&project.project_root);
 
-        let lint_progress = jot_common::spinner(&format!("Running PMD on {} Java files", java_files.len()));
+        let lint_progress =
+            jot_common::spinner(&format!("Running PMD on {} Java files", java_files.len()));
         let output = command.output()?;
         lint_progress
             .finish_with_message(format!("PMD completed for {} Java files", java_files.len()));

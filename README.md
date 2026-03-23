@@ -30,8 +30,8 @@ jot init my-app
 cd my-app
 
 # 2. Install and pin a JDK (done once)
-jot java install 21
-jot java pin 21
+jot toolchain install java@21
+jot toolchain pin java@21
 
 # 3. Add a dependency
 jot add com.google.guava:guava:33.4.0-jre
@@ -125,13 +125,13 @@ developer = { name = "Your Name", email = "you@example.com" }
 | `jot lint [--module <name>]` | Run PMD static analysis |
 | `jot audit [--fix] [--ci]` | Scan locked packages for CVEs via OSV.dev; `--fix` updates declarations; `--ci` exits non-zero on findings |
 
-### JDK management
+### Toolchain management
 
 | Command | Description |
 |---|---|
-| `jot java install <version> [--vendor <v>]` | Download and install a JDK (Adoptium, Corretto, Zulu, Oracle) |
-| `jot java list` | List installed JDKs |
-| `jot java pin <version> [--workspace]` | Pin a JDK version in `jot.toml` |
+| `jot toolchain install <tool>@<version>` | Install a toolchain (e.g. `java@21`, `java@corretto-21`, `kotlin@2.1.0`) |
+| `jot toolchain list` | List installed toolchains |
+| `jot toolchain pin <tool>@<version> [--workspace]` | Pin a toolchain version in `jot.toml` |
 
 ---
 

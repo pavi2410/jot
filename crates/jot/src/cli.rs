@@ -1,8 +1,6 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use jot_toolchain::JdkVendor;
-
 #[derive(Debug, Parser)]
 #[command(name = "jot", version, about = "A JVM toolchain manager")]
 pub(crate) struct Cli {
@@ -118,7 +116,7 @@ pub(crate) enum Command {
     },
     #[command(name = "self")]
     SelfCmd(SelfCommand),
-    Java(JavaCommand),
+    Toolchain(ToolchainCommand),
 }
 
 #[derive(Debug, clap::Args)]
@@ -144,25 +142,26 @@ pub(crate) enum SelfSubcommand {
 }
 
 #[derive(Debug, clap::Args)]
-pub(crate) struct JavaCommand {
+pub(crate) struct ToolchainCommand {
     #[command(subcommand)]
-    pub command: JavaSubcommand,
+    pub command: ToolchainSubcommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub(crate) enum JavaSubcommand {
+pub(crate) enum ToolchainSubcommand {
+    /// Install a toolchain (e.g. java@21, java@corretto-21, kotlin@2.1.0)
     Install {
-        version: String,
-        #[arg(long, default_value = "adoptium")]
-        vendor: JdkVendor,
+        /// Toolchain to install (e.g. java@21, java@corretto-21, kotlin@2.1.0)
+        toolchain: String,
         #[arg(long)]
         force: bool,
     },
+    /// List installed toolchains
     List,
+    /// Pin a toolchain version in jot.toml (e.g. java@21, java@zulu-21, kotlin@2.1.0)
     Pin {
-        version: String,
-        #[arg(long)]
-        vendor: Option<JdkVendor>,
+        /// Toolchain to pin (e.g. java@21, java@zulu-21, kotlin@2.1.0)
+        toolchain: String,
         #[arg(long)]
         workspace: bool,
     },

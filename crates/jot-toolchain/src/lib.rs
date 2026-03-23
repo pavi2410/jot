@@ -210,7 +210,8 @@ impl ToolchainManager {
         )?;
 
         let temp_dir = TempDir::new_in(self.paths.jdks_dir())?;
-        let extract_progress = jot_common::spinner(&format!("Extracting {}", asset.binary.package.name));
+        let extract_progress =
+            jot_common::spinner(&format!("Extracting {}", asset.binary.package.name));
         self.extract_archive(&download_path, temp_dir.path())?;
         extract_progress.finish_with_message(format!("Extracted {}", asset.binary.package.name));
         let java_home = detect_java_home(temp_dir.path())?;
@@ -246,6 +247,28 @@ impl ToolchainManager {
         }
 
         installations.sort_by(|left, right| left.release_name.cmp(&right.release_name));
+        Ok(installations)
+    }
+
+    pub fn list_installed_kotlin(&self) -> Result<Vec<InstalledKotlin>, ToolchainError> {
+        let mut installations = Vec::new();
+        let kotlins_dir = self.paths.kotlins_dir();
+        if !kotlins_dir.is_dir() {
+            return Ok(installations);
+        }
+        for entry in fs::read_dir(kotlins_dir)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let metadata_path = entry.path().join("install.json");
+            if metadata_path.is_file() {
+                let content = fs::read(&metadata_path)?;
+                let installed: InstalledKotlin = serde_json::from_slice(&content)?;
+                installations.push(installed);
+            }
+        }
+        installations.sort_by(|a, b| a.version.cmp(&b.version));
         Ok(installations)
     }
 
@@ -640,7 +663,6 @@ fn is_cache_fresh(fetched_at: OffsetDateTime, now: OffsetDateTime, ttl: Duration
     let age = now - fetched_at;
     age.whole_seconds() <= ttl.as_secs() as i64
 }
-
 
 fn java_binary_path(java_home: &Path) -> PathBuf {
     binary_path(java_home, "java")

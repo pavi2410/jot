@@ -98,7 +98,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             workspace,
             module,
         } => deps::handle_tree(dependency.as_deref(), depth, workspace, module.as_deref())?,
-        Command::Java(command) => toolchain::handle_java(command, manager, paths)?,
+        Command::Toolchain(command) => toolchain::handle_toolchain(command, manager, paths)?,
     }
 
     Ok(())
