@@ -18,6 +18,7 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+anyhow = "1.0.98"
 annotate-snippets = "0.12.13"
 clap = { version = "4.5.38", features = ["derive"] }
 directories = "5.0.1"
@@ -37,6 +38,7 @@ thiserror = "2.0.12"
 time = { version = "0.3.39", features = ["formatting", "macros", "parsing", "serde"] }
 toml = "0.8.20"
 toml_edit = "0.22.24"
+walkdir = "2.5.0"
 yansi = "1.0.1"
 zip = { version = "2.4.1", default-features = false, features = ["deflate"] }
 

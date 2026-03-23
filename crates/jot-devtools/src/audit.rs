@@ -1,10 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use fs2::FileExt;
 use jot_config::{
     find_jot_toml, find_workspace_root_jot_toml, load_project_build_config,
     load_workspace_build_config, load_workspace_dependency_set,
@@ -16,7 +14,7 @@ use toml_edit::{DocumentMut, Item, value};
 use crate::models::{
     OsvBatchRequest, OsvBatchResponse, OsvPackage, OsvQuery, OsvSeverity, OsvVulnerability,
 };
-use crate::{DEFAULT_RESOLVE_DEPTH, DevTools, DevToolsError, count_bar};
+use crate::{DEFAULT_RESOLVE_DEPTH, DevTools, DevToolsError};
 
 #[derive(Debug)]
 pub struct AuditReport {
@@ -202,7 +200,7 @@ impl DevTools {
 
         let mut vuln_details = HashMap::<String, OsvVulnerability>::new();
         let detail_count = vulnerability_ids.len();
-        let detail_progress = count_bar(detail_count, "Fetching vulnerability details");
+        let detail_progress = jot_common::count_bar(detail_count, "Fetching vulnerability details");
         for vuln_id in vulnerability_ids {
             let detail = self
                 .osv
@@ -448,14 +446,7 @@ fn write_locked_file(
         "file-{}.lock",
         jot_common::sanitize_for_filename(&output_path.to_string_lossy())
     ));
-    let lock_file = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(&lock_path)?;
-    lock_file
-        .lock_exclusive()
+    let _lock = jot_common::FileLock::acquire(&lock_path)
         .map_err(|error| DevToolsError::AuditInvariant(error.to_string()))?;
 
     let parent = output_path.parent().ok_or_else(|| {
@@ -474,7 +465,6 @@ fn write_locked_file(
         .persist(output_path)
         .map_err(|error| DevToolsError::Io(error.error))?;
 
-    let _ = lock_file.unlock();
     Ok(())
 }
 

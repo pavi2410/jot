@@ -5,14 +5,11 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-fs2.workspace = true
-hex.workspace = true
 jot-cache = { path = "../jot-cache" }
 jot-common = { path = "../jot-common" }
 quick-xml.workspace = true
 reqwest.workspace = true
 serde.workspace = true
-sha2.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 

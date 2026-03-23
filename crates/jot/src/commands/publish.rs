@@ -31,7 +31,7 @@ pub(crate) fn handle_publish(
     signing_key: Option<&str>,
     dry_run: bool,
     allow_snapshot: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), anyhow::Error> {
     let resolver = MavenResolver::new(paths)?;
     let builder = JavaProjectBuilder::new(resolver, manager);
     let cwd = std::env::current_dir()?;
@@ -93,7 +93,7 @@ pub(crate) fn handle_publish(
     }
 
     if module.is_some() {
-        return Err("--module can only be used from inside a workspace".into());
+        anyhow::bail!("--module can only be used from inside a workspace");
     }
 
     let output = builder.build(&cwd)?;
@@ -127,9 +127,9 @@ fn publish_project(
     signer: &dyn ArtifactSigner,
     dry_run: bool,
     allow_snapshot: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), anyhow::Error> {
     let metadata = build.project.publish.clone().ok_or_else(|| {
-        format!(
+        anyhow::anyhow!(
             "missing [publish] section in {}",
             build.project.config_path.display()
         )
@@ -153,8 +153,11 @@ fn publish_project(
         return Ok(());
     }
 
-    let publish_target = publish_target
-        .ok_or("missing publish repository; pass --repository or set JOT_PUBLISH_REPOSITORY")?;
+    let publish_target = publish_target.ok_or_else(|| {
+        anyhow::anyhow!(
+            "missing publish repository; pass --repository or set JOT_PUBLISH_REPOSITORY"
+        )
+    })?;
     publish_target.ensure_version_absent(&coordinate, &staged.primary_artifact_name)?;
     publish_target.upload(&coordinate, &staged.uploads)?;
     Ok(())
@@ -163,19 +166,16 @@ fn publish_project(
 fn publish_coordinate(
     project: &ProjectBuildConfig,
     allow_snapshot: bool,
-) -> Result<MavenCoordinate, Box<dyn std::error::Error>> {
+) -> Result<MavenCoordinate, anyhow::Error> {
     let group = project.group.clone().ok_or_else(|| {
-        format!(
+        anyhow::anyhow!(
             "{} is missing [project].group or inherited workspace group",
             project.config_path.display()
         )
     })?;
     let version = project.version.clone();
     if !allow_snapshot && version.to_ascii_uppercase().contains("SNAPSHOT") {
-        return Err(format!(
-            "refusing to publish snapshot version `{version}` without --allow-snapshot"
-        )
-        .into());
+        anyhow::bail!("refusing to publish snapshot version `{version}` without --allow-snapshot");
     }
 
     Ok(MavenCoordinate {
@@ -189,10 +189,10 @@ fn publish_coordinate(
 fn validate_publish_metadata(
     coordinate: &MavenCoordinate,
     metadata: &PublishConfig,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), anyhow::Error> {
     let version = coordinate.version.as_deref().unwrap_or_default();
     if version.trim().is_empty() {
-        return Err("publish version cannot be empty".into());
+        anyhow::bail!("publish version cannot be empty");
     }
     if metadata
         .license
@@ -201,7 +201,7 @@ fn validate_publish_metadata(
         .trim()
         .is_empty()
     {
-        return Err("[publish].license is required".into());
+        anyhow::bail!("[publish].license is required");
     }
     if metadata
         .description
@@ -210,7 +210,7 @@ fn validate_publish_metadata(
         .trim()
         .is_empty()
     {
-        return Err("[publish].description is required".into());
+        anyhow::bail!("[publish].description is required");
     }
     if metadata
         .url
@@ -219,7 +219,7 @@ fn validate_publish_metadata(
         .trim()
         .is_empty()
     {
-        return Err("[publish].url is required".into());
+        anyhow::bail!("[publish].url is required");
     }
     if metadata
         .scm
@@ -228,14 +228,14 @@ fn validate_publish_metadata(
         .trim()
         .is_empty()
     {
-        return Err("[publish].scm is required".into());
+        anyhow::bail!("[publish].scm is required");
     }
     let developer = metadata
         .developer
         .as_ref()
-        .ok_or("[publish].developer is required")?;
+        .ok_or_else(|| anyhow::anyhow!("[publish].developer is required"))?;
     if developer.name.trim().is_empty() {
-        return Err("[publish].developer.name is required".into());
+        anyhow::bail!("[publish].developer.name is required");
     }
     Ok(())
 }
@@ -244,7 +244,7 @@ fn collect_path_dependency_jars(
     builder: &JavaProjectBuilder,
     project: &ProjectBuildConfig,
     built_jars: &BTreeMap<PathBuf, PathBuf>,
-) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
+) -> Result<Vec<PathBuf>, anyhow::Error> {
     let mut jars = Vec::new();
     for dependency_root in &project.path_dependencies {
         let canonical = canonical_root(dependency_root);
@@ -263,11 +263,11 @@ fn stage_publish_artifacts(
     coordinate: &MavenCoordinate,
     metadata: &PublishConfig,
     path_dependency_jars: &[PathBuf],
-) -> Result<StagedPublish, Box<dyn std::error::Error>> {
+) -> Result<StagedPublish, anyhow::Error> {
     let version = coordinate
         .version
         .as_deref()
-        .ok_or("publish coordinate missing version")?;
+        .ok_or_else(|| anyhow::anyhow!("publish coordinate missing version"))?;
     let target_root = build.project.project_root.join("target").join("publish");
     let stage_dir = target_root.join(format!("{}-{}", coordinate.artifact, version));
     if stage_dir.exists() {
@@ -326,7 +326,7 @@ fn create_sources_jar(
     installed_jdk: &InstalledJdk,
     source_dirs: &[PathBuf],
     output_path: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), anyhow::Error> {
     let staging = TempDir::new()?;
     for source_dir in source_dirs {
         if !source_dir.exists() {
@@ -343,7 +343,7 @@ fn create_javadoc_jar(
     project: &ProjectBuildConfig,
     classpath_entries: &[PathBuf],
     output_path: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), anyhow::Error> {
     let sources = collect_java_sources(&project.source_dirs)?;
     let doc_dir = TempDir::new()?;
 
@@ -358,11 +358,10 @@ fn create_javadoc_jar(
 
     let output = command.output()?;
     if !output.status.success() {
-        return Err(format!(
+        anyhow::bail!(
             "javadoc failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()
-        )
-        .into());
+        );
     }
 
     package_directory_as_jar(installed_jdk, doc_dir.path(), output_path)?;
@@ -373,7 +372,7 @@ fn package_directory_as_jar(
     installed_jdk: &InstalledJdk,
     source_dir: &Path,
     output_path: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), anyhow::Error> {
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -387,11 +386,10 @@ fn package_directory_as_jar(
         .arg(".")
         .output()?;
     if !output.status.success() {
-        return Err(format!(
+        anyhow::bail!(
             "jar failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()
-        )
-        .into());
+        );
     }
     Ok(())
 }
@@ -400,15 +398,15 @@ fn render_pom(
     project: &ProjectBuildConfig,
     coordinate: &MavenCoordinate,
     metadata: &PublishConfig,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, anyhow::Error> {
     let version = coordinate
         .version
         .as_deref()
-        .ok_or("publish coordinate missing version")?;
+        .ok_or_else(|| anyhow::anyhow!("publish coordinate missing version"))?;
     let developer = metadata
         .developer
         .as_ref()
-        .ok_or("[publish].developer is required")?;
+        .ok_or_else(|| anyhow::anyhow!("[publish].developer is required"))?;
 
     let dependencies = project
         .dependencies
@@ -485,14 +483,14 @@ fn render_pom(
     ))
 }
 
-fn write_sha256_sidecars(paths: &[PathBuf]) -> Result<(), Box<dyn std::error::Error>> {
+fn write_sha256_sidecars(paths: &[PathBuf]) -> Result<(), anyhow::Error> {
     let mut pending = paths.to_vec();
     for path in paths {
         pending.push(signature_path_for(path));
     }
 
     for path in pending {
-        let checksum = compute_sha256(&path)?;
+        let checksum = jot_common::sha256_file(&path)?;
         let checksum_path = checksum_path_for(&path);
         let mut file = fs::File::create(checksum_path)?;
         writeln!(file, "{checksum}")?;
@@ -500,11 +498,7 @@ fn write_sha256_sidecars(paths: &[PathBuf]) -> Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
-fn compute_sha256(path: &Path) -> Result<String, Box<dyn std::error::Error>> {
-    Ok(jot_common::sha256_file(path)?)
-}
-
-fn find_gpg_binary() -> Result<String, Box<dyn std::error::Error>> {
+fn find_gpg_binary() -> Result<String, anyhow::Error> {
     for candidate in ["gpg", "gpg2"] {
         let output = Command::new(candidate).arg("--version").output();
         if let Ok(output) = output
@@ -513,7 +507,9 @@ fn find_gpg_binary() -> Result<String, Box<dyn std::error::Error>> {
             return Ok(candidate.to_owned());
         }
     }
-    Err("gpg is required for `jot publish` but was not found on PATH".into())
+    Err(anyhow::anyhow!(
+        "gpg is required for `jot publish` but was not found on PATH"
+    ))
 }
 
 fn signature_path_for(path: &Path) -> PathBuf {
@@ -532,10 +528,7 @@ fn checksum_path_for(path: &Path) -> PathBuf {
     path.with_file_name(file_name)
 }
 
-fn copy_directory_contents(
-    source: &Path,
-    destination: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn copy_directory_contents(source: &Path, destination: &Path) -> Result<(), anyhow::Error> {
     fs::create_dir_all(destination)?;
     for entry in fs::read_dir(source)? {
         let entry = entry?;
@@ -553,9 +546,7 @@ fn copy_directory_contents(
     Ok(())
 }
 
-fn collect_java_sources(
-    source_dirs: &[PathBuf],
-) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
+fn collect_java_sources(source_dirs: &[PathBuf]) -> Result<Vec<PathBuf>, anyhow::Error> {
     let mut files = Vec::new();
     for source_dir in source_dirs {
         collect_java_sources_in_dir(source_dir, &mut files)?;
@@ -564,10 +555,7 @@ fn collect_java_sources(
     Ok(files)
 }
 
-fn collect_java_sources_in_dir(
-    path: &Path,
-    files: &mut Vec<PathBuf>,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn collect_java_sources_in_dir(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), anyhow::Error> {
     if !path.exists() {
         return Ok(());
     }
@@ -605,10 +593,10 @@ struct PomDependency {
 }
 
 impl PomDependency {
-    fn from_project(project: &ProjectBuildConfig) -> Result<Self, Box<dyn std::error::Error>> {
+    fn from_project(project: &ProjectBuildConfig) -> Result<Self, anyhow::Error> {
         Ok(Self {
             group_id: project.group.clone().ok_or_else(|| {
-                format!(
+                anyhow::anyhow!(
                     "path dependency {} is missing group for publish",
                     project.name
                 )
@@ -632,7 +620,7 @@ impl From<MavenCoordinate> for PomDependency {
 }
 
 trait ArtifactSigner {
-    fn sign(&self, artifacts: &[PathBuf]) -> Result<(), Box<dyn std::error::Error>>;
+    fn sign(&self, artifacts: &[PathBuf]) -> Result<(), anyhow::Error>;
 }
 
 #[derive(Debug)]
@@ -641,7 +629,7 @@ struct GpgSigner {
 }
 
 impl ArtifactSigner for GpgSigner {
-    fn sign(&self, artifacts: &[PathBuf]) -> Result<(), Box<dyn std::error::Error>> {
+    fn sign(&self, artifacts: &[PathBuf]) -> Result<(), anyhow::Error> {
         let gpg = find_gpg_binary()?;
         for artifact in artifacts {
             let signature_path = signature_path_for(artifact);
@@ -664,12 +652,11 @@ impl ArtifactSigner for GpgSigner {
 
             let output = command.output()?;
             if !output.status.success() {
-                return Err(format!(
+                anyhow::bail!(
                     "gpg signing failed for {}: {}",
                     artifact.display(),
                     String::from_utf8_lossy(&output.stderr).trim()
-                )
-                .into());
+                );
             }
         }
         Ok(())
@@ -694,7 +681,7 @@ impl PublishTarget {
         username: Option<&str>,
         password: Option<&str>,
         dry_run: bool,
-    ) -> Result<Option<Self>, Box<dyn std::error::Error>> {
+    ) -> Result<Option<Self>, anyhow::Error> {
         let repository = repository
             .map(ToOwned::to_owned)
             .or_else(|| std::env::var("JOT_PUBLISH_REPOSITORY").ok());
@@ -709,10 +696,9 @@ impl PublishTarget {
             return if dry_run {
                 Ok(None)
             } else {
-                Err(
+                Err(anyhow::anyhow!(
                     "missing publish repository; pass --repository or set JOT_PUBLISH_REPOSITORY"
-                        .into(),
-                )
+                ))
             };
         };
 
@@ -735,18 +721,17 @@ impl PublishTarget {
         &self,
         coordinate: &MavenCoordinate,
         primary_artifact_name: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), anyhow::Error> {
         match self {
             Self::Local { root } => {
                 let artifact_path = root
                     .join(repository_relative_dir(coordinate)?)
                     .join(primary_artifact_name);
                 if artifact_path.exists() {
-                    return Err(format!(
+                    anyhow::bail!(
                         "artifact already exists in repository: {}",
                         artifact_path.display()
-                    )
-                    .into());
+                    );
                 }
                 Ok(())
             }
@@ -768,13 +753,13 @@ impl PublishTarget {
                 }
                 let response = request.send()?;
                 match response.status() {
-                    StatusCode::OK => {
-                        Err(format!("artifact already exists in repository: {url}").into())
-                    }
+                    StatusCode::OK => Err(anyhow::anyhow!(
+                        "artifact already exists in repository: {url}"
+                    )),
                     StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED => Ok(()),
-                    status => {
-                        Err(format!("failed to probe remote repository ({status}) at {url}").into())
-                    }
+                    status => Err(anyhow::anyhow!(
+                        "failed to probe remote repository ({status}) at {url}"
+                    )),
                 }
             }
         }
@@ -784,7 +769,7 @@ impl PublishTarget {
         &self,
         coordinate: &MavenCoordinate,
         uploads: &[PathBuf],
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), anyhow::Error> {
         let mut files_to_upload = uploads.to_vec();
         for path in uploads {
             files_to_upload.push(signature_path_for(path));
@@ -801,7 +786,7 @@ impl PublishTarget {
                 for path in files_to_upload {
                     let file_name = path
                         .file_name()
-                        .ok_or("publish artifact is missing file name")?;
+                        .ok_or_else(|| anyhow::anyhow!("publish artifact is missing file name"))?;
                     fs::copy(&path, repo_dir.join(file_name))?;
                 }
                 Ok(())
@@ -816,7 +801,7 @@ impl PublishTarget {
                 for path in files_to_upload {
                     let file_name = path
                         .file_name()
-                        .ok_or("publish artifact is missing file name")?
+                        .ok_or_else(|| anyhow::anyhow!("publish artifact is missing file name"))?
                         .to_string_lossy();
                     let url = format!("{}/{}/{}", base_url, relative_dir, file_name);
                     let body = fs::read(&path)?;
@@ -826,9 +811,7 @@ impl PublishTarget {
                     }
                     let response = request.send()?;
                     if !response.status().is_success() {
-                        return Err(
-                            format!("upload failed for {url}: {}", response.status()).into()
-                        );
+                        anyhow::bail!("upload failed for {url}: {}", response.status());
                     }
                 }
                 Ok(())
@@ -837,13 +820,11 @@ impl PublishTarget {
     }
 }
 
-fn repository_relative_dir(
-    coordinate: &MavenCoordinate,
-) -> Result<String, Box<dyn std::error::Error>> {
+fn repository_relative_dir(coordinate: &MavenCoordinate) -> Result<String, anyhow::Error> {
     let version = coordinate
         .version
         .as_deref()
-        .ok_or("publish coordinate missing version")?;
+        .ok_or_else(|| anyhow::anyhow!("publish coordinate missing version"))?;
     Ok(format!(
         "{}/{}/{}",
         coordinate.group.replace('.', "/"),
@@ -852,7 +833,7 @@ fn repository_relative_dir(
     ))
 }
 
-fn http_client() -> Result<Client, Box<dyn std::error::Error>> {
+fn http_client() -> Result<Client, anyhow::Error> {
     Ok(Client::builder()
         .timeout(Duration::from_secs(120))
         .build()?)
@@ -1064,7 +1045,7 @@ mod tests {
     struct TestSigner;
 
     impl ArtifactSigner for TestSigner {
-        fn sign(&self, artifacts: &[PathBuf]) -> Result<(), Box<dyn std::error::Error>> {
+        fn sign(&self, artifacts: &[PathBuf]) -> Result<(), anyhow::Error> {
             for artifact in artifacts {
                 fs::write(
                     signature_path_for(artifact),
@@ -1104,7 +1085,7 @@ mod tests {
     }
 
     impl TestRepoServer {
-        fn spawn(root: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+        fn spawn(root: PathBuf) -> Result<Self, anyhow::Error> {
             let listener = TcpListener::bind("127.0.0.1:0")?;
             listener.set_nonblocking(true)?;
             let address = listener.local_addr()?;
@@ -1148,18 +1129,21 @@ mod tests {
         }
     }
 
-    fn serve_repo_request(
-        root: &Path,
-        stream: &mut TcpStream,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    fn serve_repo_request(root: &Path, stream: &mut TcpStream) -> Result<(), anyhow::Error> {
         let mut buffer = [0_u8; 8192];
         let bytes_read = stream.read(&mut buffer)?;
         let request = String::from_utf8_lossy(&buffer[..bytes_read]);
         let mut lines = request.lines();
-        let request_line = lines.next().ok_or("missing request line")?;
+        let request_line = lines
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("missing request line"))?;
         let mut parts = request_line.split_whitespace();
-        let method = parts.next().ok_or("missing method")?;
-        let path = parts.next().ok_or("missing path")?;
+        let method = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("missing method"))?;
+        let path = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("missing path"))?;
         let relative = path.trim_start_matches('/');
         let file_path = root.join(relative);
 
@@ -1180,7 +1164,7 @@ mod tests {
         Ok(())
     }
 
-    fn create_fake_jdk(java_home: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    fn create_fake_jdk(java_home: &Path) -> Result<(), anyhow::Error> {
         let bin_dir = java_home.join("bin");
         fs::create_dir_all(&bin_dir)?;
         write_executable(
@@ -1194,7 +1178,7 @@ mod tests {
         Ok(())
     }
 
-    fn write_executable(path: &Path, content: &str) -> Result<(), Box<dyn std::error::Error>> {
+    fn write_executable(path: &Path, content: &str) -> Result<(), anyhow::Error> {
         fs::write(path, content)?;
         #[cfg(unix)]
         {

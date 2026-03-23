@@ -7,11 +7,7 @@ use jot_toolchain::ToolchainManager;
 
 use crate::commands::render::{StatusTone, print_status_stdout, status_badge, stdout_color, style};
 
-pub(crate) fn handle_audit(
-    paths: JotPaths,
-    fix: bool,
-    ci: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn handle_audit(paths: JotPaths, fix: bool, ci: bool) -> Result<(), anyhow::Error> {
     let manager = ToolchainManager::new(paths.clone())?;
     let resolver = MavenResolver::new(paths)?;
     let devtools = DevTools::new(resolver, manager)?;
@@ -48,7 +44,7 @@ pub(crate) fn handle_audit(
     }
 
     if ci_failure {
-        return Err("audit failed CI severity threshold".into());
+        anyhow::bail!("audit failed CI severity threshold");
     }
 
     Ok(())

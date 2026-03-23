@@ -37,10 +37,7 @@ struct ReleaseAssetSelection<'a> {
     checksums: &'a GithubReleaseAsset,
 }
 
-pub(crate) fn handle_self(
-    command: SelfCommand,
-    paths: JotPaths,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn handle_self(command: SelfCommand, paths: JotPaths) -> Result<(), anyhow::Error> {
     match command.command {
         SelfSubcommand::Update {
             version,
@@ -56,9 +53,9 @@ fn handle_self_update(
     requested_version: Option<&str>,
     check_only: bool,
     yes: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), anyhow::Error> {
     if std::env::var("JOT_OFFLINE").is_ok() {
-        return Err("cannot run `jot self update` in offline mode".into());
+        anyhow::bail!("cannot run `jot self update` in offline mode");
     }
 
     let release_repo = std::env::var("JOT_RELEASE_REPO")
@@ -148,10 +145,10 @@ fn handle_self_update(
     Ok(())
 }
 
-fn handle_self_uninstall(yes: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn handle_self_uninstall(yes: bool) -> Result<(), anyhow::Error> {
     if !yes {
         if !io::stdin().is_terminal() {
-            return Err("non-interactive uninstall requires --yes".into());
+            anyhow::bail!("non-interactive uninstall requires --yes");
         }
 
         println!(
@@ -188,7 +185,7 @@ fn fetch_release(
     client: &Client,
     release_repo: &str,
     version: Option<&str>,
-) -> Result<GithubRelease, Box<dyn std::error::Error>> {
+) -> Result<GithubRelease, anyhow::Error> {
     let endpoint = match version {
         Some(value) => {
             let normalized = normalize_tag(value);
@@ -209,15 +206,16 @@ fn fetch_release(
 fn select_release_assets<'a>(
     release: &'a GithubRelease,
     archive_name: &str,
-) -> Result<ReleaseAssetSelection<'a>, Box<dyn std::error::Error>> {
+) -> Result<ReleaseAssetSelection<'a>, anyhow::Error> {
     let archive = release
         .assets
         .iter()
         .find(|asset| asset.name == archive_name)
         .ok_or_else(|| {
-            format!(
+            anyhow::anyhow!(
                 "release {} does not contain required asset {}",
-                release.tag_name, archive_name
+                release.tag_name,
+                archive_name
             )
         })?;
     let checksums = release
@@ -225,20 +223,17 @@ fn select_release_assets<'a>(
         .iter()
         .find(|asset| asset.name == CHECKSUM_ASSET_NAME)
         .ok_or_else(|| {
-            format!(
+            anyhow::anyhow!(
                 "release {} does not contain required asset {}",
-                release.tag_name, CHECKSUM_ASSET_NAME
+                release.tag_name,
+                CHECKSUM_ASSET_NAME
             )
         })?;
 
     Ok(ReleaseAssetSelection { archive, checksums })
 }
 
-fn download_to_path(
-    client: &Client,
-    url: &str,
-    destination: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn download_to_path(client: &Client, url: &str, destination: &Path) -> Result<(), anyhow::Error> {
     let mut response = client
         .get(url)
         .header("User-Agent", "jot-upgrade")
@@ -264,16 +259,17 @@ fn verify_download_checksum(
     archive_path: &Path,
     checksums_path: &Path,
     archive_name: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), anyhow::Error> {
     let expected = read_expected_checksum(checksums_path, archive_name)?;
-    let actual = sha256_file(archive_path)?;
+    let actual = jot_common::sha256_file(archive_path)?;
 
     if expected != actual {
-        return Err(format!(
+        anyhow::bail!(
             "checksum mismatch for {}: expected {}, got {}",
-            archive_name, expected, actual
-        )
-        .into());
+            archive_name,
+            expected,
+            actual
+        );
     }
     Ok(())
 }
@@ -281,7 +277,7 @@ fn verify_download_checksum(
 fn read_expected_checksum(
     checksums_path: &Path,
     archive_name: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, anyhow::Error> {
     let file = fs::File::open(checksums_path)?;
     let reader = BufReader::new(file);
 
@@ -305,25 +301,20 @@ fn read_expected_checksum(
         }
     }
 
-    Err(format!(
+    Err(anyhow::anyhow!(
         "did not find checksum for {} in {}",
         archive_name,
         checksums_path.display()
-    )
-    .into())
+    ))
 }
 
-fn sha256_file(path: &Path) -> Result<String, Box<dyn std::error::Error>> {
-    Ok(jot_common::sha256_file(path)?)
-}
-
-fn extract_release_binary(archive_path: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn extract_release_binary(archive_path: &Path) -> Result<PathBuf, anyhow::Error> {
     let temp_dir = TempDir::new()?;
     jot_common::extract_archive(archive_path, temp_dir.path())?;
 
     let binary_name = if cfg!(windows) { "jot.exe" } else { "jot" };
     let extracted_path = find_file_named(temp_dir.path(), binary_name)?.ok_or_else(|| {
-        format!(
+        anyhow::anyhow!(
             "could not locate {} in {}",
             binary_name,
             archive_path.display()
@@ -344,7 +335,7 @@ fn extract_release_binary(archive_path: &Path) -> Result<PathBuf, Box<dyn std::e
     Ok(kept_path.join(format!("{}-staged", binary_name)))
 }
 
-fn current_release_target() -> Result<(&'static str, &'static str), Box<dyn std::error::Error>> {
+fn current_release_target() -> Result<(&'static str, &'static str), anyhow::Error> {
     let os = std::env::consts::OS;
     let arch = std::env::consts::ARCH;
 
@@ -353,7 +344,7 @@ fn current_release_target() -> Result<(&'static str, &'static str), Box<dyn std:
         ("macos", "x86_64") => Ok(("x86_64-apple-darwin", "tar.gz")),
         ("macos", "aarch64") => Ok(("aarch64-apple-darwin", "tar.gz")),
         ("windows", "x86_64") => Ok(("x86_64-pc-windows-msvc", "zip")),
-        _ => Err(format!("unsupported upgrade platform: {os}-{arch}").into()),
+        _ => Err(anyhow::anyhow!("unsupported upgrade platform: {os}-{arch}")),
     }
 }
 

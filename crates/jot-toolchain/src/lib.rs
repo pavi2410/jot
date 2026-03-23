@@ -1,12 +1,9 @@
 use std::fmt::{Display, Formatter};
 use std::fs;
-use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use fs2::FileExt;
-use indicatif::{ProgressBar, ProgressStyle};
 use jot_cache::JotPaths;
 use jot_platform::{OperatingSystem, Platform};
 use reqwest::blocking::Client;
@@ -169,11 +166,17 @@ impl ToolchainManager {
         options: InstallOptions,
     ) -> Result<InstalledJdk, ToolchainError> {
         let vendor = request.vendor().unwrap_or(JdkVendor::Adoptium);
-        let _install_lock = FileLock::acquire(&self.paths.install_lock_path(
+        let lock_path = self.paths.install_lock_path(
             &vendor.to_string(),
             request.version(),
             &self.platform.to_string(),
-        ))?;
+        );
+        let _install_lock = jot_common::FileLock::acquire(&lock_path).map_err(|source| {
+            ToolchainError::LockAcquisition {
+                path: lock_path,
+                source,
+            }
+        })?;
 
         let resolve_progress =
             jot_common::spinner(&format!("Resolving JDK {} ({})", request.version(), vendor));
@@ -311,7 +314,13 @@ impl ToolchainManager {
         request: &KotlinToolchainRequest,
     ) -> Result<InstalledKotlin, ToolchainError> {
         let version = &request.version;
-        let _lock = FileLock::acquire(&self.paths.kotlin_install_lock_path(version))?;
+        let lock_path = self.paths.kotlin_install_lock_path(version);
+        let _lock = jot_common::FileLock::acquire(&lock_path).map_err(|source| {
+            ToolchainError::LockAcquisition {
+                path: lock_path,
+                source,
+            }
+        })?;
 
         let url = format!(
             "https://github.com/JetBrains/kotlin/releases/download/v{version}/kotlin-compiler-{version}.zip"
@@ -472,7 +481,7 @@ impl ToolchainManager {
 
         let mut response = self.client.get(url).send()?.error_for_status()?;
         let total_bytes = response.content_length();
-        let progress = download_bar(
+        let progress = jot_common::download_bar(
             total_bytes,
             &format!(
                 "Downloading {}",
@@ -576,57 +585,6 @@ impl ToolchainManager {
         let content = fs::read(path)?;
         Ok(serde_json::from_slice(&content)?)
     }
-}
-
-struct FileLock {
-    file: fs::File,
-}
-
-impl FileLock {
-    fn acquire(path: &Path) -> Result<Self, ToolchainError> {
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(path)?;
-        file.lock_exclusive()
-            .map_err(|source| ToolchainError::LockAcquisition {
-                path: path.to_path_buf(),
-                source,
-            })?;
-        Ok(Self { file })
-    }
-}
-
-impl Drop for FileLock {
-    fn drop(&mut self) {
-        let _ = self.file.unlock();
-    }
-}
-
-fn download_bar(total_bytes: Option<u64>, message: &str) -> ProgressBar {
-    let progress = match total_bytes {
-        Some(total) => ProgressBar::new(total),
-        None => ProgressBar::new_spinner(),
-    };
-
-    let style = match total_bytes {
-        Some(_) => ProgressStyle::with_template(
-            "{spinner:.green} {msg} [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})",
-        )
-        .expect("valid progress bar template")
-        .progress_chars("=> "),
-        None => ProgressStyle::with_template("{spinner:.green} {msg} {bytes} ({bytes_per_sec})")
-            .expect("valid spinner template"),
-    };
-
-    progress.set_style(style);
-    progress.set_message(message.to_owned());
-    if total_bytes.is_none() {
-        progress.enable_steady_tick(std::time::Duration::from_millis(100));
-    }
-    progress
 }
 
 fn detect_java_home(root: &Path) -> Result<PathBuf, ToolchainError> {

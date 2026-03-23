@@ -5,8 +5,8 @@ use std::process::Command;
 use jot_toolchain::InstalledJdk;
 
 use super::{
-    AnnotationProcessingConfig, CompileConfig, CompileResult, SourceCompiler,
-    collect_sources_by_extension, java_release_flag, join_paths_for_classpath,
+    AnnotationProcessingConfig, CompileConfig, CompileResult, SourceCompiler, java_release_flag,
+    join_paths_for_classpath,
 };
 use crate::diagnostics::format_javac_stderr;
 use crate::errors::BuildError;
@@ -34,7 +34,7 @@ impl SourceCompiler for Javac {
     }
 
     fn collect_sources(&self, source_dirs: &[PathBuf]) -> Result<Vec<PathBuf>, BuildError> {
-        collect_sources_by_extension(source_dirs, "java")
+        Ok(jot_common::collect_files_by_ext(source_dirs, "java"))
     }
 
     fn compile(

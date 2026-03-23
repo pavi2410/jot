@@ -1,6 +1,6 @@
 mod archive;
+mod lock;
 
-use std::ffi::OsString;
 use std::fs;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -9,6 +9,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use sha2::{Digest, Sha256};
 
 pub use archive::extract_archive;
+pub use lock::FileLock;
 
 // ── Error type ─────────────────────────────────────────────────────────────
 
@@ -48,6 +49,41 @@ pub fn spinner(message: &str) -> ProgressBar {
     progress
 }
 
+pub fn download_bar(total_bytes: Option<u64>, message: &str) -> ProgressBar {
+    let progress = match total_bytes {
+        Some(total) => ProgressBar::new(total),
+        None => ProgressBar::new_spinner(),
+    };
+
+    let style = match total_bytes {
+        Some(_) => ProgressStyle::with_template(
+            "{spinner:.green} {msg} [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})",
+        )
+        .expect("valid progress bar template")
+        .progress_chars("=> "),
+        None => ProgressStyle::with_template("{spinner:.green} {msg} {bytes} ({bytes_per_sec})")
+            .expect("valid spinner template"),
+    };
+
+    progress.set_style(style);
+    progress.set_message(message.to_owned());
+    if total_bytes.is_none() {
+        progress.enable_steady_tick(std::time::Duration::from_millis(100));
+    }
+    progress
+}
+
+pub fn count_bar(total: usize, message: &str) -> ProgressBar {
+    let progress = ProgressBar::new(total as u64);
+    progress.set_style(
+        ProgressStyle::with_template("{spinner:.green} {msg} [{bar:40.cyan/blue}] {pos}/{len}")
+            .expect("valid progress bar template")
+            .progress_chars("=> "),
+    );
+    progress.set_message(message.to_owned());
+    progress
+}
+
 // ── SHA-256 file hashing ───────────────────────────────────────────────────
 
 pub fn sha256_file(path: &Path) -> Result<String, std::io::Error> {
@@ -72,40 +108,37 @@ pub fn sha256_file(path: &Path) -> Result<String, std::io::Error> {
 /// Recursively collect files with the given extension from multiple directories.
 /// Results are sorted and deduplicated.
 pub fn collect_files_by_ext(dirs: &[PathBuf], ext: &str) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    for dir in dirs {
-        visit_files_by_ext(dir, ext, &mut files);
-    }
+    let mut files: Vec<PathBuf> = dirs
+        .iter()
+        .flat_map(|dir| {
+            walkdir::WalkDir::new(dir)
+                .into_iter()
+                .filter_map(|e| e.ok())
+        })
+        .filter(|e| e.file_type().is_file())
+        .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some(ext))
+        .map(|e| e.into_path())
+        .collect();
     files.sort();
     files.dedup();
     files
 }
 
-fn visit_files_by_ext(root: &Path, ext: &str, files: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(root) else {
-        return;
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            visit_files_by_ext(&path, ext, files);
-        } else if path.extension().and_then(|e| e.to_str()) == Some(ext) {
-            files.push(path);
-        }
-    }
-}
-
-// ── Classpath ──────────────────────────────────────────────────────────────
-
-pub fn join_classpath(paths: &[PathBuf]) -> Result<OsString, std::env::JoinPathsError> {
-    std::env::join_paths(paths)
-}
-
 // ── Environment ─────────────────────────────────────────────────────────────
 
-/// Returns `true` when the `JOT_OFFLINE` environment variable is set to a truthy value.
+static OFFLINE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Enable or disable offline mode at runtime.
+pub fn set_offline(enabled: bool) {
+    OFFLINE.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Returns `true` when offline mode has been enabled via [`set_offline`] or
+/// the `JOT_OFFLINE` environment variable is set to a truthy value.
 pub fn offline_mode_enabled() -> bool {
+    if OFFLINE.load(std::sync::atomic::Ordering::Relaxed) {
+        return true;
+    }
     std::env::var("JOT_OFFLINE").ok().is_some_and(|value| {
         matches!(
             value.trim().to_ascii_lowercase().as_str(),

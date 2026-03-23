@@ -11,23 +11,24 @@ pub(crate) fn handle_run(
     manager: ToolchainManager,
     module: Option<&str>,
     args: &[String],
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), anyhow::Error> {
     let resolver = MavenResolver::new(paths)?;
     let builder = JavaProjectBuilder::new(resolver, manager);
     let cwd = std::env::current_dir()?;
 
     if find_workspace_root_jot_toml(&cwd)?.is_some() {
-        let module = module.ok_or("workspace run requires --module <name>")?;
+        let module =
+            module.ok_or_else(|| anyhow::anyhow!("workspace run requires --module <name>"))?;
         let output = builder.build_workspace(&cwd, Some(module))?;
         let selected = output
             .modules
             .into_iter()
             .find(|item| item.module_name == module)
-            .ok_or("selected workspace module was not built")?;
+            .ok_or_else(|| anyhow::anyhow!("selected workspace module was not built"))?;
         let fat_jar = selected
             .build
             .fat_jar_path
-            .ok_or("selected module has no runnable main-class")?;
+            .ok_or_else(|| anyhow::anyhow!("selected module has no runnable main-class"))?;
 
         let status = std::process::Command::new(selected.build.installed_jdk.java_binary())
             .current_dir(selected.build.project.project_root)
@@ -40,13 +41,13 @@ pub(crate) fn handle_run(
             .status()?;
 
         if !status.success() {
-            return Err(format!("java exited with status {:?}", status.code()).into());
+            anyhow::bail!("java exited with status {:?}", status.code());
         }
         return Ok(());
     }
 
     if module.is_some() {
-        return Err("--module can only be used from inside a workspace".into());
+        anyhow::bail!("--module can only be used from inside a workspace");
     }
 
     builder.run(&cwd, args)?;
@@ -57,7 +58,7 @@ pub(crate) fn handle_test(
     paths: JotPaths,
     manager: ToolchainManager,
     module: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), anyhow::Error> {
     let resolver = MavenResolver::new(paths)?;
     let builder = JavaProjectBuilder::new(resolver, manager);
     let targets = super::select_project_targets(module)?;

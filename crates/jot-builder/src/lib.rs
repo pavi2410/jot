@@ -70,8 +70,8 @@ impl JavaProjectBuilder {
         let classes_dir = target_dir.join("classes");
         prepare_directory(&classes_dir)?;
 
-        let java_sources = compile::collect_sources_by_extension(&project.source_dirs, "java")?;
-        let kotlin_sources = compile::collect_sources_by_extension(&project.source_dirs, "kt")?;
+        let java_sources = jot_common::collect_files_by_ext(&project.source_dirs, "java");
+        let kotlin_sources = jot_common::collect_files_by_ext(&project.source_dirs, "kt");
         if java_sources.is_empty() && kotlin_sources.is_empty() {
             return Err(BuildError::NoSources(project.project_root.clone()));
         }
@@ -212,10 +212,8 @@ impl JavaProjectBuilder {
         let classes_dir = target_dir.join("classes");
         prepare_directory(&classes_dir)?;
 
-        let main_java_sources =
-            compile::collect_sources_by_extension(&project.source_dirs, "java")?;
-        let main_kotlin_sources =
-            compile::collect_sources_by_extension(&project.source_dirs, "kt")?;
+        let main_java_sources = jot_common::collect_files_by_ext(&project.source_dirs, "java");
+        let main_kotlin_sources = jot_common::collect_files_by_ext(&project.source_dirs, "kt");
 
         let jvm_target = project
             .toolchain
@@ -249,10 +247,8 @@ impl JavaProjectBuilder {
             copy_resources(&project.resource_dir, &classes_dir)?;
         }
 
-        let test_java_sources =
-            compile::collect_sources_by_extension(&project.test_source_dirs, "java")?;
-        let test_kotlin_sources =
-            compile::collect_sources_by_extension(&project.test_source_dirs, "kt")?;
+        let test_java_sources = jot_common::collect_files_by_ext(&project.test_source_dirs, "java");
+        let test_kotlin_sources = jot_common::collect_files_by_ext(&project.test_source_dirs, "kt");
 
         if test_java_sources.is_empty() && test_kotlin_sources.is_empty() {
             return Ok(TestOutput {
@@ -404,7 +400,6 @@ fn prepare_directory(path: &Path) -> Result<(), BuildError> {
 
 #[cfg(test)]
 mod tests {
-    use super::compile::collect_sources_by_extension;
     use super::compile::java_release_flag;
     use super::diagnostics::{caret_span, format_javac_stderr, parse_javac_diagnostics};
     use super::package::merge_service_contents;
@@ -427,8 +422,8 @@ mod tests {
         fs::write(src.join("Main.java"), "class Main {} ").expect("write java");
         fs::write(src.join("README.txt"), "ignore").expect("write text");
 
-        let sources = collect_sources_by_extension(&[temp.path().join("src/main/java")], "java")
-            .expect("collect sources");
+        let sources =
+            jot_common::collect_files_by_ext(&[temp.path().join("src/main/java")], "java");
         assert_eq!(sources.len(), 1);
         assert!(sources[0].ends_with("Main.java"));
     }

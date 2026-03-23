@@ -14,7 +14,7 @@ pub(crate) fn handle_init(
     group: Option<String>,
     package_name: Option<String>,
     name: Option<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), anyhow::Error> {
     let options = init_templates::InitOptions {
         template,
         group,
@@ -35,10 +35,7 @@ pub(crate) fn handle_init(
     Ok(())
 }
 
-pub(crate) fn handle_clean(
-    global: bool,
-    paths: JotPaths,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn handle_clean(global: bool, paths: JotPaths) -> Result<(), anyhow::Error> {
     if global {
         let summary = paths.clear_global_cache()?;
         print_status_stdout(
@@ -98,7 +95,7 @@ pub(crate) fn handle_clean(
     Ok(())
 }
 
-fn remove_target_dir(path: &PathBuf) -> Result<bool, Box<dyn std::error::Error>> {
+fn remove_target_dir(path: &PathBuf) -> Result<bool, anyhow::Error> {
     if !path.exists() {
         return Ok(false);
     }

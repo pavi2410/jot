@@ -129,7 +129,7 @@ pub(crate) fn build_compiler_chain(
 // ── Shared helpers ──────────────────────────────────────────────────────────
 
 pub(crate) fn join_paths_for_classpath(paths: &[PathBuf]) -> Result<OsString, BuildError> {
-    jot_common::join_classpath(paths).map_err(BuildError::JoinPaths)
+    std::env::join_paths(paths).map_err(BuildError::JoinPaths)
 }
 
 pub(crate) fn java_release_flag(version: &str) -> Option<String> {
@@ -142,11 +142,4 @@ pub(crate) fn java_release_flag(version: &str) -> Option<String> {
     } else {
         Some(digits)
     }
-}
-
-pub(crate) fn collect_sources_by_extension(
-    source_dirs: &[PathBuf],
-    extension: &str,
-) -> Result<Vec<PathBuf>, BuildError> {
-    Ok(jot_common::collect_files_by_ext(source_dirs, extension))
 }

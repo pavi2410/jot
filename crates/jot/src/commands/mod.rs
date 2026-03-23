@@ -17,13 +17,10 @@ pub(crate) mod run;
 pub(crate) mod self_mgmt;
 pub(crate) mod toolchain;
 
-pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
     if cli.offline {
-        // Safe here because jot is single-process CLI setup before any worker threads spawn.
-        unsafe {
-            std::env::set_var("JOT_OFFLINE", "1");
-        }
+        jot_common::set_offline(true);
     }
 
     let paths = JotPaths::new()?;
@@ -113,7 +110,7 @@ pub(crate) enum ProjectTargets {
 /// Resolve which project roots to operate on, handling workspace detection and `--module` filtering.
 pub(crate) fn select_project_targets(
     module: Option<&str>,
-) -> Result<ProjectTargets, Box<dyn std::error::Error>> {
+) -> Result<ProjectTargets, anyhow::Error> {
     let cwd = std::env::current_dir()?;
     if let Some(workspace) = load_workspace_build_config(&cwd)? {
         let roots = if let Some(module) = module {
@@ -121,7 +118,7 @@ pub(crate) fn select_project_targets(
                 .members
                 .iter()
                 .find(|candidate| candidate.module_name == module)
-                .ok_or_else(|| format!("unknown workspace module `{module}`"))?;
+                .ok_or_else(|| anyhow::anyhow!("unknown workspace module `{module}`"))?;
             vec![member.project.project_root.clone()]
         } else {
             workspace
@@ -134,7 +131,7 @@ pub(crate) fn select_project_targets(
     }
 
     if module.is_some() {
-        return Err("--module can only be used from inside a workspace".into());
+        anyhow::bail!("--module can only be used from inside a workspace");
     }
 
     Ok(ProjectTargets::Single { root: cwd })

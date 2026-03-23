@@ -20,7 +20,7 @@ pub(crate) fn handle_build(
     paths: JotPaths,
     manager: ToolchainManager,
     module: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), anyhow::Error> {
     let resolver = MavenResolver::new(paths)?;
     let builder = JavaProjectBuilder::new(resolver, manager);
     let cwd = std::env::current_dir()?;
@@ -53,7 +53,7 @@ pub(crate) fn handle_build(
     }
 
     if module.is_some() {
-        return Err("--module can only be used from inside a workspace".into());
+        anyhow::bail!("--module can only be used from inside a workspace");
     }
 
     let output = builder.build(&cwd)?;
@@ -81,7 +81,7 @@ pub(crate) fn handle_fmt(
     manager: ToolchainManager,
     check: bool,
     module: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), anyhow::Error> {
     let resolver = MavenResolver::new(paths)?;
     let devtools = DevTools::new(resolver, manager)?;
     let color = stderr_color();
@@ -99,7 +99,7 @@ pub(crate) fn handle_fmt(
     }
 
     if check && had_changes {
-        return Err("format check failed".into());
+        anyhow::bail!("format check failed");
     }
     Ok(())
 }
@@ -108,7 +108,7 @@ pub(crate) fn handle_lint(
     paths: JotPaths,
     manager: ToolchainManager,
     module: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), anyhow::Error> {
     let resolver = MavenResolver::new(paths)?;
     let devtools = DevTools::new(resolver, manager)?;
     let color = stderr_color();
@@ -125,7 +125,7 @@ pub(crate) fn handle_lint(
         violations += report.violations.len() + report.processing_errors.len();
     }
     if violations > 0 {
-        return Err("lint found violations".into());
+        anyhow::bail!("lint found violations");
     }
     Ok(())
 }

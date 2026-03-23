@@ -1,4 +1,3 @@
-use std::error::Error;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -29,7 +28,7 @@ enum TemplateKind {
     KotlinMinimal,
 }
 
-pub fn scaffold(cwd: &Path, options: InitOptions) -> Result<InitOutput, Box<dyn Error>> {
+pub fn scaffold(cwd: &Path, options: InitOptions) -> anyhow::Result<InitOutput> {
     let template = parse_template(options.template.as_deref())?;
     let group = options.group.unwrap_or_else(|| "com.example".to_owned());
     validate_package_name(&group)?;

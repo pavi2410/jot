@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use jot_config::ProjectBuildConfig;
 
-use crate::{DevTools, DevToolsError, GOOGLE_JAVA_FORMAT_COORD, KTLINT_COORD, count_bar};
+use crate::{DevTools, DevToolsError, GOOGLE_JAVA_FORMAT_COORD, KTLINT_COORD};
 
 use google_java_format::GoogleJavaFormat;
 use ktlint::Ktlint;
@@ -94,7 +94,7 @@ impl DevTools {
             }
             files_scanned += files.len();
 
-            let progress = count_bar(
+            let progress = jot_common::count_bar(
                 files.len(),
                 &format!(
                     "{} {} files ({})",
@@ -144,7 +144,7 @@ pub(crate) fn collect_files_with_ext(project: &ProjectBuildConfig, ext: &str) ->
 }
 
 pub(crate) fn join_classpath(paths: &[PathBuf]) -> Result<std::ffi::OsString, DevToolsError> {
-    Ok(jot_common::join_classpath(paths)?)
+    Ok(std::env::join_paths(paths)?)
 }
 
 pub(crate) fn describe_format_issue(file: &Path, original: &str, formatted: &str) -> FormatIssue {

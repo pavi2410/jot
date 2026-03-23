@@ -1,13 +1,10 @@
-use fs2::FileExt;
 use jot_cache::JotPaths;
 use quick_xml::de::from_str;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
-use std::fs::OpenOptions;
-use std::io::{BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tempfile::NamedTempFile;
@@ -671,7 +668,13 @@ impl MavenResolver {
             });
         }
 
-        let _lock = CacheWriteLock::acquire(&self.cache_lock_path(cache_path))?;
+        let _lock =
+            jot_common::FileLock::acquire(&self.cache_lock_path(cache_path)).map_err(|source| {
+                ResolverError::LockAcquisition {
+                    path: self.cache_lock_path(cache_path),
+                    source,
+                }
+            })?;
         if cache_path.is_file() && is_cache_usable(cache_path, ttl)? {
             return Ok(fs::read_to_string(cache_path)?);
         }
@@ -740,7 +743,13 @@ impl MavenResolver {
         coordinate: &MavenCoordinate,
     ) -> Result<String, ResolverError> {
         let artifact_path = self.artifact_cache_path(coordinate)?;
-        let _lock = CacheWriteLock::acquire(&self.artifact_lock_path(coordinate))?;
+        let lock_path = self.artifact_lock_path(coordinate);
+        let _lock = jot_common::FileLock::acquire(&lock_path).map_err(|source| {
+            ResolverError::LockAcquisition {
+                path: lock_path,
+                source,
+            }
+        })?;
 
         if artifact_path.is_file() {
             let actual_checksum = sha256_file(&artifact_path)?;
@@ -871,33 +880,6 @@ fn dependency_coordinate(dependency: &ResolvedDependency) -> MavenCoordinate {
     }
 }
 
-pub(crate) struct CacheWriteLock {
-    file: fs::File,
-}
-
-impl CacheWriteLock {
-    pub(crate) fn acquire(path: &Path) -> Result<Self, ResolverError> {
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(path)?;
-        file.lock_exclusive()
-            .map_err(|source| ResolverError::LockAcquisition {
-                path: path.to_path_buf(),
-                source,
-            })?;
-        Ok(Self { file })
-    }
-}
-
-impl Drop for CacheWriteLock {
-    fn drop(&mut self) {
-        let _ = self.file.unlock();
-    }
-}
-
 pub(crate) fn write_text_atomic(path: &Path, body: &str) -> Result<(), ResolverError> {
     let parent = path.parent().ok_or_else(|| {
         ResolverError::Io(std::io::Error::new(
@@ -1023,20 +1005,7 @@ pub(crate) fn relocation_target(
 }
 
 pub(crate) fn sha256_file(path: &Path) -> Result<String, ResolverError> {
-    let file = fs::File::open(path)?;
-    let mut reader = BufReader::new(file);
-    let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
-
-    loop {
-        let bytes_read = reader.read(&mut buffer)?;
-        if bytes_read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..bytes_read]);
-    }
-
-    Ok(hex::encode(hasher.finalize()))
+    Ok(jot_common::sha256_file(path)?)
 }
 
 pub(crate) fn normalize_checksum_response(input: &str) -> Option<String> {

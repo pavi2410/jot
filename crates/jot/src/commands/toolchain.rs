@@ -25,13 +25,13 @@ enum ToolchainSpec {
 ///   - `oracle-21`           → Oracle
 ///   - `adoptium-21`         → Adoptium (explicit)
 ///   - `temurin-21`          → Adoptium (alias)
-fn parse_toolchain_spec(spec: &str) -> Result<ToolchainSpec, Box<dyn std::error::Error>> {
+fn parse_toolchain_spec(spec: &str) -> Result<ToolchainSpec, anyhow::Error> {
     let (name, version_part) = spec
         .split_once('@')
-        .ok_or_else(|| format!("expected <tool>@<version> (e.g. java@21), got `{spec}`"))?;
+        .ok_or_else(|| anyhow::anyhow!("expected <tool>@<version> (e.g. java@21), got `{spec}`"))?;
 
     if version_part.is_empty() {
-        return Err(format!("missing version in `{spec}`").into());
+        anyhow::bail!("missing version in `{spec}`");
     }
 
     match name {
@@ -42,7 +42,9 @@ fn parse_toolchain_spec(spec: &str) -> Result<ToolchainSpec, Box<dyn std::error:
         "kotlin" => Ok(ToolchainSpec::Kotlin {
             version: version_part.to_string(),
         }),
-        other => Err(format!("unknown toolchain `{other}` (expected java or kotlin)").into()),
+        other => Err(anyhow::anyhow!(
+            "unknown toolchain `{other}` (expected java or kotlin)"
+        )),
     }
 }
 
@@ -69,7 +71,7 @@ pub(crate) fn handle_toolchain(
     command: ToolchainCommand,
     manager: ToolchainManager,
     _paths: JotPaths,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), anyhow::Error> {
     match command.command {
         ToolchainSubcommand::Install { toolchain, force } => {
             let spec = parse_toolchain_spec(&toolchain)?;
@@ -168,7 +170,7 @@ pub(crate) fn handle_toolchain(
                 }
                 ToolchainSpec::Kotlin { .. } => {
                     // TODO: implement pin_kotlin_toolchain in jot-config
-                    return Err("kotlin pin is not yet implemented".into());
+                    anyhow::bail!("kotlin pin is not yet implemented");
                 }
             }
             print_status_stdout(

@@ -37,7 +37,7 @@ pub(crate) fn handle_lock(
     dependencies: &[String],
     depth: usize,
     output: &PathBuf,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), anyhow::Error> {
     let cwd = std::env::current_dir()?;
     let workspace_dependencies = load_workspace_dependency_set(&cwd)?;
     let resolved_inputs = if dependencies.is_empty() {
@@ -47,9 +47,8 @@ pub(crate) fn handle_lock(
             read_declared_dependencies(&cwd)?
         };
         if inputs.is_empty() {
-            return Err(
+            anyhow::bail!(
                 "no dependency coordinates were provided and no supported `[dependencies]` entries were found in jot.toml"
-                    .into(),
             );
         }
         inputs
@@ -75,10 +74,7 @@ pub(crate) fn handle_lock(
     Ok(())
 }
 
-pub(crate) fn handle_resolve(
-    dependency: &str,
-    deps: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn handle_resolve(dependency: &str, deps: bool) -> Result<(), anyhow::Error> {
     let paths = JotPaths::new()?;
     paths.ensure_exists()?;
     let resolver = MavenResolver::new(paths)?;
@@ -114,19 +110,20 @@ pub(crate) fn handle_tree(
     depth: usize,
     workspace: bool,
     module: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), anyhow::Error> {
     let paths = JotPaths::new()?;
     paths.ensure_exists()?;
     let resolver = MavenResolver::new(paths)?;
 
     if workspace {
         if dependency.is_some() {
-            return Err("dependency argument cannot be combined with --workspace".into());
+            anyhow::bail!("dependency argument cannot be combined with --workspace");
         }
         return print_workspace_tree(&resolver, &std::env::current_dir()?, depth, module);
     }
 
-    let dependency = dependency.ok_or("tree requires a dependency coordinate or --workspace")?;
+    let dependency = dependency
+        .ok_or_else(|| anyhow::anyhow!("tree requires a dependency coordinate or --workspace"))?;
     let entries = resolver.resolve_dependency_tree(dependency, depth)?;
     let tree = dependency_tree(&entries)?;
     println!("{tree}");
@@ -138,7 +135,7 @@ pub(crate) fn handle_add(
     catalog: Option<&str>,
     test: bool,
     name: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), anyhow::Error> {
     let cwd = std::env::current_dir()?;
     let project_file = nearest_project_file(&cwd)?;
 
@@ -163,21 +160,20 @@ pub(crate) fn handle_add(
     regenerate_lockfile_if_possible()
 }
 
-pub(crate) fn handle_remove(name: &str, test: bool) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn handle_remove(name: &str, test: bool) -> Result<(), anyhow::Error> {
     let cwd = std::env::current_dir()?;
     let project_file = nearest_project_file(&cwd)?;
 
     let removed = remove_dependency(&project_file, name, test)?;
     if !removed {
-        return Err(format!(
+        anyhow::bail!(
             "dependency `{name}` was not found in [{}]",
             if test {
                 "test-dependencies"
             } else {
                 "dependencies"
             }
-        )
-        .into());
+        );
     }
 
     print_status_stdout(
@@ -202,18 +198,18 @@ fn resolve_add_input(
     coordinate: Option<&str>,
     catalog: Option<&str>,
     name: Option<&str>,
-) -> Result<(String, DependencySpec), Box<dyn std::error::Error>> {
+) -> Result<(String, DependencySpec), anyhow::Error> {
     match (coordinate, catalog) {
-        (Some(_), Some(_)) => {
-            Err("use either a coordinate argument or --catalog, but not both".into())
-        }
-        (None, None) => Err(
-            "missing dependency input: provide <group:artifact:version> or --catalog <name>".into(),
-        ),
+        (Some(_), Some(_)) => Err(anyhow::anyhow!(
+            "use either a coordinate argument or --catalog, but not both"
+        )),
+        (None, None) => Err(anyhow::anyhow!(
+            "missing dependency input: provide <group:artifact:version> or --catalog <name>"
+        )),
         (Some(raw), None) => {
             let parsed = MavenCoordinate::parse(raw)?;
             if parsed.version.is_none() {
-                return Err("coordinate must include a version: <group:artifact:version>".into());
+                anyhow::bail!("coordinate must include a version: <group:artifact:version>");
             }
 
             let dependency_name = name
@@ -230,7 +226,7 @@ fn resolve_add_input(
     }
 }
 
-fn regenerate_lockfile_if_possible() -> Result<(), Box<dyn std::error::Error>> {
+fn regenerate_lockfile_if_possible() -> Result<(), anyhow::Error> {
     let lock_output = PathBuf::from(DEFAULT_LOCKFILE_NAME);
     match handle_lock(&[], DEFAULT_LOCK_DEPTH, &lock_output) {
         Ok(()) => Ok(()),
@@ -251,7 +247,7 @@ fn regenerate_lockfile_if_possible() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-pub(crate) fn handle_deps(module: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn handle_deps(module: Option<&str>) -> Result<(), anyhow::Error> {
     let selection = collect_dependency_rows(module)?;
     let lockfile = load_lockfile(&selection.lockfile_path)?;
 
@@ -272,7 +268,7 @@ pub(crate) fn handle_deps(module: Option<&str>) -> Result<(), Box<dyn std::error
     Ok(())
 }
 
-pub(crate) fn handle_outdated(module: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn handle_outdated(module: Option<&str>) -> Result<(), anyhow::Error> {
     let selection = collect_dependency_rows(module)?;
     let lockfile = load_lockfile(&selection.lockfile_path)?;
 
@@ -331,9 +327,7 @@ pub(crate) fn handle_outdated(module: Option<&str>) -> Result<(), Box<dyn std::e
     Ok(())
 }
 
-fn collect_dependency_rows(
-    module: Option<&str>,
-) -> Result<DepsSelection, Box<dyn std::error::Error>> {
+fn collect_dependency_rows(module: Option<&str>) -> Result<DepsSelection, anyhow::Error> {
     let cwd = std::env::current_dir()?;
     if let Some(workspace) = load_workspace_build_config(&cwd)? {
         if let Some(selected) = module
@@ -342,7 +336,7 @@ fn collect_dependency_rows(
                 .iter()
                 .any(|member| member.module_name == selected)
         {
-            return Err(format!("unknown workspace module `{selected}`").into());
+            anyhow::bail!("unknown workspace module `{selected}`");
         }
 
         let mut rows = Vec::new();
@@ -367,7 +361,7 @@ fn collect_dependency_rows(
     }
 
     if module.is_some() {
-        return Err("--module can only be used from inside a workspace".into());
+        anyhow::bail!("--module can only be used from inside a workspace");
     }
 
     let project_file = nearest_project_file(&cwd)?;
@@ -384,14 +378,14 @@ fn collect_dependency_rows(
             .collect(),
         lockfile_path: project_file
             .parent()
-            .ok_or("project config path has no parent")?
+            .ok_or_else(|| anyhow::anyhow!("project config path has no parent"))?
             .join(DEFAULT_LOCKFILE_NAME),
     })
 }
 
-fn load_lockfile(path: &PathBuf) -> Result<Lockfile, Box<dyn std::error::Error>> {
+fn load_lockfile(path: &PathBuf) -> Result<Lockfile, anyhow::Error> {
     let content = fs::read_to_string(path).map_err(|_| {
-        format!(
+        anyhow::anyhow!(
             "could not read lockfile at {}; run `jot lock` first",
             display_path(path)
         )
@@ -477,7 +471,7 @@ fn select_packages_for_module(
     lockfile: &Lockfile,
     rows: &[DirectDependencyRow],
     selected_module: &str,
-) -> Result<Vec<LockedPackage>, Box<dyn std::error::Error>> {
+) -> Result<Vec<LockedPackage>, anyhow::Error> {
     let selected_rows = rows
         .iter()
         .filter(|row| row.module.as_deref() == Some(selected_module))
@@ -580,9 +574,9 @@ fn package_scope(package: &LockedPackage, index: &HashMap<String, BTreeSet<Strin
         .unwrap_or_else(|| "transitive".to_owned())
 }
 
-fn dependency_tree(entries: &[TreeEntry]) -> Result<Tree<String>, Box<dyn std::error::Error>> {
+fn dependency_tree(entries: &[TreeEntry]) -> Result<Tree<String>, anyhow::Error> {
     if entries.is_empty() {
-        return Err("dependency tree contained no entries".into());
+        anyhow::bail!("dependency tree contained no entries");
     }
 
     let (tree, _) = build_dependency_subtree(entries, 0);
@@ -617,16 +611,16 @@ fn print_workspace_tree(
     start: &std::path::Path,
     depth: usize,
     module: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), anyhow::Error> {
     let workspace = load_workspace_dependency_set(start)?
-        .ok_or("--workspace requires running inside a workspace")?;
+        .ok_or_else(|| anyhow::anyhow!("--workspace requires running inside a workspace"))?;
     if let Some(selected) = module
         && !workspace
             .members
             .iter()
             .any(|member| member.module_name == selected)
     {
-        return Err(format!("unknown workspace module `{selected}`").into());
+        anyhow::bail!("unknown workspace module `{selected}`");
     }
     let by_root = workspace
         .members

@@ -11,7 +11,6 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use indicatif::{ProgressBar, ProgressStyle};
 use jot_resolver::{MavenCoordinate, MavenResolver};
 use jot_toolchain::ToolchainManager;
 use reqwest::blocking::Client;
@@ -138,17 +137,6 @@ pub enum DevToolsError {
 }
 
 // ── Shared utilities ────────────────────────────────────────────────────────
-
-pub(crate) fn count_bar(total: usize, message: &str) -> ProgressBar {
-    let progress = ProgressBar::new(total as u64);
-    progress.set_style(
-        ProgressStyle::with_template("{spinner:.green} {msg} [{bar:40.cyan/blue}] {pos}/{len}")
-            .expect("valid progress bar template")
-            .progress_chars("=> "),
-    );
-    progress.set_message(message.to_owned());
-    progress
-}
 
 pub(crate) fn write_path_list(paths: &[PathBuf]) -> Result<NamedTempFile, DevToolsError> {
     let file = NamedTempFile::new()?;

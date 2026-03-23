@@ -1,24 +1,23 @@
 use std::fs;
-use std::fs::OpenOptions;
 use std::io;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use fs2::FileExt;
 use jot_cache::JotPaths;
 use jot_config::{find_jot_toml, find_workspace_jot_toml};
 use tempfile::NamedTempFile;
 
-pub(crate) fn workspace_project_file(start: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+pub(crate) fn workspace_project_file(start: &Path) -> Result<PathBuf, anyhow::Error> {
     find_workspace_jot_toml(start)?.ok_or_else(|| {
-        "could not find a workspace jot.toml in the current directory or any parent directory"
-            .into()
+        anyhow::anyhow!(
+            "could not find a workspace jot.toml in the current directory or any parent directory"
+        )
     })
 }
 
-pub(crate) fn nearest_project_file(start: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+pub(crate) fn nearest_project_file(start: &Path) -> Result<PathBuf, anyhow::Error> {
     find_jot_toml(start)?.ok_or_else(|| {
-        "could not find jot.toml in the current directory or any parent directory".into()
+        anyhow::anyhow!("could not find jot.toml in the current directory or any parent directory")
     })
 }
 
@@ -26,18 +25,12 @@ pub(crate) fn write_locked_file(
     paths: &JotPaths,
     output_path: &Path,
     content: &[u8],
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> anyhow::Result<()> {
     let lock_path = paths.locks_dir().join(format!(
         "file-{}.lock",
         jot_common::sanitize_for_filename(&output_path.to_string_lossy())
     ));
-    let lock_file = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(&lock_path)?;
-    lock_file.lock_exclusive()?;
+    let _lock = jot_common::FileLock::acquire(&lock_path)?;
 
     let parent = output_path.parent().ok_or_else(|| {
         std::io::Error::new(
@@ -56,7 +49,6 @@ pub(crate) fn write_locked_file(
         .persist(output_path)
         .map_err(|error| error.error)?;
 
-    let _ = lock_file.unlock();
     Ok(())
 }
 
