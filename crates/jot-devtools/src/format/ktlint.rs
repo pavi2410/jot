@@ -4,7 +4,7 @@ use std::process::Command;
 
 use jot_config::ProjectBuildConfig;
 
-use super::{JavaToolContext, FormatFileResult, FormatIssue, Formatter};
+use super::{FormatFileResult, FormatIssue, Formatter, JavaToolContext};
 use crate::DevToolsError;
 
 pub(crate) struct Ktlint {

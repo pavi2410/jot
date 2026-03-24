@@ -4,7 +4,7 @@ use std::process::Command;
 
 use jot_config::{JavaFormatStyle, ProjectBuildConfig};
 
-use super::{JavaToolContext, FormatFileResult, Formatter, describe_format_issue};
+use super::{FormatFileResult, Formatter, JavaToolContext, describe_format_issue};
 use crate::{DevToolsError, GOOGLE_JAVA_FORMAT_EXPORTS, GOOGLE_JAVA_FORMAT_MAIN_CLASS};
 
 pub(crate) struct GoogleJavaFormat {

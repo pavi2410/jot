@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use jot_config::ProjectBuildConfig;
 
-use crate::{DevTools, DevToolsError, JavaToolContext, GOOGLE_JAVA_FORMAT_COORD, KTLINT_COORD};
+use crate::{DevTools, DevToolsError, GOOGLE_JAVA_FORMAT_COORD, JavaToolContext, KTLINT_COORD};
 
 use google_java_format::GoogleJavaFormat;
 use ktlint::Ktlint;
