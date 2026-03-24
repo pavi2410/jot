@@ -7,11 +7,27 @@ use crate::errors::ConfigError;
 use crate::models::WorkspaceMemberBuildConfig;
 use crate::raw::{RawCatalog, RawCatalogVersion, RawConfig, RawDependencySpec, RawProcessorSpec};
 
+/// Whether a dependency is for the main or test classpath.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum DependencyScope {
+    Main,
+    Test,
+}
+
+impl std::fmt::Display for DependencyScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Main => f.write_str("main"),
+            Self::Test => f.write_str("test"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeclaredDependencyEntry {
     pub name: String,
     pub coordinate: String,
-    pub test: bool,
+    pub scope: DependencyScope,
 }
 
 pub fn read_declared_dependencies(start: &Path) -> Result<Vec<String>, ConfigError> {
@@ -51,17 +67,17 @@ pub fn read_declared_dependency_entries(
     let mut entries = Vec::new();
     entries.extend(resolve_dependency_entries(
         config.dependencies,
-        false,
+        DependencyScope::Main,
         catalog.as_ref(),
     )?);
     entries.extend(resolve_dependency_entries(
         config.test_dependencies,
-        true,
+        DependencyScope::Test,
         catalog.as_ref(),
     )?);
     entries.sort_by(|left, right| {
-        left.test
-            .cmp(&right.test)
+        left.scope
+            .cmp(&right.scope)
             .then_with(|| left.name.cmp(&right.name))
     });
     Ok(entries)
@@ -69,7 +85,7 @@ pub fn read_declared_dependency_entries(
 
 fn resolve_dependency_entries(
     dependencies: Option<std::collections::BTreeMap<String, RawDependencySpec>>,
-    test: bool,
+    scope: DependencyScope,
     catalog: Option<&RawCatalog>,
 ) -> Result<Vec<DeclaredDependencyEntry>, ConfigError> {
     let mut result = Vec::new();
@@ -80,7 +96,7 @@ fn resolve_dependency_entries(
                 result.push(DeclaredDependencyEntry {
                     name,
                     coordinate: coords,
-                    test,
+                    scope,
                 });
             }
             RawDependencySpec::Detailed {
@@ -90,7 +106,7 @@ fn resolve_dependency_entries(
                 result.push(DeclaredDependencyEntry {
                     name,
                     coordinate: coords,
-                    test,
+                    scope,
                 });
             }
             RawDependencySpec::Detailed { path: Some(_), .. } => {}
@@ -101,7 +117,7 @@ fn resolve_dependency_entries(
                 result.push(DeclaredDependencyEntry {
                     coordinate: resolve_catalog_dependency(&name, &alias, catalog)?,
                     name,
-                    test,
+                    scope,
                 });
             }
             RawDependencySpec::Detailed { .. } => {

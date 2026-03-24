@@ -6,7 +6,8 @@ mod models;
 mod raw;
 
 pub use dependencies::{
-    DeclaredDependencyEntry, read_declared_dependencies, read_declared_dependency_entries,
+    DeclaredDependencyEntry, DependencyScope, read_declared_dependencies,
+    read_declared_dependency_entries,
 };
 pub use discovery::{
     find_jot_toml, find_workspace_jot_toml, find_workspace_root_jot_toml, read_toolchain_request,

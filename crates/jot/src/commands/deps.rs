@@ -1,7 +1,8 @@
 use jot_cache::JotPaths;
 use jot_config::{
-    DependencySpec, add_dependency, load_workspace_build_config, load_workspace_dependency_set,
-    read_declared_dependencies, read_declared_dependency_entries, remove_dependency,
+    DependencyScope, DependencySpec, add_dependency, load_workspace_build_config,
+    load_workspace_dependency_set, read_declared_dependencies, read_declared_dependency_entries,
+    remove_dependency,
 };
 use jot_resolver::{LockedPackage, Lockfile, MavenCoordinate, MavenResolver, TreeEntry};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -24,7 +25,7 @@ struct DirectDependencyRow {
     module: Option<String>,
     name: String,
     coordinate: String,
-    scope: &'static str,
+    scope: DependencyScope,
 }
 
 #[derive(Debug)]
@@ -350,7 +351,7 @@ fn collect_dependency_rows(module: Option<&str>) -> Result<DepsSelection, anyhow
                 module: Some(member.module_name.clone()),
                 name: entry.name,
                 coordinate: entry.coordinate,
-                scope: if entry.test { "test" } else { "main" },
+                scope: entry.scope,
             }));
         }
 
@@ -373,7 +374,7 @@ fn collect_dependency_rows(module: Option<&str>) -> Result<DepsSelection, anyhow
                 module: None,
                 name: entry.name,
                 coordinate: entry.coordinate,
-                scope: if entry.test { "test" } else { "main" },
+                scope: entry.scope,
             })
             .collect(),
         lockfile_path: project_file
@@ -434,14 +435,14 @@ fn print_deps_table(rows: &[(DirectDependencyRow, String)], include_module_colum
                 row.name.clone(),
                 row.coordinate.clone(),
                 version.clone(),
-                row.scope.to_owned(),
+                row.scope.to_string(),
             ]);
         } else {
             table_rows.push(vec![
                 row.name.clone(),
                 row.coordinate.clone(),
                 version.clone(),
-                row.scope.to_owned(),
+                row.scope.to_string(),
             ]);
         }
     }
@@ -534,7 +535,7 @@ fn build_scope_index(
             index
                 .entry(root.to_string())
                 .or_default()
-                .insert(row.scope.to_owned());
+                .insert(row.scope.to_string());
         }
 
         if let Ok(entries) = resolver.resolve_dependency_tree(&row.coordinate, DEFAULT_LOCK_DEPTH) {
