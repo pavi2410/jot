@@ -29,7 +29,7 @@ pub enum BuildError {
     #[error("zip error: {0}")]
     Zip(#[from] zip::result::ZipError),
     #[error("failed to build classpath: {0}")]
-    JoinPaths(#[source] std::env::JoinPathsError),
+    JoinPaths(#[from] std::env::JoinPathsError),
     #[error("invalid fat-jar output path: {0}")]
     InvalidFatJarPath(PathBuf),
     #[error("failed to compute relative path for {0}")]

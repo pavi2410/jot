@@ -7,7 +7,6 @@ use quick_xml::de::from_str;
 use tempfile::NamedTempFile;
 
 use super::{LintContext, LintResult, LintViolation, Linter};
-use crate::format::collect_files_with_ext;
 use crate::models::CheckstyleReport;
 use crate::{DEFAULT_DETEKT_CONFIG, DETEKT_CLI_COORD, DETEKT_MAIN_CLASS, DevToolsError};
 
@@ -30,7 +29,7 @@ impl Linter for Detekt {
     }
 
     fn is_applicable(&self, project: &ProjectBuildConfig) -> bool {
-        project.kotlin_toolchain.is_some() && !collect_files_with_ext(project, "kt").is_empty()
+        project.kotlin_toolchain.is_some() && !project.source_files_by_ext("kt").is_empty()
     }
 
     fn lint(
@@ -38,7 +37,7 @@ impl Linter for Detekt {
         ctx: &LintContext,
         project: &ProjectBuildConfig,
     ) -> Result<LintResult, DevToolsError> {
-        let kotlin_files = collect_files_with_ext(project, "kt");
+        let kotlin_files = project.source_files_by_ext("kt");
         if kotlin_files.is_empty() {
             return Ok(LintResult {
                 files_scanned: 0,

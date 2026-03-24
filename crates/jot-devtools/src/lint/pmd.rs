@@ -7,7 +7,6 @@ use quick_xml::de::from_str;
 use tempfile::NamedTempFile;
 
 use super::{LintContext, LintProcessingError, LintResult, LintViolation, Linter};
-use crate::format::collect_files_with_ext;
 use crate::models::PmdReport;
 use crate::{
     DEFAULT_PMD_RULESET, DevToolsError, PMD_CLI_COORD, PMD_JAVA_COORD, PMD_MAIN_CLASS,
@@ -38,7 +37,7 @@ impl Linter for Pmd {
     }
 
     fn is_applicable(&self, project: &ProjectBuildConfig) -> bool {
-        !collect_files_with_ext(project, "java").is_empty()
+        !project.source_files_by_ext("java").is_empty()
     }
 
     fn lint(
@@ -46,7 +45,7 @@ impl Linter for Pmd {
         ctx: &LintContext,
         project: &ProjectBuildConfig,
     ) -> Result<LintResult, DevToolsError> {
-        let java_files = collect_files_with_ext(project, "java");
+        let java_files = project.source_files_by_ext("java");
         if java_files.is_empty() {
             return Ok(LintResult {
                 files_scanned: 0,
@@ -76,7 +75,7 @@ impl Linter for Pmd {
         command
             .current_dir(&project.project_root)
             .arg("-cp")
-            .arg(crate::format::join_classpath(&classpath)?)
+            .arg(std::env::join_paths(&classpath)?)
             .arg(PMD_MAIN_CLASS)
             .arg("check")
             .arg("--file-list")

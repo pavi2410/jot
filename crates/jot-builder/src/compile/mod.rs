@@ -2,7 +2,6 @@ mod javac;
 mod kotlinc;
 
 use std::collections::BTreeMap;
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use jot_config::ProjectBuildConfig;
@@ -127,10 +126,6 @@ pub(crate) fn build_compiler_chain(
 }
 
 // ── Shared helpers ──────────────────────────────────────────────────────────
-
-pub(crate) fn join_paths_for_classpath(paths: &[PathBuf]) -> Result<OsString, BuildError> {
-    std::env::join_paths(paths).map_err(BuildError::JoinPaths)
-}
 
 pub(crate) fn java_release_flag(version: &str) -> Option<String> {
     let digits = version

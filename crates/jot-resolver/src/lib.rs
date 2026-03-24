@@ -26,7 +26,7 @@ mod tests {
     use crate::resolver::{
         LockedPackage, Lockfile, ResolvedDependency, dependency_exclusions,
         include_classpath_scope, interpolate_value, is_cache_usable, normalize_checksum_response,
-        relocation_target, sha256_file,
+        relocation_target,
     };
     use crate::versions::{
         is_property_version_expression, is_stable_maven_version, needs_dynamic_version_resolution,
@@ -387,7 +387,7 @@ mod tests {
         let file_path = temp.path().join("demo.jar");
         fs::write(&file_path, b"hello world").expect("write artifact");
 
-        let checksum = sha256_file(&file_path).expect("sha256");
+        let checksum = jot_common::sha256_file(&file_path).expect("sha256");
         assert_eq!(
             checksum,
             "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"

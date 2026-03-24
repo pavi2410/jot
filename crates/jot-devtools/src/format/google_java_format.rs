@@ -4,10 +4,7 @@ use std::process::Command;
 
 use jot_config::{JavaFormatStyle, ProjectBuildConfig};
 
-use super::{
-    FormatContext, FormatFileResult, Formatter, collect_files_with_ext, describe_format_issue,
-    join_classpath,
-};
+use super::{FormatContext, FormatFileResult, Formatter, describe_format_issue};
 use crate::{DevToolsError, GOOGLE_JAVA_FORMAT_EXPORTS, GOOGLE_JAVA_FORMAT_MAIN_CLASS};
 
 pub(crate) struct GoogleJavaFormat {
@@ -30,7 +27,7 @@ impl Formatter for GoogleJavaFormat {
     }
 
     fn collect_files(&self, project: &ProjectBuildConfig) -> Vec<PathBuf> {
-        collect_files_with_ext(project, "java")
+        project.source_files_by_ext("java")
     }
 
     fn format_file(
@@ -47,7 +44,7 @@ impl Formatter for GoogleJavaFormat {
         }
         command
             .arg("-cp")
-            .arg(join_classpath(&self.classpath)?)
+            .arg(std::env::join_paths(&self.classpath)?)
             .arg(GOOGLE_JAVA_FORMAT_MAIN_CLASS);
         if self.style == JavaFormatStyle::Aosp {
             command.arg("--aosp");

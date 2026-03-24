@@ -1,10 +1,17 @@
 use std::fs;
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
 use crate::errors::ConfigError;
 use crate::raw::RawConfig;
 
-pub fn find_jot_toml(start: &Path) -> Result<Option<PathBuf>, ConfigError> {
+/// Walk up the directory tree from `start`, calling `visitor` with each directory.
+/// The visitor returns `ControlFlow::Break(T)` to stop early with a result,
+/// or `ControlFlow::Continue(())` to keep walking.
+fn walk_ancestors<T>(
+    start: &Path,
+    mut visitor: impl FnMut(&Path) -> ControlFlow<T>,
+) -> Result<Option<T>, ConfigError> {
     let mut current = if start.is_dir() {
         start.to_path_buf()
     } else {
@@ -15,64 +22,56 @@ pub fn find_jot_toml(start: &Path) -> Result<Option<PathBuf>, ConfigError> {
     };
 
     loop {
-        let candidate = current.join("jot.toml");
-        if candidate.is_file() {
-            return Ok(Some(candidate));
+        if let ControlFlow::Break(value) = visitor(&current) {
+            return Ok(Some(value));
         }
-
         if !current.pop() {
             return Ok(None);
         }
     }
+}
+
+pub fn find_jot_toml(start: &Path) -> Result<Option<PathBuf>, ConfigError> {
+    walk_ancestors(start, |dir| {
+        let candidate = dir.join("jot.toml");
+        if candidate.is_file() {
+            ControlFlow::Break(candidate)
+        } else {
+            ControlFlow::Continue(())
+        }
+    })
 }
 
 pub fn find_workspace_jot_toml(start: &Path) -> Result<Option<PathBuf>, ConfigError> {
-    let mut current = if start.is_dir() {
-        start.to_path_buf()
-    } else {
-        start
-            .parent()
-            .ok_or_else(|| ConfigError::InvalidStartPath(start.to_path_buf()))?
-            .to_path_buf()
-    };
     let mut found = None;
-
-    loop {
-        let candidate = current.join("jot.toml");
+    walk_ancestors(start, |dir| {
+        let candidate = dir.join("jot.toml");
         if candidate.is_file() {
             found = Some(candidate);
         }
-
-        if !current.pop() {
-            return Ok(found);
-        }
-    }
+        ControlFlow::<PathBuf>::Continue(())
+    })?;
+    Ok(found)
 }
 
 pub fn find_workspace_root_jot_toml(start: &Path) -> Result<Option<PathBuf>, ConfigError> {
-    let mut current = if start.is_dir() {
-        start.to_path_buf()
-    } else {
-        start
-            .parent()
-            .ok_or_else(|| ConfigError::InvalidStartPath(start.to_path_buf()))?
-            .to_path_buf()
-    };
-
-    loop {
-        let candidate = current.join("jot.toml");
+    walk_ancestors(start, |dir| {
+        let candidate = dir.join("jot.toml");
         if candidate.is_file() {
-            let content = fs::read_to_string(&candidate)?;
-            let config: RawConfig = toml::from_str(&content)?;
+            let content = match fs::read_to_string(&candidate) {
+                Ok(c) => c,
+                Err(_) => return ControlFlow::Continue(()),
+            };
+            let config: RawConfig = match toml::from_str(&content) {
+                Ok(c) => c,
+                Err(_) => return ControlFlow::Continue(()),
+            };
             if config.workspace.is_some() {
-                return Ok(Some(candidate));
+                return ControlFlow::Break(candidate);
             }
         }
-
-        if !current.pop() {
-            return Ok(None);
-        }
-    }
+        ControlFlow::Continue(())
+    })
 }
 
 pub fn read_toolchain_request(

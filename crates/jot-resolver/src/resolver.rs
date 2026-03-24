@@ -4,10 +4,8 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use tempfile::NamedTempFile;
 
 use crate::coordinate::MavenCoordinate;
 use crate::errors::ResolverError;
@@ -752,7 +750,7 @@ impl MavenResolver {
         })?;
 
         if artifact_path.is_file() {
-            let actual_checksum = sha256_file(&artifact_path)?;
+            let actual_checksum = jot_common::sha256_file(&artifact_path)?;
             if self.offline {
                 return Ok(actual_checksum);
             }
@@ -778,7 +776,7 @@ impl MavenResolver {
         let expected_checksum = self.fetch_artifact_checksum(coordinate)?;
 
         self.download_artifact(coordinate, &artifact_path)?;
-        let actual_checksum = sha256_file(&artifact_path)?;
+        let actual_checksum = jot_common::sha256_file(&artifact_path)?;
 
         if let Some(expected_checksum) = expected_checksum
             && expected_checksum != actual_checksum
@@ -832,25 +830,8 @@ impl MavenResolver {
         }
 
         let url = coordinate.jar_url()?;
-        let mut response = self.client.get(url).send()?.error_for_status()?;
-        let mut temp_file = NamedTempFile::new_in(self.paths.downloads_dir())?;
-        let mut buffer = [0_u8; 64 * 1024];
-
-        loop {
-            let bytes_read = response.read(&mut buffer)?;
-            if bytes_read == 0 {
-                break;
-            }
-            temp_file.write_all(&buffer[..bytes_read])?;
-        }
-
-        temp_file.flush()?;
-        if destination.exists() {
-            fs::remove_file(destination)?;
-        }
-        temp_file
-            .persist(destination)
-            .map_err(|error| ResolverError::Io(error.error))?;
+        let response = self.client.get(url).send()?.error_for_status()?;
+        jot_common::download_to_file(response, destination, None)?;
         Ok(())
     }
 }
@@ -881,24 +862,7 @@ fn dependency_coordinate(dependency: &ResolvedDependency) -> MavenCoordinate {
 }
 
 pub(crate) fn write_text_atomic(path: &Path, body: &str) -> Result<(), ResolverError> {
-    let parent = path.parent().ok_or_else(|| {
-        ResolverError::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("path {} has no parent directory", path.display()),
-        ))
-    })?;
-    let mut temp_file = NamedTempFile::new_in(parent)?;
-    temp_file.write_all(body.as_bytes())?;
-    temp_file.flush()?;
-
-    if path.exists() {
-        fs::remove_file(path)?;
-    }
-
-    temp_file
-        .persist(path)
-        .map_err(|error| ResolverError::Io(error.error))?;
-    Ok(())
+    Ok(jot_common::atomic_write(path, body.as_bytes())?)
 }
 
 pub(crate) fn include_classpath_scope(scope: Option<&str>) -> bool {
@@ -1002,10 +966,6 @@ pub(crate) fn relocation_target(
     } else {
         Some(relocated)
     }
-}
-
-pub(crate) fn sha256_file(path: &Path) -> Result<String, ResolverError> {
-    Ok(jot_common::sha256_file(path)?)
 }
 
 pub(crate) fn normalize_checksum_response(input: &str) -> Option<String> {

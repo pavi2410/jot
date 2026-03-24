@@ -837,6 +837,7 @@ dependencies = [
  "termtree",
  "time",
  "toml",
+ "walkdir",
  "yansi",
 ]
 
@@ -884,6 +885,7 @@ dependencies = [
 name = "jot-config"
 version = "0.1.0"
 dependencies = [
+ "jot-common",
  "jot-toolchain",
  "serde",
  "tempfile",

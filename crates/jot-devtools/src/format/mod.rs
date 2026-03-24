@@ -133,20 +133,6 @@ impl DevTools {
 
 // ── Shared helpers ──────────────────────────────────────────────────────────
 
-pub(crate) fn collect_files_with_ext(project: &ProjectBuildConfig, ext: &str) -> Vec<PathBuf> {
-    let dirs: Vec<PathBuf> = project
-        .source_dirs
-        .iter()
-        .chain(project.test_source_dirs.iter())
-        .cloned()
-        .collect();
-    jot_common::collect_files_by_ext(&dirs, ext)
-}
-
-pub(crate) fn join_classpath(paths: &[PathBuf]) -> Result<std::ffi::OsString, DevToolsError> {
-    Ok(std::env::join_paths(paths)?)
-}
-
 pub(crate) fn describe_format_issue(file: &Path, original: &str, formatted: &str) -> FormatIssue {
     let original_lines = original.lines().collect::<Vec<_>>();
     let formatted_lines = formatted.lines().collect::<Vec<_>>();

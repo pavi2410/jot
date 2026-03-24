@@ -61,6 +61,19 @@ pub struct ProjectBuildConfig {
     pub lint: LintConfig,
 }
 
+impl ProjectBuildConfig {
+    /// Collect all source and test source files with the given extension.
+    pub fn source_files_by_ext(&self, ext: &str) -> Vec<PathBuf> {
+        let dirs: Vec<PathBuf> = self
+            .source_dirs
+            .iter()
+            .chain(self.test_source_dirs.iter())
+            .cloned()
+            .collect();
+        jot_common::collect_files_by_ext(&dirs, ext)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceBuildConfig {
     pub config_path: PathBuf,

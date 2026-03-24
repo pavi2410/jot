@@ -313,7 +313,7 @@ fn extract_release_binary(archive_path: &Path) -> Result<PathBuf, anyhow::Error>
     jot_common::extract_archive(archive_path, temp_dir.path())?;
 
     let binary_name = if cfg!(windows) { "jot.exe" } else { "jot" };
-    let extracted_path = find_file_named(temp_dir.path(), binary_name)?.ok_or_else(|| {
+    let extracted_path = find_file_named(temp_dir.path(), binary_name).ok_or_else(|| {
         anyhow::anyhow!(
             "could not locate {} in {}",
             binary_name,

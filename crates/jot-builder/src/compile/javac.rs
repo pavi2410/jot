@@ -6,7 +6,6 @@ use jot_toolchain::InstalledJdk;
 
 use super::{
     AnnotationProcessingConfig, CompileConfig, CompileResult, SourceCompiler, java_release_flag,
-    join_paths_for_classpath,
 };
 use crate::diagnostics::format_javac_stderr;
 use crate::errors::BuildError;
@@ -51,7 +50,7 @@ impl SourceCompiler for Javac {
         if !config.classpath.is_empty() {
             command
                 .arg("-classpath")
-                .arg(join_paths_for_classpath(&config.classpath)?);
+                .arg(std::env::join_paths(&config.classpath)?);
         }
 
         if let Some(release) = java_release_flag(config.jvm_target.as_deref().unwrap_or_default()) {
@@ -62,7 +61,7 @@ impl SourceCompiler for Javac {
             Some(ap) => {
                 command
                     .arg("-processorpath")
-                    .arg(join_paths_for_classpath(&ap.processor_paths)?);
+                    .arg(std::env::join_paths(&ap.processor_paths)?);
                 command.arg("-s").arg(&ap.generated_sources_dir);
                 for (key, value) in &ap.options {
                     command.arg(format!("-A{key}={value}"));

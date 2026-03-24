@@ -3,7 +3,7 @@ use std::process::Command;
 
 use jot_toolchain::InstalledKotlin;
 
-use super::{CompileConfig, CompileResult, SourceCompiler, join_paths_for_classpath};
+use super::{CompileConfig, CompileResult, SourceCompiler};
 use crate::errors::BuildError;
 
 pub(crate) struct Kotlinc {
@@ -43,7 +43,7 @@ impl SourceCompiler for Kotlinc {
         if !config.classpath.is_empty() {
             command
                 .arg("-classpath")
-                .arg(join_paths_for_classpath(&config.classpath)?);
+                .arg(std::env::join_paths(&config.classpath)?);
         }
 
         if let Some(ref target) = config.jvm_target {

@@ -124,21 +124,72 @@ pub fn collect_files_by_ext(dirs: &[PathBuf], ext: &str) -> Vec<PathBuf> {
     files
 }
 
-// ── Environment ─────────────────────────────────────────────────────────────
+// ── Streaming download to file ───────────────────────────────────────────────
 
-static OFFLINE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Stream data from `reader` into `destination` via a temporary file, optionally
+/// wrapping the reader with a progress bar. The temporary file is created in the
+/// same directory as `destination` and atomically persisted.
+pub fn download_to_file(
+    reader: impl std::io::Read,
+    destination: &Path,
+    progress: Option<&ProgressBar>,
+) -> Result<(), std::io::Error> {
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut temp_file =
+        tempfile::NamedTempFile::new_in(destination.parent().unwrap_or(Path::new(".")))?;
 
-/// Enable or disable offline mode at runtime.
-pub fn set_offline(enabled: bool) {
-    OFFLINE.store(enabled, std::sync::atomic::Ordering::Relaxed);
+    match progress {
+        Some(bar) => {
+            let mut wrapped = bar.wrap_read(reader);
+            std::io::copy(&mut wrapped, &mut temp_file)?;
+        }
+        None => {
+            let mut reader = reader;
+            std::io::copy(&mut reader, &mut temp_file)?;
+        }
+    }
+
+    std::io::Write::flush(&mut temp_file)?;
+    if destination.exists() {
+        fs::remove_file(destination)?;
+    }
+    temp_file
+        .persist(destination)
+        .map_err(|error| error.error)?;
+    Ok(())
 }
 
-/// Returns `true` when offline mode has been enabled via [`set_offline`] or
-/// the `JOT_OFFLINE` environment variable is set to a truthy value.
-pub fn offline_mode_enabled() -> bool {
-    if OFFLINE.load(std::sync::atomic::Ordering::Relaxed) {
-        return true;
+// ── Atomic file writing ──────────────────────────────────────────────────────
+
+/// Atomically write `content` to `path` by writing to a temporary file first,
+/// then persisting it into place.
+pub fn atomic_write(path: &Path, content: &[u8]) -> Result<(), std::io::Error> {
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("path {} has no parent directory", path.display()),
+        )
+    })?;
+    fs::create_dir_all(parent)?;
+    let mut temp_file = tempfile::NamedTempFile::new_in(parent)?;
+    std::io::Write::write_all(&mut temp_file, content)?;
+    std::io::Write::flush(&mut temp_file)?;
+
+    if path.exists() {
+        fs::remove_file(path)?;
     }
+
+    temp_file.persist(path).map_err(|error| error.error)?;
+    Ok(())
+}
+
+// ── Environment ─────────────────────────────────────────────────────────────
+
+/// Returns `true` when the `JOT_OFFLINE` environment variable is set to a
+/// truthy value (`1`, `true`, `yes`, or `on`).
+pub fn offline_mode_enabled() -> bool {
     std::env::var("JOT_OFFLINE").ok().is_some_and(|value| {
         matches!(
             value.trim().to_ascii_lowercase().as_str(),

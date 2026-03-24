@@ -17,9 +17,7 @@ use jot_config::{ProjectBuildConfig, load_project_build_config};
 use jot_resolver::{MavenResolver, ResolvedArtifact};
 use jot_toolchain::{InstalledJdk, InstalledKotlin, ToolchainManager};
 
-use compile::{
-    build_compiler_chain, compile_pipeline, join_paths_for_classpath, resolve_annotation_processing,
-};
+use compile::{build_compiler_chain, compile_pipeline, resolve_annotation_processing};
 use package::{build_fat_jar, copy_resources, package_jar};
 
 const DEFAULT_RESOLVE_DEPTH: usize = 8;
@@ -152,7 +150,7 @@ impl JavaProjectBuilder {
             .with_artifacts(&output.dependencies)
             .with_optional_unique_path(kotlin_stdlib_jar(output.installed_kotlin.as_ref()))
             .build();
-        let classpath = join_paths_for_classpath(&classpath_entries)?;
+        let classpath = std::env::join_paths(&classpath_entries)?;
 
         let status = Command::new(output.installed_jdk.java_binary())
             .current_dir(&output.project.project_root)
@@ -299,7 +297,7 @@ impl JavaProjectBuilder {
             .with_artifacts(&test_dependencies)
             .with_optional_unique_path(kotlin_stdlib_jar(installed_kotlin.as_ref()))
             .build();
-        let classpath = join_paths_for_classpath(&runtime_classpath)?;
+        let classpath = std::env::join_paths(&runtime_classpath)?;
 
         let status = Command::new(installed_jdk.java_binary())
             .current_dir(&project.project_root)

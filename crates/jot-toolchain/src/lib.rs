@@ -1,6 +1,5 @@
 use std::fmt::{Display, Formatter};
 use std::fs;
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -8,7 +7,7 @@ use jot_cache::JotPaths;
 use jot_platform::{OperatingSystem, Platform};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use tempfile::{NamedTempFile, TempDir};
+use tempfile::TempDir;
 use time::OffsetDateTime;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, clap::ValueEnum)]
@@ -215,7 +214,7 @@ impl ToolchainManager {
         let temp_dir = TempDir::new_in(self.paths.jdks_dir())?;
         let extract_progress =
             jot_common::spinner(&format!("Extracting {}", asset.binary.package.name));
-        self.extract_archive(&download_path, temp_dir.path())?;
+        jot_common::extract_archive(&download_path, temp_dir.path())?;
         extract_progress.finish_with_message(format!("Extracted {}", asset.binary.package.name));
         let java_home = detect_java_home(temp_dir.path())?;
         let installation = InstalledJdk {
@@ -347,7 +346,7 @@ impl ToolchainManager {
 
         let extract_progress = jot_common::spinner(&format!("Extracting {download_filename}"));
         let temp_dir = TempDir::new_in(self.paths.kotlins_dir())?;
-        self.extract_archive(&download_path, temp_dir.path())?;
+        jot_common::extract_archive(&download_path, temp_dir.path())?;
         extract_progress.finish_with_message(format!("Extracted {download_filename}"));
 
         let kotlin_home = install_dir.join("kotlinc");
@@ -479,45 +478,15 @@ impl ToolchainManager {
             });
         }
 
-        let mut response = self.client.get(url).send()?.error_for_status()?;
+        let response = self.client.get(url).send()?.error_for_status()?;
         let total_bytes = response.content_length();
-        let progress = jot_common::download_bar(
-            total_bytes,
-            &format!(
-                "Downloading {}",
-                destination
-                    .file_name()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or("archive")
-            ),
-        );
-        let mut temp_file = NamedTempFile::new_in(self.paths.downloads_dir())?;
-        let mut buffer = [0_u8; 64 * 1024];
-
-        loop {
-            let bytes_read = response.read(&mut buffer)?;
-            if bytes_read == 0 {
-                break;
-            }
-            temp_file.write_all(&buffer[..bytes_read])?;
-            progress.inc(bytes_read as u64);
-        }
-
-        temp_file.flush()?;
-        if destination.exists() {
-            fs::remove_file(destination)?;
-        }
-        temp_file
-            .persist(destination)
-            .map_err(|error| ToolchainError::Io(error.error))?;
-
-        progress.finish_with_message(format!(
-            "Downloaded {}",
-            destination
-                .file_name()
-                .and_then(|value| value.to_str())
-                .unwrap_or("archive")
-        ));
+        let file_name = destination
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("archive");
+        let progress = jot_common::download_bar(total_bytes, &format!("Downloading {file_name}"));
+        jot_common::download_to_file(response, destination, Some(&progress))?;
+        progress.finish_with_message(format!("Downloaded {file_name}"));
         Ok(())
     }
 
@@ -569,15 +538,6 @@ impl ToolchainManager {
             });
         }
 
-        Ok(())
-    }
-
-    fn extract_archive(
-        &self,
-        archive_path: &Path,
-        destination: &Path,
-    ) -> Result<(), ToolchainError> {
-        jot_common::extract_archive(archive_path, destination)?;
         Ok(())
     }
 

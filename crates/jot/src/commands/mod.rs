@@ -20,7 +20,8 @@ pub(crate) mod toolchain;
 pub(crate) fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
     if cli.offline {
-        jot_common::set_offline(true);
+        // SAFETY: This runs at CLI startup before any threads are spawned.
+        unsafe { std::env::set_var("JOT_OFFLINE", "1") };
     }
 
     let paths = JotPaths::new()?;

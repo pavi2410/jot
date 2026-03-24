@@ -4,7 +4,7 @@ use std::process::Command;
 
 use jot_config::ProjectBuildConfig;
 
-use super::{FormatContext, FormatFileResult, FormatIssue, Formatter, collect_files_with_ext};
+use super::{FormatContext, FormatFileResult, FormatIssue, Formatter};
 use crate::DevToolsError;
 
 pub(crate) struct Ktlint {
@@ -23,7 +23,7 @@ impl Formatter for Ktlint {
     }
 
     fn collect_files(&self, project: &ProjectBuildConfig) -> Vec<PathBuf> {
-        collect_files_with_ext(project, "kt")
+        project.source_files_by_ext("kt")
     }
 
     fn format_file(
