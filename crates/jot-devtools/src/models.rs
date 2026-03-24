@@ -48,6 +48,24 @@ pub(crate) struct PmdError {
 
 // ── Checkstyle XML models (used by detekt) ───────────────────────────────────
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum CheckstyleSeverity {
+    Error,
+    Warning,
+    Info,
+}
+
+impl CheckstyleSeverity {
+    pub fn priority(self) -> usize {
+        match self {
+            Self::Error => 1,
+            Self::Warning => 2,
+            Self::Info => 3,
+        }
+    }
+}
+
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct CheckstyleReport {
     #[serde(rename = "file", default)]
@@ -69,7 +87,7 @@ pub(crate) struct CheckstyleError {
     #[serde(rename = "@column", default)]
     pub column: usize,
     #[serde(rename = "@severity")]
-    pub severity: String,
+    pub severity: CheckstyleSeverity,
     #[serde(rename = "@message")]
     pub message: String,
     #[serde(rename = "@source")]
@@ -134,10 +152,20 @@ pub(crate) struct OsvAffected {
     pub database_specific: Option<OsvSeverityHolder>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub(crate) enum CvssKind {
+    #[serde(alias = "CVSS_V2")]
+    CvssV2,
+    #[serde(alias = "CVSS_V3")]
+    CvssV3,
+    #[serde(alias = "CVSS_V4")]
+    CvssV4,
+}
+
 #[derive(Debug, Deserialize)]
 pub(crate) struct OsvSeverity {
     #[serde(rename = "type")]
-    pub kind: Option<String>,
+    pub kind: Option<CvssKind>,
     pub score: String,
 }
 

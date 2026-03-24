@@ -122,7 +122,7 @@ impl Linter for Detekt {
                         end_column: error.column,
                         rule,
                         ruleset,
-                        priority: severity_to_priority(&error.severity),
+                        priority: error.severity.priority(),
                         message: error.message,
                     }
                 })
@@ -134,14 +134,5 @@ impl Linter for Detekt {
             violations,
             processing_errors: Vec::new(),
         })
-    }
-}
-
-fn severity_to_priority(severity: &str) -> usize {
-    match severity {
-        "error" => 1,
-        "warning" => 2,
-        "info" => 3,
-        _ => 2,
     }
 }

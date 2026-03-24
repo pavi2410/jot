@@ -158,6 +158,7 @@ mod tests {
     use super::audit::{
         parse_cvss_score, parse_severity, rewrite_coordinate, severity_for_vulnerability,
     };
+    use super::models::CvssKind;
     use super::models::OsvVulnerability;
     use super::{AuditSeverity, DEFAULT_PMD_RULESET};
     use std::collections::BTreeMap;
@@ -191,7 +192,7 @@ mod tests {
     fn parses_cvss_v3_vectors() {
         let score = parse_cvss_score(
             "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
-            Some("CVSS_V3"),
+            Some(CvssKind::CvssV3),
         )
         .expect("cvss vector should parse");
         assert_eq!(score, 10.0);

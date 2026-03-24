@@ -9,7 +9,7 @@ pub use errors::ResolverError;
 pub use models::{
     MavenDependencies, MavenDependency, MavenDeveloper, MavenDevelopers, MavenExclusion,
     MavenExclusions, MavenLicense, MavenLicenses, MavenMetadata, MavenParent, MavenProject,
-    MavenScope, MavenScm, MavenVersioning, MavenVersions,
+    MavenScm, MavenScope, MavenVersioning, MavenVersions,
 };
 pub use resolver::{
     LockedPackage, Lockfile, MavenResolver, ResolvedArtifact, ResolvedDependency, TreeEntry,

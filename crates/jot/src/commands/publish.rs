@@ -20,18 +20,30 @@ use tempfile::TempDir;
 
 use crate::commands::render::{StatusTone, display_path_with_roots, print_status_stdout};
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn handle_publish(
-    paths: JotPaths,
-    manager: ToolchainManager,
-    module: Option<&str>,
-    repository: Option<&str>,
-    username: Option<&str>,
-    password: Option<&str>,
-    signing_key: Option<&str>,
-    dry_run: bool,
-    allow_snapshot: bool,
-) -> Result<(), anyhow::Error> {
+pub(crate) struct PublishOptions<'a> {
+    pub paths: JotPaths,
+    pub manager: ToolchainManager,
+    pub module: Option<&'a str>,
+    pub repository: Option<&'a str>,
+    pub username: Option<&'a str>,
+    pub password: Option<&'a str>,
+    pub signing_key: Option<&'a str>,
+    pub dry_run: bool,
+    pub allow_snapshot: bool,
+}
+
+pub(crate) fn handle_publish(opts: PublishOptions<'_>) -> Result<(), anyhow::Error> {
+    let PublishOptions {
+        paths,
+        manager,
+        module,
+        repository,
+        username,
+        password,
+        signing_key,
+        dry_run,
+        allow_snapshot,
+    } = opts;
     let resolver = MavenResolver::new(paths)?;
     let builder = JavaProjectBuilder::new(resolver, manager);
     let cwd = std::env::current_dir()?;

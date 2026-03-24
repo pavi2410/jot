@@ -541,21 +541,23 @@ pub(crate) fn parse_severity(input: &str) -> AuditSeverity {
 }
 
 fn parse_osv_severity(severity: &OsvSeverity) -> AuditSeverity {
-    if let Some(score) = parse_cvss_score(&severity.score, severity.kind.as_deref()) {
+    if let Some(score) = parse_cvss_score(&severity.score, severity.kind) {
         return AuditSeverity::from_cvss_score(score);
     }
 
     parse_severity(&severity.score)
 }
 
-pub(crate) fn parse_cvss_score(value: &str, kind: Option<&str>) -> Option<f64> {
+pub(crate) fn parse_cvss_score(value: &str, kind: Option<crate::models::CvssKind>) -> Option<f64> {
+    use crate::models::CvssKind;
+
     let trimmed = value.trim();
     if let Ok(score) = trimmed.parse::<f64>() {
         return Some(score);
     }
 
     let is_v3 = kind
-        .map(|candidate| candidate.eq_ignore_ascii_case("CVSS_V3"))
+        .map(|k| k == CvssKind::CvssV3)
         .unwrap_or_else(|| trimmed.starts_with("CVSS:3."));
 
     if is_v3 {
