@@ -1,5 +1,41 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::fmt;
+
+// ── Maven scope ─────────────────────────────────────────────────────────────
+
+/// The scope of a Maven dependency, controlling when it appears on the classpath.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MavenScope {
+    #[default]
+    Compile,
+    Runtime,
+    Test,
+    Provided,
+    Import,
+    System,
+}
+
+impl MavenScope {
+    /// Returns `true` if the scope should be included on the compile/runtime classpath.
+    pub fn is_classpath_visible(self) -> bool {
+        !matches!(self, Self::Test | Self::Provided | Self::Import)
+    }
+}
+
+impl fmt::Display for MavenScope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Compile => f.write_str("compile"),
+            Self::Runtime => f.write_str("runtime"),
+            Self::Test => f.write_str("test"),
+            Self::Provided => f.write_str("provided"),
+            Self::Import => f.write_str("import"),
+            Self::System => f.write_str("system"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct MavenMetadata {
@@ -133,7 +169,7 @@ pub struct MavenDependency {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub classifier: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub scope: Option<String>,
+    pub scope: Option<MavenScope>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub optional: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]

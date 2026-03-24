@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use crate::coordinate::MavenCoordinate;
 use crate::errors::ResolverError;
-use crate::models::{MavenDependency, MavenMetadata, MavenParent, MavenProject};
+use crate::models::{MavenDependency, MavenMetadata, MavenParent, MavenProject, MavenScope};
 use crate::versions::{
     is_property_version_expression, needs_dynamic_version_resolution, resolve_best_version,
     resolve_version_from_metadata,
@@ -27,7 +27,7 @@ pub struct ResolvedDependency {
     pub artifact: String,
     pub version: Option<String>,
     pub classifier: Option<String>,
-    pub scope: Option<String>,
+    pub scope: Option<MavenScope>,
     pub optional: bool,
     pub exclusions: BTreeSet<(String, String)>,
 }
@@ -36,7 +36,7 @@ pub struct ResolvedDependency {
 pub struct TreeEntry {
     pub depth: usize,
     pub coordinate: MavenCoordinate,
-    pub scope: Option<String>,
+    pub scope: Option<MavenScope>,
     pub optional: bool,
     pub note: Option<String>,
 }
@@ -281,7 +281,7 @@ impl MavenResolver {
                     continue;
                 }
 
-                if include_classpath_scope(entry.scope.as_deref()) {
+                if include_classpath_scope(entry.scope) {
                     packages.insert(entry.coordinate);
                 }
             }
@@ -324,11 +324,11 @@ impl MavenResolver {
 
         let dependencies = self.fetch_direct_dependencies(coordinate)?;
         for dependency in dependencies {
-            let scope = dependency.scope.clone();
+            let scope = dependency.scope;
             let optional = dependency.optional;
             let dependency_coordinate = dependency_coordinate(&dependency);
 
-            if !include_classpath_scope(scope.as_deref()) {
+            if !include_classpath_scope(scope) {
                 out.push(tree_entry(
                     depth,
                     dependency_coordinate,
@@ -493,10 +493,10 @@ impl MavenResolver {
                         continue;
                     };
 
-                    let scope = interpolation.optional_ref(dependency.scope.as_ref());
+                    let scope = dependency.scope;
                     let packaging = interpolation.optional_ref(dependency.packaging.as_ref());
 
-                    if scope.as_deref() == Some("import") && packaging.as_deref() == Some("pom") {
+                    if scope == Some(MavenScope::Import) && packaging.as_deref() == Some("pom") {
                         if let Some(version) =
                             interpolation.optional_ref(dependency.version.as_ref())
                         {
@@ -548,7 +548,7 @@ impl MavenResolver {
                                 version,
                                 classifier: interpolation
                                     .optional_ref(dependency.classifier.as_ref()),
-                                scope: interpolation.optional_ref(dependency.scope.as_ref()),
+                                scope: dependency.scope,
                                 optional: dependency.optional.unwrap_or(false),
                                 exclusions: dependency_exclusions(&dependency, &properties),
                             })
@@ -839,7 +839,7 @@ impl MavenResolver {
 fn tree_entry(
     depth: usize,
     coordinate: MavenCoordinate,
-    scope: Option<String>,
+    scope: Option<MavenScope>,
     optional: bool,
     note: Option<&str>,
 ) -> TreeEntry {
@@ -865,8 +865,8 @@ pub(crate) fn write_text_atomic(path: &Path, body: &str) -> Result<(), ResolverE
     Ok(jot_common::atomic_write(path, body.as_bytes())?)
 }
 
-pub(crate) fn include_classpath_scope(scope: Option<&str>) -> bool {
-    !matches!(scope, Some("test" | "provided" | "import"))
+pub(crate) fn include_classpath_scope(scope: Option<MavenScope>) -> bool {
+    scope.unwrap_or_default().is_classpath_visible()
 }
 
 pub(crate) fn interpolate_value(input: &str, properties: &BTreeMap<String, String>) -> String {

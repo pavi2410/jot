@@ -166,7 +166,7 @@ pub(crate) fn read_source_line(path: &Path, line_number: usize) -> Option<String
 
 pub(crate) fn format_tree_label(entry: &TreeEntry) -> String {
     let color = stdout_color();
-    let scope = entry.scope.clone().unwrap_or_else(|| "compile".to_owned());
+    let scope = entry.scope.unwrap_or_default();
     let optional = if entry.optional { " optional" } else { "" };
     let note = entry
         .note

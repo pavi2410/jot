@@ -9,7 +9,7 @@ pub use errors::ResolverError;
 pub use models::{
     MavenDependencies, MavenDependency, MavenDeveloper, MavenDevelopers, MavenExclusion,
     MavenExclusions, MavenLicense, MavenLicenses, MavenMetadata, MavenParent, MavenProject,
-    MavenScm, MavenVersioning, MavenVersions,
+    MavenScope, MavenScm, MavenVersioning, MavenVersions,
 };
 pub use resolver::{
     LockedPackage, Lockfile, MavenResolver, ResolvedArtifact, ResolvedDependency, TreeEntry,
@@ -20,7 +20,7 @@ mod tests {
     use crate::coordinate::MavenCoordinate;
     use crate::models::{
         MavenDependencies, MavenDependency, MavenDependencyManagement, MavenDistributionManagement,
-        MavenExclusion, MavenExclusions, MavenParent, MavenProject, MavenRelocation,
+        MavenExclusion, MavenExclusions, MavenParent, MavenProject, MavenRelocation, MavenScope,
         MavenVersioning, MavenVersions,
     };
     use crate::resolver::{
@@ -109,11 +109,11 @@ mod tests {
     #[test]
     fn include_classpath_scope_excludes_test_provided_and_import() {
         assert!(include_classpath_scope(None));
-        assert!(include_classpath_scope(Some("compile")));
-        assert!(include_classpath_scope(Some("runtime")));
-        assert!(!include_classpath_scope(Some("test")));
-        assert!(!include_classpath_scope(Some("provided")));
-        assert!(!include_classpath_scope(Some("import")));
+        assert!(include_classpath_scope(Some(MavenScope::Compile)));
+        assert!(include_classpath_scope(Some(MavenScope::Runtime)));
+        assert!(!include_classpath_scope(Some(MavenScope::Test)));
+        assert!(!include_classpath_scope(Some(MavenScope::Provided)));
+        assert!(!include_classpath_scope(Some(MavenScope::Import)));
     }
 
     #[test]
@@ -197,7 +197,7 @@ mod tests {
         assert_eq!(first.group_id.as_deref(), Some("org.junit.jupiter"));
         assert_eq!(first.artifact_id.as_deref(), Some("junit-jupiter-api"));
         assert_eq!(first.version.as_deref(), Some("5.11.0"));
-        assert_eq!(first.scope.as_deref(), Some("test"));
+        assert_eq!(first.scope, Some(MavenScope::Test));
         assert_eq!(first.optional, Some(false));
     }
 

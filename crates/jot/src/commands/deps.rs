@@ -86,7 +86,7 @@ pub(crate) fn handle_resolve(dependency: &str, deps: bool) -> Result<(), anyhow:
         } else {
             for dependency in dependencies {
                 let version = dependency.version.unwrap_or_else(|| "<managed>".to_owned());
-                let scope = dependency.scope.unwrap_or_else(|| "compile".to_owned());
+                let scope = dependency.scope.unwrap_or_default();
                 let optional = if dependency.optional { " optional" } else { "" };
                 print_status_stdout(
                     "dep",
@@ -547,11 +547,11 @@ fn build_scope_index(
                 if entry.note.is_some() {
                     continue;
                 }
-                let scope = entry.scope.unwrap_or_else(|| "compile".to_owned());
+                let scope = entry.scope.unwrap_or_default();
                 index
                     .entry(entry.coordinate.to_string())
                     .or_default()
-                    .insert(scope);
+                    .insert(scope.to_string());
             }
         }
     }
