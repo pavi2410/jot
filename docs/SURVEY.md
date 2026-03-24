@@ -19,7 +19,7 @@ A veteran Java dev has battle scars from Maven/Gradle and knows the ecosystem de
 - **CI/CD friendliness** — Reproducible builds, caching-friendly output, non-interactive mode, exit codes, machine-readable output (JSON/XML), integration with GitHub Actions / Jenkins.
 - **BOM / dependency management** — Spring Boot BOMs, platform constraints, exclusion rules, forced versions.
 - **Multi-module builds that scale** — Incremental compilation, parallel module builds, build avoidance (skip unchanged modules). Workspaces are a start, but the devil is in performance at 50+ modules.
-- **Source/target compatibility control** — `--release` flag, cross-compilation to older JDKs, multi-release JARs.
+- **Source/target compatibility control** — Java release target configured in `jot.toml`, cross-compilation to older JDKs, multi-release JARs.
 - **Integration with existing tooling** — IDE support (IntelliJ project generation), test coverage reports, static analysis beyond PMD (SpotBugs, Error Prone, Checkstyle).
 - **Fat JAR / shading / shadow** — Packaging an executable uber-jar with dependency relocation is extremely common for microservices.
 
@@ -79,12 +79,12 @@ Building command-line applications, data pipelines, batch processors, and dev to
 
 ### Must-haves
 
-- **Single executable packaging** — `jot build --fat-jar` or `jot build --uber-jar` to produce a self-contained JAR. Ideally also `jot build --native` via GraalVM native-image for zero-startup-time binaries.
+- **Single executable packaging** — Fat/uber-JAR packaging configured in `jot.toml` (e.g., `[package] type = "fat-jar"`), produced by `jot build`. Ideally also GraalVM native-image support for zero-startup-time binaries.
 - **Argument parsing library support** — Easy integration with picocli, JCommander, or airline. Annotation processing support is critical here (picocli uses it for GraalVM reflection config).
 - **Single-file execution** — `jot run Script.java` without needing a full project. Useful for quick scripts and prototyping, similar to JBang.
 - **Shebang support** — `#!/usr/bin/env jot run` at the top of a `.java` file to make it directly executable from the shell.
 - **`jot install`** — Install a CLI tool globally from a jot project (symlink the built artifact to `~/.local/bin` or similar).
-- **Startup time awareness** — Options to minimize JVM startup overhead: CDS (Class Data Sharing) archive generation, AOT compilation hints.
+- **Startup time awareness** — Config options in `jot.toml` to minimize JVM startup overhead: CDS (Class Data Sharing) archive generation, AOT compilation hints.
 
 ### Nice-to-haves
 
@@ -113,14 +113,14 @@ Building REST APIs, microservices, web applications, and server-side systems.
 - **Annotation processor support** — Non-negotiable. Spring uses them (Spring Configuration Processor), Micronaut is built entirely on them, Quarkus uses them for build-time optimization.
 - **Resource handling** — `src/main/resources` with proper classpath inclusion, filtering/variable substitution (e.g., `application.properties` with `${project.version}`).
 - **WAR packaging** — For teams deploying to traditional app servers (Tomcat, WildFly). Less common now but still needed in enterprise.
-- **Docker-friendly builds** — `jot build --docker` or at minimum a Dockerfile-friendly layered JAR output. Multi-stage build support.
+- **Docker-friendly builds** — Dockerfile-friendly layered JAR output configured in `jot.toml`. Multi-stage build support.
 - **Environment/profile configs** — `application-dev.properties` vs `application-prod.properties` style config switching.
 
 ### Nice-to-haves
 
 - `jot init --template rest-api` with a working Spring Boot or Micronaut starter.
 - `jot init --template graphql` for GraphQL server scaffolding.
-- Built-in HTTP client testing (`jot test --integration` that starts the server, runs tests, shuts down).
+- Built-in integration test support (start the server, run tests, shut down) configured via `jot.toml` test profiles.
 - OpenAPI spec generation from code.
 - Database migration tool integration (Flyway, Liquibase).
 - `jot deploy` — Push to common PaaS targets (Docker registry, AWS Lambda, Cloud Run).
@@ -215,7 +215,7 @@ Building Android applications (though Android uses its own build system, crossov
 
 ### Nice-to-haves
 
-- `jot build --target 8` to easily target Java 8 bytecode for Android compatibility.
+- Java release target in `jot.toml` (e.g., `java-release = 8`) for Android-compatible bytecode.
 - Documentation on how to consume jot-built JARs from a Gradle Android project.
 - KMP (Kotlin Multiplatform) module support for shared business logic.
 
@@ -242,9 +242,9 @@ Using Java for data processing, ML pipelines, and scientific computing.
 ### Nice-to-haves
 
 - `jot init --template spark-job` or `jot init --template flink-job`.
-- `jot run --spark` that wraps `spark-submit` locally.
+- Custom run scripts in `jot.toml` that wrap `spark-submit` locally.
 - Jupyter/JShell notebook-style scratch execution for exploratory data work.
-- `jot build --shade` with relocation rules for common conflicts (Guava, Jackson, etc.).
+- Shading with relocation rules configured in `jot.toml` (e.g., `[shade]` section for common conflicts like Guava, Jackson).
 
 ### Likely concerns
 
@@ -278,8 +278,8 @@ This is one of the largest and most active Java communities. Many modders are yo
 - **Mixin config generation** — Auto-generate or validate `mixins.json` from annotated classes.
 - **Multi-loader support** — Build the same mod for both Fabric and NeoForge from a shared codebase (like Architectury does). Workspace support with platform-specific source sets.
 - **Dev environment setup** — Download and deobfuscate a Minecraft JAR for development (what Fabric Loom's `genSources` does).
-- **Run client/server** — `jot run --client` / `jot run --server` to launch Minecraft with the mod loaded for testing.
-- `jot publish --modrinth` / `jot publish --curseforge` — Publish to mod distribution platforms.
+- **Run client/server** — Run configurations in `jot.toml` (e.g., `[run.client]`, `[run.server]`) to launch Minecraft with the mod loaded for testing.
+- **Publish to mod platforms** — Modrinth/CurseForge publish targets configured in `jot.toml`, invoked via `jot publish`.
 - Modpack dependency management and version pinning.
 
 ### Likely concerns
