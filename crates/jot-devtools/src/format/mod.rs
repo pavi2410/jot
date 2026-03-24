@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use jot_config::ProjectBuildConfig;
 
-use crate::{DevTools, DevToolsError, GOOGLE_JAVA_FORMAT_COORD, KTLINT_COORD};
+use crate::{DevTools, DevToolsError, JavaToolContext, GOOGLE_JAVA_FORMAT_COORD, KTLINT_COORD};
 
 use google_java_format::GoogleJavaFormat;
 use ktlint::Ktlint;
@@ -32,10 +32,6 @@ pub struct FormatIssue {
 
 // ── Formatter trait ─────────────────────────────────────────────────────────
 
-pub(crate) struct FormatContext {
-    pub java_binary: PathBuf,
-}
-
 pub(crate) struct FormatFileResult {
     pub changed: bool,
     pub issues: Vec<FormatIssue>,
@@ -46,7 +42,7 @@ pub(crate) trait Formatter {
     fn collect_files(&self, project: &ProjectBuildConfig) -> Vec<PathBuf>;
     fn format_file(
         &self,
-        ctx: &FormatContext,
+        ctx: &JavaToolContext,
         file: &Path,
         check: bool,
     ) -> Result<FormatFileResult, DevToolsError>;
@@ -80,7 +76,7 @@ impl DevTools {
             formatters.push(Box::new(Ktlint::new(ktlint_jar)));
         }
 
-        let ctx = FormatContext {
+        let ctx = JavaToolContext {
             java_binary: installed_jdk.java_binary(),
         };
         let mut changed_files = Vec::new();

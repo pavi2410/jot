@@ -16,6 +16,11 @@ use jot_toolchain::ToolchainManager;
 use reqwest::blocking::Client;
 use tempfile::NamedTempFile;
 
+/// Shared context for Java-based tools (formatters, linters).
+pub(crate) struct JavaToolContext {
+    pub java_binary: PathBuf,
+}
+
 pub(crate) const DEFAULT_RESOLVE_DEPTH: usize = 8;
 pub(crate) const GOOGLE_JAVA_FORMAT_COORD: &str =
     "com.google.googlejavaformat:google-java-format:1.24.0:all-deps";

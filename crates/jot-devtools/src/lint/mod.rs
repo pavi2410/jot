@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use jot_config::ProjectBuildConfig;
 
-use crate::{DevTools, DevToolsError};
+use crate::{DevTools, DevToolsError, JavaToolContext};
 
 use detekt::Detekt;
 use pmd::Pmd;
@@ -41,10 +41,6 @@ pub struct LintProcessingError {
 
 // ── Linter trait ────────────────────────────────────────────────────────────
 
-pub(crate) struct LintContext {
-    pub java_binary: PathBuf,
-}
-
 pub(crate) struct LintResult {
     pub files_scanned: usize,
     pub violations: Vec<LintViolation>,
@@ -52,12 +48,11 @@ pub(crate) struct LintResult {
 }
 
 pub(crate) trait Linter {
-    #[allow(dead_code)]
     fn name(&self) -> &'static str;
     fn is_applicable(&self, project: &ProjectBuildConfig) -> bool;
     fn lint(
         &self,
-        ctx: &LintContext,
+        ctx: &JavaToolContext,
         project: &ProjectBuildConfig,
     ) -> Result<LintResult, DevToolsError>;
 }
@@ -78,7 +73,7 @@ impl DevTools {
             Box::new(Detekt::new(&self.resolver)?),
         ];
 
-        let ctx = LintContext {
+        let ctx = JavaToolContext {
             java_binary: installed_jdk.java_binary(),
         };
         let mut total_scanned = 0;
@@ -89,7 +84,14 @@ impl DevTools {
             if !linter.is_applicable(&project) {
                 continue;
             }
+            let progress = jot_common::spinner(&format!("Running {}", linter.name()));
             let result = linter.lint(&ctx, &project)?;
+            progress.finish_with_message(format!(
+                "{}: scanned {} files, {} violations",
+                linter.name(),
+                result.files_scanned,
+                result.violations.len(),
+            ));
             total_scanned += result.files_scanned;
             all_violations.extend(result.violations);
             all_errors.extend(result.processing_errors);

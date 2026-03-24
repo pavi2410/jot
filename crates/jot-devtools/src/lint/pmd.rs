@@ -6,7 +6,7 @@ use jot_config::ProjectBuildConfig;
 use quick_xml::de::from_str;
 use tempfile::NamedTempFile;
 
-use super::{LintContext, LintProcessingError, LintResult, LintViolation, Linter};
+use super::{JavaToolContext, LintProcessingError, LintResult, LintViolation, Linter};
 use crate::models::PmdReport;
 use crate::{
     DEFAULT_PMD_RULESET, DevToolsError, PMD_CLI_COORD, PMD_JAVA_COORD, PMD_MAIN_CLASS,
@@ -42,7 +42,7 @@ impl Linter for Pmd {
 
     fn lint(
         &self,
-        ctx: &LintContext,
+        ctx: &JavaToolContext,
         project: &ProjectBuildConfig,
     ) -> Result<LintResult, DevToolsError> {
         let java_files = project.source_files_by_ext("java");

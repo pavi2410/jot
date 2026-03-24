@@ -4,7 +4,7 @@ use std::process::Command;
 
 use jot_config::ProjectBuildConfig;
 
-use super::{FormatContext, FormatFileResult, FormatIssue, Formatter};
+use super::{JavaToolContext, FormatFileResult, FormatIssue, Formatter};
 use crate::DevToolsError;
 
 pub(crate) struct Ktlint {
@@ -28,7 +28,7 @@ impl Formatter for Ktlint {
 
     fn format_file(
         &self,
-        ctx: &FormatContext,
+        ctx: &JavaToolContext,
         file: &Path,
         check: bool,
     ) -> Result<FormatFileResult, DevToolsError> {

@@ -6,7 +6,7 @@ use jot_config::ProjectBuildConfig;
 use quick_xml::de::from_str;
 use tempfile::NamedTempFile;
 
-use super::{LintContext, LintResult, LintViolation, Linter};
+use super::{JavaToolContext, LintResult, LintViolation, Linter};
 use crate::models::CheckstyleReport;
 use crate::{DEFAULT_DETEKT_CONFIG, DETEKT_CLI_COORD, DETEKT_MAIN_CLASS, DevToolsError};
 
@@ -33,7 +33,7 @@ impl Linter for Detekt {
 
     fn lint(
         &self,
-        ctx: &LintContext,
+        ctx: &JavaToolContext,
         project: &ProjectBuildConfig,
     ) -> Result<LintResult, DevToolsError> {
         let kotlin_files = project.source_files_by_ext("kt");

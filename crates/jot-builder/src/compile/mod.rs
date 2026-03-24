@@ -28,7 +28,6 @@ pub(crate) struct CompileResult {
 }
 
 pub(crate) trait SourceCompiler {
-    #[allow(dead_code)]
     fn name(&self) -> &'static str;
     fn collect_sources(&self, source_dirs: &[PathBuf]) -> Result<Vec<PathBuf>, BuildError>;
     fn compile(
@@ -56,6 +55,11 @@ pub(crate) fn compile_pipeline(
         if sources.is_empty() {
             continue;
         }
+        let progress = jot_common::spinner(&format!(
+            "Compiling {} {} sources",
+            sources.len(),
+            compiler.name(),
+        ));
         let config = CompileConfig {
             project_root: project_root.to_path_buf(),
             classpath: classpath.clone(),
@@ -63,6 +67,11 @@ pub(crate) fn compile_pipeline(
             jvm_target: jvm_target.map(|s| s.to_owned()),
         };
         let result = compiler.compile(&config, &sources)?;
+        progress.finish_with_message(format!(
+            "Compiled {} {} sources",
+            sources.len(),
+            compiler.name(),
+        ));
         classpath.extend(result.extra_classpath);
     }
     Ok(())
