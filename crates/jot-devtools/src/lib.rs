@@ -11,7 +11,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use jot_resolver::{MavenCoordinate, MavenResolver};
+use jot_resolver::MavenResolver;
 use jot_toolchain::ToolchainManager;
 use reqwest::blocking::Client;
 use tempfile::NamedTempFile;
@@ -100,9 +100,8 @@ impl DevTools {
         &self,
         coordinate: &str,
     ) -> Result<PathBuf, DevToolsError> {
-        let coordinate = MavenCoordinate::parse(coordinate)?;
-        let resolved = self.resolver.resolve_coordinate(&coordinate.to_string())?;
-        Ok(self.resolver.cache_artifact(&resolved)?)
+        let resolved = self.resolver.resolve_coordinate(coordinate)?;
+        Ok(self.resolver.cache_artifact(&resolved.as_coordinate())?)
     }
 }
 

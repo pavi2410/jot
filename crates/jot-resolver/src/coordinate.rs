@@ -48,6 +48,22 @@ impl MavenCoordinate {
         }
     }
 
+    /// Convert into a [`ResolvedCoordinate`], returning an error if the version is missing.
+    pub fn into_resolved(self) -> Result<ResolvedCoordinate, ResolverError> {
+        match self.version {
+            Some(version) => Ok(ResolvedCoordinate {
+                group: self.group,
+                artifact: self.artifact,
+                version,
+                classifier: self.classifier,
+            }),
+            None => Err(ResolverError::MissingVersionForPom(format!(
+                "{}:{}",
+                self.group, self.artifact
+            ))),
+        }
+    }
+
     pub(crate) fn metadata_url(&self) -> String {
         self.metadata_url_for(&repository_base_url())
     }
@@ -132,6 +148,103 @@ impl Display for MavenCoordinate {
                 write!(formatter, "{}:{}:{}", self.group, self.artifact, version)
             }
             (None, _) => write!(formatter, "{}:{}", self.group, self.artifact),
+        }
+    }
+}
+
+// ── Resolved coordinate (version always present) ─────────────────────────────
+
+/// A Maven coordinate with a guaranteed version. Created by resolving a
+/// [`MavenCoordinate`] or via [`MavenCoordinate::into_resolved`].
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ResolvedCoordinate {
+    pub group: String,
+    pub artifact: String,
+    pub version: String,
+    pub classifier: Option<String>,
+}
+
+impl ResolvedCoordinate {
+    /// Borrow as a [`MavenCoordinate`] (with `Some(version)`).
+    pub fn as_coordinate(&self) -> MavenCoordinate {
+        MavenCoordinate {
+            group: self.group.clone(),
+            artifact: self.artifact.clone(),
+            version: Some(self.version.clone()),
+            classifier: self.classifier.clone(),
+        }
+    }
+
+    pub fn pom_url(&self) -> String {
+        self.pom_url_for(&repository_base_url())
+    }
+
+    pub fn pom_url_for(&self, repository_base: &str) -> String {
+        let group_path = self.group.replace('.', "/");
+        format!(
+            "{}/{}/{}/{}/{}-{}.pom",
+            repository_base.trim_end_matches('/'),
+            group_path,
+            self.artifact,
+            self.version,
+            self.artifact,
+            self.version
+        )
+    }
+
+    pub fn jar_url(&self) -> String {
+        self.jar_url_for(&repository_base_url())
+    }
+
+    pub fn jar_url_for(&self, repository_base: &str) -> String {
+        let group_path = self.group.replace('.', "/");
+        let classifier_suffix = self
+            .classifier
+            .as_deref()
+            .map(|value| format!("-{value}"))
+            .unwrap_or_default();
+
+        format!(
+            "{}/{}/{}/{}/{}-{}{}.jar",
+            repository_base.trim_end_matches('/'),
+            group_path,
+            self.artifact,
+            self.version,
+            self.artifact,
+            self.version,
+            classifier_suffix,
+        )
+    }
+
+    pub fn jar_sha256_url(&self) -> String {
+        format!("{}.sha256", self.jar_url())
+    }
+}
+
+impl From<ResolvedCoordinate> for MavenCoordinate {
+    fn from(resolved: ResolvedCoordinate) -> Self {
+        Self {
+            group: resolved.group,
+            artifact: resolved.artifact,
+            version: Some(resolved.version),
+            classifier: resolved.classifier,
+        }
+    }
+}
+
+impl Display for ResolvedCoordinate {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        match &self.classifier {
+            Some(classifier) => write!(
+                formatter,
+                "{}:{}:{}:{}",
+                self.group, self.artifact, self.version, classifier
+            ),
+            None => write!(
+                formatter,
+                "{}:{}:{}",
+                self.group, self.artifact, self.version
+            ),
         }
     }
 }

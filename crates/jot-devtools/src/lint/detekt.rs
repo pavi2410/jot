@@ -16,9 +16,8 @@ pub(crate) struct Detekt {
 
 impl Detekt {
     pub fn new(resolver: &jot_resolver::MavenResolver) -> Result<Self, DevToolsError> {
-        let coordinate = jot_resolver::MavenCoordinate::parse(DETEKT_CLI_COORD)?;
-        let resolved = resolver.resolve_coordinate(&coordinate.to_string())?;
-        let jar = resolver.cache_artifact(&resolved)?;
+        let resolved = resolver.resolve_coordinate(DETEKT_CLI_COORD)?;
+        let jar = resolver.cache_artifact(&resolved.as_coordinate())?;
         Ok(Self { jar })
     }
 }

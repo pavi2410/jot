@@ -4,7 +4,7 @@ mod models;
 mod resolver;
 mod versions;
 
-pub use coordinate::MavenCoordinate;
+pub use coordinate::{MavenCoordinate, ResolvedCoordinate};
 pub use errors::ResolverError;
 pub use models::{
     MavenDependencies, MavenDependency, MavenDeveloper, MavenDevelopers, MavenExclusion,
@@ -17,7 +17,7 @@ pub use resolver::{
 
 #[cfg(test)]
 mod tests {
-    use crate::coordinate::MavenCoordinate;
+    use crate::coordinate::{MavenCoordinate, ResolvedCoordinate};
     use crate::models::{
         MavenDependencies, MavenDependency, MavenDependencyManagement, MavenDistributionManagement,
         MavenExclusion, MavenExclusions, MavenParent, MavenProject, MavenRelocation, MavenScope,
@@ -250,10 +250,10 @@ mod tests {
     fn lockfile_packages_are_deterministic_and_deduplicated() {
         let lockfile = Lockfile {
             version: 1,
-            roots: vec![MavenCoordinate {
+            roots: vec![ResolvedCoordinate {
                 group: "org.example".into(),
                 artifact: "demo".into(),
-                version: Some("1.0.0".into()),
+                version: "1.0.0".into(),
                 classifier: None,
             }],
             package: vec![

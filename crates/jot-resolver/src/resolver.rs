@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::coordinate::MavenCoordinate;
+use crate::coordinate::{MavenCoordinate, ResolvedCoordinate};
 use crate::errors::ResolverError;
 use crate::models::{MavenDependency, MavenMetadata, MavenParent, MavenProject, MavenScope};
 use crate::versions::{
@@ -44,7 +44,7 @@ pub struct TreeEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Lockfile {
     pub version: u32,
-    pub roots: Vec<MavenCoordinate>,
+    pub roots: Vec<ResolvedCoordinate>,
     pub package: Vec<LockedPackage>,
 }
 
@@ -153,7 +153,7 @@ impl MavenResolver {
         })
     }
 
-    pub fn resolve_coordinate(&self, input: &str) -> Result<MavenCoordinate, ResolverError> {
+    pub fn resolve_coordinate(&self, input: &str) -> Result<ResolvedCoordinate, ResolverError> {
         let coordinate = MavenCoordinate::parse(input)?;
         if let Some(version) = coordinate.version.as_deref() {
             if is_property_version_expression(version) {
@@ -164,10 +164,10 @@ impl MavenResolver {
 
             if needs_dynamic_version_resolution(version) {
                 let resolved = self.resolve_version_spec(&coordinate, version)?;
-                return Ok(coordinate.with_version(resolved));
+                return coordinate.with_version(resolved).into_resolved();
             }
 
-            return Ok(coordinate);
+            return coordinate.into_resolved();
         }
 
         let metadata = self.fetch_metadata(&coordinate)?;
@@ -176,15 +176,16 @@ impl MavenResolver {
             .as_ref()
             .and_then(resolve_best_version)
             .ok_or_else(|| ResolverError::MissingVersionMetadata(coordinate.to_string()))?;
-        Ok(coordinate.with_version(version))
+        coordinate.with_version(version).into_resolved()
     }
 
     pub fn resolve_direct_dependencies(
         &self,
         input: &str,
-    ) -> Result<(MavenCoordinate, Vec<ResolvedDependency>), ResolverError> {
+    ) -> Result<(ResolvedCoordinate, Vec<ResolvedDependency>), ResolverError> {
         let coordinate = self.resolve_coordinate(input)?;
-        let dependencies = self.fetch_direct_dependencies(&coordinate)?;
+        let unresolved: MavenCoordinate = coordinate.clone().into();
+        let dependencies = self.fetch_direct_dependencies(&unresolved)?;
 
         Ok((coordinate, dependencies))
     }
@@ -195,9 +196,10 @@ impl MavenResolver {
         max_depth: usize,
     ) -> Result<Vec<TreeEntry>, ResolverError> {
         let root = self.resolve_coordinate(input)?;
+        let root_coord: MavenCoordinate = root.clone().into();
         let mut entries = vec![TreeEntry {
             depth: 0,
-            coordinate: root.clone(),
+            coordinate: root_coord.clone(),
             scope: None,
             optional: false,
             note: None,
@@ -206,7 +208,7 @@ impl MavenResolver {
         seen.insert(root.to_string());
         let inherited_exclusions = BTreeSet::new();
         self.walk_dependencies(
-            &root,
+            &root_coord,
             1,
             max_depth,
             &inherited_exclusions,
@@ -227,7 +229,8 @@ impl MavenResolver {
         for input in inputs {
             let root = self.resolve_coordinate(input)?;
             roots.push(root.clone());
-            packages.insert(root.clone());
+            let root_coord: MavenCoordinate = root.into();
+            packages.insert(root_coord);
 
             let tree = self.resolve_dependency_tree(input, max_depth)?;
             for entry in tree.into_iter().skip(1) {
@@ -247,13 +250,15 @@ impl MavenResolver {
             roots,
             package: packages
                 .into_iter()
-                .map(|coordinate| {
-                    let sha256 = self.cache_artifact_and_hash(&coordinate)?;
+                .filter_map(|coordinate| coordinate.into_resolved().ok())
+                .map(|resolved| {
+                    let coord: MavenCoordinate = resolved.clone().into();
+                    let sha256 = self.cache_artifact_and_hash(&coord)?;
                     Ok(LockedPackage {
-                        group: coordinate.group,
-                        artifact: coordinate.artifact,
-                        version: coordinate.version.expect("locked package version"),
-                        classifier: coordinate.classifier,
+                        group: resolved.group,
+                        artifact: resolved.artifact,
+                        version: resolved.version,
+                        classifier: resolved.classifier,
                         sha256,
                     })
                 })
@@ -270,7 +275,7 @@ impl MavenResolver {
 
         for input in inputs {
             let root = self.resolve_coordinate(input)?;
-            packages.insert(root);
+            packages.insert(MavenCoordinate::from(root));
 
             for entry in self
                 .resolve_dependency_tree(input, max_depth)?

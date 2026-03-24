@@ -400,8 +400,12 @@ fn resolve_locked_version(lockfile: &Lockfile, coordinate: &str) -> Option<Strin
     lockfile
         .roots
         .iter()
-        .find(|root| same_package(root, &parsed))
-        .and_then(|root| root.version.clone())
+        .find(|root| {
+            root.group == parsed.group
+                && root.artifact == parsed.artifact
+                && root.classifier == parsed.classifier
+        })
+        .map(|root| root.version.clone())
         .or_else(|| {
             lockfile
                 .package
@@ -413,12 +417,6 @@ fn resolve_locked_version(lockfile: &Lockfile, coordinate: &str) -> Option<Strin
                 })
                 .map(|package| package.version.clone())
         })
-}
-
-fn same_package(left: &MavenCoordinate, right: &MavenCoordinate) -> bool {
-    left.group == right.group
-        && left.artifact == right.artifact
-        && left.classifier == right.classifier
 }
 
 fn print_deps_table(rows: &[(DirectDependencyRow, String)], include_module_column: bool) {
