@@ -26,6 +26,7 @@ A veteran Java dev has battle scars from Maven/Gradle and knows the ecosystem de
 ### Nice-to-haves
 
 - `jot doctor` — Diagnose environment issues (JDK mismatch, corrupt cache, stale locks).
+- `jot man` — Man-page-style quick reference for Java APIs and jot concepts, without leaving the terminal.
 - `jot benchmark` / JMH integration.
 - Native image support (GraalVM).
 - Build scan / build timeline visualization for performance debugging.
@@ -47,15 +48,11 @@ A beginner just wants to write Java and see it run. They don't know (or care) wh
 
 - **Zero-config start** — `jot init` then `jot run` should Just Work with no JDK pre-installed.
 - **Helpful error messages** — "Cannot find symbol `Scanner`" should suggest `import java.util.Scanner;`. Compiler errors should have human-friendly explanations, not just raw `javac` output.
-- **`jot add` with fuzzy search** — Beginners don't know Maven coordinates. `jot add gson` should find `com.google.code.gson:gson` automatically. Interactive search would be ideal.
+- **`jot search`** — Beginners don't know Maven coordinates. `jot search gson` should find `com.google.code.gson:gson`. `jot search --tag web-framework` could show curated popular options with brief descriptions. Then `jot add` takes the coordinate.
+- **`jot man`** — Built-in man-page-style reference. `jot man HashMap` explains the class. `jot man streams` gives a quick tutorial. Like `go doc` or `rustup doc` but for Java — meeting developers where they are instead of sending them to Oracle's website.
 - **Built-in REPL or scratch mode** — `jot repl` or `jot run MyFile.java` (single-file execution without a full project). JEP 330+ style.
 - **Simple, well-documented templates** — `jot init` templates should have comments explaining the project structure. A `--guided` mode that asks questions interactively.
 - **Watch mode** — `jot run --watch` to auto-recompile on save. Instant feedback loop is critical for learning.
-
-### Nice-to-haves
-
-- `jot doc <topic>` — Quick reference for common Java concepts, or link to relevant docs.
-- **Curated dependency catalog** — `jot add --search web-framework` showing popular options with brief descriptions.
 - **Guided error recovery** — When a build fails, suggest specific fixes, not just dump a stack trace.
 - **Example projects** — `jot init --template rest-api` with a working example to modify.
 - **`jot test` with clear output** — Green/red test results with actual vs expected values prominently displayed.
@@ -89,7 +86,6 @@ Building command-line applications, data pipelines, batch processors, and dev to
 ### Nice-to-haves
 
 - `jot init --template cli` with picocli pre-configured and a sample command.
-- `jot run --args "-- --help"` passthrough for CLI args without ambiguity.
 - Cross-compilation of native images for different OS/arch targets.
 - Man page generation from code annotations.
 
@@ -175,6 +171,7 @@ Building reusable libraries published to Maven Central or private repositories.
 
 - **Publishing to Maven Central** — Full Sonatype OSSRH workflow: staging, closing, releasing. GPG signing, POM generation with correct metadata. jot already has `jot publish` — this needs to be battle-tested.
 - **Sources JAR + Javadoc JAR** — Required by Maven Central and expected by consumers. jot already generates these.
+- **`jot docs`** — Generate API documentation for the project. Uses javadoc for Java sources, Dokka for Kotlin — the developer doesn't need to care which. Docs are criminally underused in the JVM ecosystem because the tooling makes it painful. jot should make it effortless — generate on build, serve locally with `jot docs --serve`, and bundle into the docs JAR for publishing. Making docs a first-class citizen is how jot fixes what Maven/Gradle never prioritized.
 - **POM customization** — License, SCM URL, developer info, description — all required by Maven Central validation.
 - **API compatibility checking** — Detect breaking changes between versions. Something like `japicmp` or `revapi` integration.
 - **Multi-target compilation** — Build the same library against Java 8, 11, 17, 21 to verify compatibility. Multi-release JAR support.
@@ -200,29 +197,37 @@ Building reusable libraries published to Maven Central or private repositories.
 
 ---
 
-## Android Developer
+## Kotlin Developer
 
-Building Android applications (though Android uses its own build system, crossover exists).
+Building applications and libraries in Kotlin targeting the JVM.
 
-**Examples:** Shared Java/Kotlin modules used in both Android and server-side, annotation processors consumed by Android builds.
+**Examples:** Ktor servers, KotlinX libraries, Spring Boot with Kotlin, Compose Multiplatform desktop apps, Kotlin-first backend services.
+
+Kotlin is the second most popular JVM language and growing fast outside of Android. Many Kotlin developers actively avoid Java tooling friction — jot needs to feel Kotlin-native, not like a Java tool that also happens to compile `.kt` files.
 
 ### Must-haves
 
-- **Shared module compilation** — Build a pure Java/Kotlin module (no Android dependencies) that can be consumed by both an Android project (via Gradle) and a server project (via jot).
-- **Java 8/11 bytecode targeting** — Android's desugaring has limits. Shared modules must target compatible bytecode versions.
-- **Kotlin support** — Android development is Kotlin-first. jot's Kotlin compilation must produce artifacts compatible with Android's Kotlin version expectations.
-- **AAR is out of scope (and that's fine)** — jot should not try to replace AGP (Android Gradle Plugin). But it should clearly document the boundary.
+- **First-class Kotlin compilation** — jot already supports Kotlin, but it must feel seamless: auto-detect `.kt` files, handle mixed Java/Kotlin source sets with correct compilation order (Kotlin before Java for interop), and manage the Kotlin stdlib dependency automatically.
+- **Kotlin compiler plugin support** — kotlinx.serialization, Compose compiler, All-open, No-arg, SAM-with-receiver — these are Kotlin compiler plugins, not annotation processors. They require passing `-Xplugin` to `kotlinc`. This is a different mechanism than Java's annotation processing and must be supported separately.
+- **Coroutine-aware testing** — `kotlinx-coroutines-test` and `kotest` are common test frameworks alongside JUnit. jot should support them without extra config.
+- **KDoc / Dokka support** — Kotlin uses KDoc (not Javadoc) for documentation, generated by Dokka. `jot docs` should detect Kotlin sources and use Dokka automatically.
+- **Kotlin version management** — jot already manages Kotlin toolchains. Pinning Kotlin versions in `jot.toml` and ensuring compiler/stdlib version alignment is critical.
+- **JVM-only scope** — jot targets JVM, not Kotlin Multiplatform. KMP (JS, Native, WASM targets) is Jetbrains' territory with Amper. jot should be the best tool for Kotlin-on-JVM, not try to compete with Jetbrains' own tooling for non-JVM targets.
 
 ### Nice-to-haves
 
-- Java release target in `jot.toml` (e.g., `java-release = 8`) for Android-compatible bytecode.
-- Documentation on how to consume jot-built JARs from a Gradle Android project.
-- KMP (Kotlin Multiplatform) module support for shared business logic.
+- `jot init --template ktor` with a working Ktor server starter.
+- `jot init --template kotlin-lib` for a pure Kotlin library with KDoc pre-configured.
+- Kotlin script support (`.kts` files) — `jot run script.kts` similar to single-file Java execution.
+- `jot lint` with detekt pre-configured for Kotlin (jot already has some detekt support).
+- IDE integration that generates `.idea` configs with correct Kotlin SDK settings.
 
 ### Likely concerns
 
-- "Can I use this for my shared `core` module that both my Spring backend and Android app depend on?"
-- "Will the JAR actually work on Android, or will it pull in JDK APIs that aren't available?"
+- "Is Kotlin a first-class citizen or an afterthought?" — If Kotlin compilation is slower, buggier, or less documented than Java, Kotlin devs won't adopt.
+- "Do Kotlin compiler plugins work?" — kotlinx.serialization is nearly universal in modern Kotlin. If it doesn't work, jot is a non-starter.
+- "Can I mix Java and Kotlin in the same module?" — This is extremely common. Compilation order and interop must be correct.
+- "Does Compose for Desktop work?" — Compose requires a specific compiler plugin and Kotlin version alignment. This is a growing use case (and JVM-only, so in scope).
 
 ---
 
@@ -310,7 +315,7 @@ This is one of the largest and most active Java communities. Many modders are yo
 | Web / Backend Dev | Framework integration (Spring, Quarkus) | Hot reload dev server, BOM support | No framework support |
 | Desktop / GUI Dev | JPMS + JavaFX module handling | `jpackage` bundling | No JPMS, no jpackage |
 | Library Dev | Maven Central publishing workflow | API compat checking, BOM publishing | `jot publish` exists (needs hardening) |
-| Android Dev | Bytecode target control | Shared module JAR compatible with AGP | Basic build only |
+| Kotlin Dev | Kotlin compiler plugins | KDoc/Dokka support | Basic Kotlin compilation works |
 | Data / ML Engineer | Fat JAR with shading/relocation | `provided` scope, Scala variant handling | No shading support |
 | Minecraft Modder | Obfuscation remapping, Mixin support | Custom repos, JAR-in-JAR, plugin API | No custom repos, no plugin API |
 
@@ -321,8 +326,12 @@ Features that appear across multiple personas, ranked by breadth of impact:
 | Feature | Personas That Need It | Priority |
 |---------|----------------------|----------|
 | **Fat JAR / uber-JAR** | CLI, Web, Data | Critical |
-| **Annotation processor support** | Seasoned, CLI, Web, Library, Minecraft | Critical |
+| **Annotation processor support** | Seasoned, CLI, Web, Library, Minecraft, Kotlin | Critical |
+| **Compiler plugin support (Kotlin)** | Kotlin | Critical |
 | **Custom Maven repositories** | Minecraft, Seasoned, Library | Critical |
+| **`jot search`** | Beginner, Minecraft, all personas | High |
+| **`jot man` (man-page reference)** | Beginner, Seasoned | High |
+| **`jot docs` (API doc generation)** | Library, Kotlin, Seasoned | High |
 | **GraalVM native-image** | CLI, Web | High |
 | **JPMS (module system)** | Desktop, Library | High |
 | **`jlink` custom runtimes** | Desktop, CLI | High |
@@ -343,4 +352,5 @@ Features that appear across multiple personas, ranked by breadth of impact:
 - **Biggest unlock for CLI devs:** Native image and `jlink` for distribution without requiring a JDK.
 - **Biggest unlock for library authors:** Hardened Maven Central publishing and API compatibility checks.
 - **Biggest unlock for Minecraft modders:** Custom repo support + annotation processors. A plugin API would be needed long-term for full Fabric/Forge integration, but even basic support would win hearts in a community deeply frustrated by Gradle.
-- **Universal priority:** Annotation processors and custom Maven repositories cut across nearly every persona.
+- **Biggest ecosystem fix:** `jot docs` for API documentation generation. Nobody writes docs because the tooling is painful — making it effortless and language-agnostic (javadoc for Java, Dokka for Kotlin) is how jot changes the culture.
+- **Universal priority:** Annotation processors and custom Maven repositories cut across nearly every persona. `jot search` benefits everyone.
