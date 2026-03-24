@@ -455,6 +455,46 @@ mod tests {
         assert_eq!(caret_span("none"), None);
     }
 
+    // ── package.rs helper tests ────────────────────────────────────────────
+
+    #[test]
+    fn is_safe_zip_path_rejects_traversal() {
+        use super::package::{is_safe_zip_path, should_skip_jar_entry};
+        assert!(is_safe_zip_path("org/example/Demo.class"));
+        assert!(!is_safe_zip_path("/etc/passwd"));
+        assert!(!is_safe_zip_path("foo/../bar"));
+        assert!(is_safe_zip_path("META-INF/MANIFEST.MF"));
+
+        assert!(should_skip_jar_entry("META-INF/MANIFEST.MF"));
+        assert!(should_skip_jar_entry("META-INF/DEMO.SF"));
+        assert!(should_skip_jar_entry("META-INF/DEMO.RSA"));
+        assert!(should_skip_jar_entry("META-INF/DEMO.DSA"));
+        assert!(!should_skip_jar_entry("META-INF/services/demo.Service"));
+        assert!(!should_skip_jar_entry("org/example/Demo.class"));
+    }
+
+    #[test]
+    fn is_service_file_matches_meta_inf_services() {
+        use super::package::is_service_file;
+        assert!(is_service_file("META-INF/services/demo.Service"));
+        assert!(!is_service_file("META-INF/MANIFEST.MF"));
+        assert!(!is_service_file("org/example/Demo.class"));
+    }
+
+    #[test]
+    fn merge_service_contents_skips_comments_and_blanks() {
+        let mut services = BTreeMap::new();
+        merge_service_contents(
+            &mut services,
+            "META-INF/services/demo.Service",
+            b"# comment\n\na.Provider\n  \nb.Provider\n",
+        );
+        assert_eq!(
+            services.get("META-INF/services/demo.Service").cloned(),
+            Some(vec!["a.Provider".to_owned(), "b.Provider".to_owned()])
+        );
+    }
+
     #[test]
     fn merges_service_lines_without_duplicates() {
         let mut services = BTreeMap::new();

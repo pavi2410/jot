@@ -780,4 +780,173 @@ mod tests {
         );
         assert_eq!(dependencies.members.len(), 2);
     }
+
+    // ── discovery.rs tests ──────────────────────────────────────────────
+
+    #[test]
+    fn find_jot_toml_returns_none_for_empty_tree() {
+        let temp = tempdir().expect("tempdir");
+        let result = find_jot_toml(temp.path()).expect("find_jot_toml");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn find_workspace_jot_toml_returns_topmost() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().join("root");
+        let sub = root.join("sub");
+        fs::create_dir_all(&sub).expect("create dirs");
+        fs::write(
+            root.join("jot.toml"),
+            "[project]\nname = \"root\"\nversion = \"1.0.0\"\n",
+        )
+        .expect("write root config");
+        fs::write(
+            sub.join("jot.toml"),
+            "[project]\nname = \"sub\"\nversion = \"1.0.0\"\n",
+        )
+        .expect("write sub config");
+
+        let result = find_workspace_jot_toml(&sub).expect("find_workspace_jot_toml");
+        assert_eq!(result.unwrap(), root.join("jot.toml"));
+    }
+
+    #[test]
+    fn find_workspace_root_jot_toml_requires_workspace_section() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().join("root");
+        let sub = root.join("sub");
+        fs::create_dir_all(&sub).expect("create dirs");
+
+        // root has no [workspace] section
+        fs::write(
+            root.join("jot.toml"),
+            "[project]\nname = \"root\"\nversion = \"1.0.0\"\n",
+        )
+        .expect("write root config");
+        fs::write(
+            sub.join("jot.toml"),
+            "[project]\nname = \"sub\"\nversion = \"1.0.0\"\n",
+        )
+        .expect("write sub config");
+
+        let result = find_workspace_root_jot_toml(&sub).expect("find_workspace_root_jot_toml");
+        assert!(
+            result.is_none(),
+            "should not find workspace without [workspace] section"
+        );
+
+        // Now add [workspace] to root
+        fs::write(
+            root.join("jot.toml"),
+            "[workspace]\nmembers = [\"sub\"]\n\n[toolchains]\njava = \"21\"\n",
+        )
+        .expect("write workspace config");
+
+        let result = find_workspace_root_jot_toml(&sub).expect("find_workspace_root_jot_toml");
+        assert_eq!(result.unwrap(), root.join("jot.toml"));
+    }
+
+    // ── dependencies.rs tests ───────────────────────────────────────────
+
+    #[test]
+    fn dependency_scope_display() {
+        use super::dependencies::DependencyScope;
+        assert_eq!(DependencyScope::Main.to_string(), "main");
+        assert_eq!(DependencyScope::Test.to_string(), "test");
+    }
+
+    #[test]
+    fn dependency_scope_ordering() {
+        use super::dependencies::DependencyScope;
+        assert!(DependencyScope::Main < DependencyScope::Test);
+    }
+
+    #[test]
+    fn read_declared_dependency_entries_returns_scoped_entries() {
+        use super::{DependencyScope, read_declared_dependency_entries};
+
+        let temp = tempdir().expect("tempdir");
+        let project = temp.path().join("project");
+        fs::create_dir_all(&project).expect("create project");
+        fs::write(
+            project.join("jot.toml"),
+            r#"
+[project]
+name = "demo"
+version = "1.0.0"
+
+[dependencies]
+guava = "com.google.guava:guava:33.0.0-jre"
+
+[test-dependencies]
+junit = "org.junit.jupiter:junit-jupiter:5.11.0"
+"#,
+        )
+        .expect("write config");
+
+        let entries = read_declared_dependency_entries(&project).expect("read entries");
+        assert_eq!(entries.len(), 2);
+
+        let main_entry = entries.iter().find(|e| e.name == "guava").expect("guava");
+        assert_eq!(main_entry.scope, DependencyScope::Main);
+
+        let test_entry = entries.iter().find(|e| e.name == "junit").expect("junit");
+        assert_eq!(test_entry.scope, DependencyScope::Test);
+    }
+
+    #[test]
+    fn cycle_detection_catches_circular_path_dependencies() {
+        use super::dependencies::detect_workspace_path_cycles;
+        use super::models::{
+            FormatConfig, LintConfig, ProjectBuildConfig, WorkspaceMemberBuildConfig,
+        };
+        use std::collections::BTreeMap;
+        use std::path::PathBuf;
+
+        let make_member = |name: &str, root: &str, deps: Vec<PathBuf>| WorkspaceMemberBuildConfig {
+            module_name: name.to_owned(),
+            project: ProjectBuildConfig {
+                config_path: PathBuf::from(root).join("jot.toml"),
+                project_root: PathBuf::from(root),
+                name: name.to_owned(),
+                version: "1.0.0".to_owned(),
+                group: None,
+                module_name: None,
+                main_class: None,
+                source_dirs: Vec::new(),
+                test_source_dirs: Vec::new(),
+                resource_dir: PathBuf::from(root).join("src/main/resources"),
+                dependencies: Vec::new(),
+                path_dependencies: deps,
+                test_dependencies: Vec::new(),
+                processors: Vec::new(),
+                processor_options: BTreeMap::new(),
+                toolchain: None,
+                kotlin_toolchain: None,
+                publish: None,
+                format: FormatConfig::default(),
+                lint: LintConfig::default(),
+            },
+        };
+
+        let member_a = make_member("a", "/workspace/a", vec![PathBuf::from("/workspace/b")]);
+        let member_b = make_member("b", "/workspace/b", vec![PathBuf::from("/workspace/a")]);
+
+        let result = detect_workspace_path_cycles(&[member_a, member_b]);
+        assert!(result.is_err(), "should detect a -> b -> a cycle");
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("a") && error.contains("b"),
+            "error should mention both modules: {error}"
+        );
+    }
+
+    #[test]
+    fn module_name_from_member_extracts_last_segment() {
+        use super::dependencies::module_name_from_member;
+        assert_eq!(module_name_from_member("modules/api").unwrap(), "api");
+        assert_eq!(module_name_from_member("core").unwrap(), "core");
+        assert!(module_name_from_member("").is_err());
+    }
 }

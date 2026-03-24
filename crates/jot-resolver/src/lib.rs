@@ -394,6 +394,152 @@ mod tests {
         );
     }
 
+    // ── coordinate.rs tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn parse_rejects_single_component() {
+        assert!(MavenCoordinate::parse("just-one").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_five_components() {
+        assert!(MavenCoordinate::parse("a:b:c:d:e").is_err());
+    }
+
+    #[test]
+    fn display_omits_version_when_absent() {
+        let coord = MavenCoordinate::parse("org.example:demo").unwrap();
+        assert_eq!(coord.to_string(), "org.example:demo");
+    }
+
+    #[test]
+    fn display_includes_classifier_when_present() {
+        let coord = MavenCoordinate::parse("org.example:demo:1.0:sources").unwrap();
+        assert_eq!(coord.to_string(), "org.example:demo:1.0:sources");
+    }
+
+    #[test]
+    fn with_version_preserves_classifier() {
+        let coord = MavenCoordinate {
+            group: "org.example".into(),
+            artifact: "demo".into(),
+            version: None,
+            classifier: Some("tests".into()),
+        };
+        let versioned = coord.with_version("2.0".into());
+        assert_eq!(versioned.version.as_deref(), Some("2.0"));
+        assert_eq!(versioned.classifier.as_deref(), Some("tests"));
+    }
+
+    #[test]
+    fn into_resolved_succeeds_with_version() {
+        let coord = MavenCoordinate::parse("org.example:demo:1.0").unwrap();
+        let resolved = coord.into_resolved().unwrap();
+        assert_eq!(resolved.group, "org.example");
+        assert_eq!(resolved.artifact, "demo");
+        assert_eq!(resolved.version, "1.0");
+        assert_eq!(resolved.classifier, None);
+    }
+
+    #[test]
+    fn into_resolved_fails_without_version() {
+        let coord = MavenCoordinate::parse("org.example:demo").unwrap();
+        assert!(coord.into_resolved().is_err());
+    }
+
+    #[test]
+    fn resolved_coordinate_display_and_conversions() {
+        let resolved = ResolvedCoordinate {
+            group: "org.example".into(),
+            artifact: "demo".into(),
+            version: "1.0".into(),
+            classifier: Some("sources".into()),
+        };
+        assert_eq!(resolved.to_string(), "org.example:demo:1.0:sources");
+
+        let back: MavenCoordinate = resolved.clone().into();
+        assert_eq!(back.version.as_deref(), Some("1.0"));
+        assert_eq!(back.classifier.as_deref(), Some("sources"));
+
+        let also_back = resolved.as_coordinate();
+        assert_eq!(also_back, back);
+    }
+
+    #[test]
+    fn resolved_coordinate_url_construction() {
+        let resolved = ResolvedCoordinate {
+            group: "org.example".into(),
+            artifact: "demo".into(),
+            version: "1.0".into(),
+            classifier: None,
+        };
+        let base = "https://repo.example.com/maven2";
+        assert_eq!(
+            resolved.pom_url_for(base),
+            "https://repo.example.com/maven2/org/example/demo/1.0/demo-1.0.pom"
+        );
+        assert_eq!(
+            resolved.jar_url_for(base),
+            "https://repo.example.com/maven2/org/example/demo/1.0/demo-1.0.jar"
+        );
+    }
+
+    #[test]
+    fn resolved_coordinate_jar_url_includes_classifier() {
+        let resolved = ResolvedCoordinate {
+            group: "org.example".into(),
+            artifact: "demo".into(),
+            version: "1.0".into(),
+            classifier: Some("sources".into()),
+        };
+        let base = "https://repo.example.com/maven2";
+        assert_eq!(
+            resolved.jar_url_for(base),
+            "https://repo.example.com/maven2/org/example/demo/1.0/demo-1.0-sources.jar"
+        );
+    }
+
+    #[test]
+    fn maven_coordinate_metadata_url_uses_group_path() {
+        let coord = MavenCoordinate::parse("org.example:demo:1.0").unwrap();
+        let url = coord.metadata_url_for("https://repo.example.com/maven2");
+        assert_eq!(
+            url,
+            "https://repo.example.com/maven2/org/example/demo/maven-metadata.xml"
+        );
+    }
+
+    #[test]
+    fn maven_coordinate_pom_url_fails_without_version() {
+        let coord = MavenCoordinate::parse("org.example:demo").unwrap();
+        assert!(coord.pom_url_for("https://repo.example.com").is_err());
+    }
+
+    #[test]
+    fn maven_coordinate_jar_url_includes_classifier() {
+        let coord = MavenCoordinate::parse("org.example:demo:1.0:sources").unwrap();
+        let url = coord
+            .jar_url_for("https://repo.example.com/maven2")
+            .unwrap();
+        assert_eq!(
+            url,
+            "https://repo.example.com/maven2/org/example/demo/1.0/demo-1.0-sources.jar"
+        );
+    }
+
+    #[test]
+    fn url_construction_trims_trailing_slash() {
+        let resolved = ResolvedCoordinate {
+            group: "org.example".into(),
+            artifact: "demo".into(),
+            version: "1.0".into(),
+            classifier: None,
+        };
+        let url = resolved.pom_url_for("https://repo.example.com/maven2/");
+        assert!(url.starts_with("https://repo.example.com/maven2/org/"));
+        assert!(!url.contains("maven2//"));
+    }
+
     #[test]
     fn relocation_target_uses_relocation_fields_with_coordinate_fallbacks() {
         let project = MavenProject {

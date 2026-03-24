@@ -244,4 +244,66 @@ mod tests {
         assert!(DEFAULT_PMD_RULESET.contains("category/java/bestpractices.xml"));
         assert!(DEFAULT_PMD_RULESET.contains("category/java/errorprone.xml"));
     }
+
+    // ── CheckstyleSeverity tests ─────────────────────────────────────────
+
+    #[test]
+    fn checkstyle_severity_deserializes_from_xml() {
+        use super::models::{CheckstyleError, CheckstyleSeverity};
+        use quick_xml::de::from_str;
+
+        let xml = r#"<error line="10" column="5" severity="error" message="Unused import" source="detekt.UnusedImport" />"#;
+        let error: CheckstyleError = from_str(xml).expect("parse checkstyle error");
+        assert_eq!(error.severity, CheckstyleSeverity::Error);
+        assert_eq!(error.severity.priority(), 1);
+
+        let xml = r#"<error line="10" column="5" severity="warning" message="Magic number" source="detekt.MagicNumber" />"#;
+        let error: CheckstyleError = from_str(xml).expect("parse checkstyle warning");
+        assert_eq!(error.severity, CheckstyleSeverity::Warning);
+        assert_eq!(error.severity.priority(), 2);
+
+        let xml =
+            r#"<error line="10" column="5" severity="info" message="Note" source="detekt.Note" />"#;
+        let error: CheckstyleError = from_str(xml).expect("parse checkstyle info");
+        assert_eq!(error.severity, CheckstyleSeverity::Info);
+        assert_eq!(error.severity.priority(), 3);
+    }
+
+    // ── CvssKind tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn cvss_kind_deserializes_from_json() {
+        use super::models::OsvSeverity;
+
+        let json = r#"{"type": "CVSS_V3", "score": "7.5"}"#;
+        let severity: OsvSeverity = serde_json::from_str(json).expect("parse severity");
+        assert_eq!(severity.kind, Some(CvssKind::CvssV3));
+
+        let json = r#"{"type": "CVSS_V2", "score": "5.0"}"#;
+        let severity: OsvSeverity = serde_json::from_str(json).expect("parse severity v2");
+        assert_eq!(severity.kind, Some(CvssKind::CvssV2));
+
+        let json = r#"{"score": "HIGH"}"#;
+        let severity: OsvSeverity = serde_json::from_str(json).expect("parse severity no kind");
+        assert_eq!(severity.kind, None);
+    }
+
+    #[test]
+    fn cvss_v3_score_with_typed_kind() {
+        let score = parse_cvss_score(
+            "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+            Some(CvssKind::CvssV3),
+        )
+        .expect("should parse CVSS v3 vector");
+        assert!(score > 7.0 && score < 8.0);
+    }
+
+    #[test]
+    fn cvss_numeric_score_works_with_any_kind() {
+        let score = parse_cvss_score("9.8", None).expect("numeric score");
+        assert!((score - 9.8).abs() < f64::EPSILON);
+
+        let score = parse_cvss_score("9.8", Some(CvssKind::CvssV2)).expect("numeric with v2");
+        assert!((score - 9.8).abs() < f64::EPSILON);
+    }
 }

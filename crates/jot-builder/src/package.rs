@@ -205,11 +205,11 @@ pub(crate) fn merge_service_contents(
     }
 }
 
-fn is_service_file(path: &str) -> bool {
+pub(crate) fn is_service_file(path: &str) -> bool {
     path.starts_with("META-INF/services/")
 }
 
-fn should_skip_jar_entry(path: &str) -> bool {
+pub(crate) fn should_skip_jar_entry(path: &str) -> bool {
     if path.eq_ignore_ascii_case("META-INF/MANIFEST.MF") {
         return true;
     }
@@ -221,7 +221,7 @@ fn should_skip_jar_entry(path: &str) -> bool {
     path.ends_with(".SF") || path.ends_with(".RSA") || path.ends_with(".DSA")
 }
 
-fn is_safe_zip_path(path: &str) -> bool {
+pub(crate) fn is_safe_zip_path(path: &str) -> bool {
     !path.starts_with('/') && !path.split('/').any(|segment| segment == "..")
 }
 
