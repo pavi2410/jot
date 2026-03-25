@@ -124,6 +124,7 @@ developer = { name = "Your Name", email = "you@example.com" }
 | `jot fmt [--check] [--module <name>]` | Auto-format Java sources (Google Java Format) |
 | `jot lint [--module <name>]` | Run PMD static analysis |
 | `jot audit [--fix] [--ci]` | Scan locked packages for CVEs via OSV.dev; `--fix` updates declarations; `--ci` exits non-zero on findings |
+| `jot doc [--open] [--module <name>]` | Generate API docs via Dokka (supports Java + Kotlin); `--open` launches `target/docs/index.html` in the browser |
 
 ### Toolchain management
 

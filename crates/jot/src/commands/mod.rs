@@ -89,6 +89,7 @@ pub(crate) fn run() -> anyhow::Result<()> {
         Command::Resolve { dependency, deps } => deps::handle_resolve(&dependency, deps)?,
         Command::Run { module, args } => run::handle_run(paths, manager, module.as_deref(), &args)?,
         Command::Test { module } => run::handle_test(paths, manager, module.as_deref())?,
+        Command::Doc { module, open } => build::handle_doc(paths, manager, module.as_deref(), open)?,
         Command::SelfCmd(command) => self_mgmt::handle_self(command, paths)?,
         Command::Tree {
             dependency,

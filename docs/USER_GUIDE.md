@@ -111,6 +111,20 @@ Committed runnable samples are available under `samples/java/`:
 - Audit vulnerabilities: `jot audit`
 - Auto-fix direct vulnerable coords (when possible): `jot audit --fix`
 
+### Documentation
+
+Generate API docs (Java Javadoc comments + Kotlin KDoc) using Dokka:
+
+```bash
+jot doc
+jot doc --open           # generate and open in browser
+jot doc --module domain  # workspace: generate docs for one module
+```
+
+Output is written to `target/docs/`. Dokka plugin JARs are resolved and cached automatically on first run.
+
+Dokka understands both `/** ... */` Javadoc-style comments and `/** ... */` KDoc tags in Kotlin sources.
+
 ### Publish
 
 - Local repository dry-run: `jot publish --repository file:///tmp/jot-m2 --dry-run`

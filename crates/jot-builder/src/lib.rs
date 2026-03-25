@@ -1,5 +1,6 @@
 mod compile;
 mod diagnostics;
+mod doc;
 pub mod errors;
 mod graph;
 mod package;
@@ -324,6 +325,30 @@ impl JavaProjectBuilder {
             tests_found: true,
         })
     }
+
+    pub fn doc(&self, start: &Path) -> Result<DocOutput, BuildError> {
+        let project = load_project_build_config(start)?;
+        let toolchain_request = project
+            .toolchain
+            .clone()
+            .ok_or_else(|| BuildError::MissingJavaToolchain(project.config_path.clone()))?;
+        let installed_jdk = self.toolchains.ensure_installed(&toolchain_request)?;
+
+        let dependencies = self
+            .resolver
+            .resolve_artifacts(&project.dependencies, DEFAULT_RESOLVE_DEPTH)?;
+
+        let docs_dir = project.project_root.join("target").join("docs");
+        prepare_directory(&docs_dir)?;
+
+        let classpath = ClasspathAssembler::new()
+            .with_artifacts(&dependencies)
+            .build();
+
+        doc::run_dokka(&self.resolver, &installed_jdk, &project, &classpath, &docs_dir)?;
+
+        Ok(DocOutput { project, docs_dir })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -342,6 +367,12 @@ pub struct BuildOutput {
 pub struct TestOutput {
     pub project: ProjectBuildConfig,
     pub tests_found: bool,
+}
+
+#[derive(Debug)]
+pub struct DocOutput {
+    pub project: ProjectBuildConfig,
+    pub docs_dir: PathBuf,
 }
 
 #[derive(Default)]

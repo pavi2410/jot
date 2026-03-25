@@ -114,6 +114,13 @@ pub(crate) enum Command {
         #[arg(long)]
         module: Option<String>,
     },
+    Doc {
+        #[arg(long)]
+        module: Option<String>,
+        /// Open generated docs in the browser after building
+        #[arg(long)]
+        open: bool,
+    },
     #[command(name = "self")]
     SelfCmd(SelfCommand),
     Toolchain(ToolchainCommand),

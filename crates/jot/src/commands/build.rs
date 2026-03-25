@@ -76,6 +76,51 @@ pub(crate) fn handle_build(
     Ok(())
 }
 
+pub(crate) fn handle_doc(
+    paths: JotPaths,
+    manager: ToolchainManager,
+    module: Option<&str>,
+    open: bool,
+) -> Result<(), anyhow::Error> {
+    let resolver = MavenResolver::new(paths)?;
+    let builder = JavaProjectBuilder::new(resolver, manager);
+    let targets = super::select_project_targets(module)?;
+    let roots = match targets {
+        super::ProjectTargets::Workspace { roots } => roots,
+        super::ProjectTargets::Single { root } => vec![root],
+    };
+    for root in roots {
+        let output = builder.doc(&root)?;
+        print_status_stdout(
+            "doc",
+            StatusTone::Success,
+            format!(
+                "{} {} -> {}",
+                output.project.name,
+                output.project.version,
+                display_path(&output.docs_dir)
+            ),
+        );
+        if open {
+            open_in_browser(&output.docs_dir.join("index.html"))?;
+        }
+    }
+    Ok(())
+}
+
+fn open_in_browser(path: &Path) -> Result<(), anyhow::Error> {
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open").arg(path).status()?;
+    #[cfg(target_os = "linux")]
+    std::process::Command::new("xdg-open").arg(path).status()?;
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("cmd")
+        .args(["/c", "start"])
+        .arg(path)
+        .status()?;
+    Ok(())
+}
+
 pub(crate) fn handle_fmt(
     paths: JotPaths,
     manager: ToolchainManager,
