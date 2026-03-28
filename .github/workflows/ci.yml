@@ -54,6 +54,8 @@ jobs:
             path: samples/java-apt
           - name: Benchmarks sample
             path: samples/java-bench
+            build_cmd: bench
+            test_cmd: bench
           - name: Kotlin minimal app sample
             path: samples/kotlin-app
           - name: Mixed Java+Kotlin sample
@@ -72,7 +74,7 @@ jobs:
         run: cargo build --locked -p jot --verbose
       - name: Build sample
         working-directory: ${{ matrix.sample.path }}
-        run: ${{ github.workspace }}/${{ matrix.binary }} build
+        run: ${{ github.workspace }}/${{ matrix.binary }} ${{ matrix.sample.build_cmd || 'build' }}
       - name: Test sample
         working-directory: ${{ matrix.sample.path }}
-        run: ${{ github.workspace }}/${{ matrix.binary }} test
+        run: ${{ github.workspace }}/${{ matrix.binary }} ${{ matrix.sample.test_cmd || 'test' }}
