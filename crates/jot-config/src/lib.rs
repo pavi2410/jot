@@ -208,30 +208,25 @@ fn load_project_build_config_from_file_with_inheritance(
     let kotlin_toolchain =
         parse_kotlin_toolchain_request(config.toolchains.as_ref()).or(inherited_kotlin_toolchain);
     let has_kotlin = kotlin_toolchain.is_some();
-    let source_dirs = project
-        .source_dirs
-        .unwrap_or_else(|| {
-            let mut dirs = vec!["src/main/java".to_owned()];
-            if has_kotlin {
-                dirs.push("src/main/kotlin".to_owned());
-            }
-            dirs
-        })
-        .into_iter()
-        .map(|value| project_root.join(value))
-        .collect();
-    let test_source_dirs = project
-        .test_source_dirs
-        .unwrap_or_else(|| {
-            let mut dirs = vec!["src/test/java".to_owned()];
-            if has_kotlin {
-                dirs.push("src/test/kotlin".to_owned());
-            }
-            dirs
-        })
-        .into_iter()
-        .map(|value| project_root.join(value))
-        .collect();
+    let use_maven_layout = project.layout.as_deref() == Some("maven");
+    let source_dirs = if use_maven_layout {
+        let mut dirs = vec![project_root.join("src/main/java")];
+        if has_kotlin {
+            dirs.push(project_root.join("src/main/kotlin"));
+        }
+        dirs
+    } else {
+        vec![project_root.join("src")]
+    };
+    let test_source_dirs = if use_maven_layout {
+        let mut dirs = vec![project_root.join("src/test/java")];
+        if has_kotlin {
+            dirs.push(project_root.join("src/test/kotlin"));
+        }
+        dirs
+    } else {
+        vec![project_root.join("test")]
+    };
     let inherited_group = inherited.as_ref().and_then(|ctx| ctx.group.clone());
     let inherited_catalog_path = inherited.as_ref().and_then(|ctx| ctx.catalog_path.clone());
     let inherited_publish = inherited.as_ref().and_then(|ctx| ctx.publish.clone());
@@ -258,7 +253,11 @@ fn load_project_build_config_from_file_with_inheritance(
         main_class: project.main_class,
         source_dirs,
         test_source_dirs,
-        resource_dir: project_root.join("src/main/resources"),
+        resource_dir: project_root.join(if use_maven_layout {
+            "src/main/resources"
+        } else {
+            "res"
+        }),
         dependencies: extract_dependency_coordinates(config.dependencies, catalog_path.as_deref())?,
         path_dependencies,
         test_dependencies: extract_dependency_coordinates(
@@ -272,7 +271,7 @@ fn load_project_build_config_from_file_with_inheritance(
         publish: parse_publish_config(config.publish, inherited_publish),
         format: parse_format_config(config.format, inherited_format),
         lint: parse_lint_config(config.lint, inherited_lint, &project_root),
-        bench: parse_bench_config(config.bench, has_kotlin, &project_root),
+        bench: parse_bench_config(config.bench, has_kotlin, use_maven_layout, &project_root),
     })
 }
 
@@ -324,20 +323,22 @@ fn parse_lint_config(
     config
 }
 
-fn parse_bench_config(raw: Option<RawBench>, has_kotlin: bool, root: &Path) -> BenchConfig {
+fn parse_bench_config(
+    raw: Option<RawBench>,
+    has_kotlin: bool,
+    use_maven_layout: bool,
+    root: &Path,
+) -> BenchConfig {
     let raw = raw.unwrap_or_default();
-    let source_dirs = raw
-        .source_dirs
-        .unwrap_or_else(|| {
-            let mut dirs = vec!["src/bench/java".to_owned()];
-            if has_kotlin {
-                dirs.push("src/bench/kotlin".to_owned());
-            }
-            dirs
-        })
-        .into_iter()
-        .map(|v| root.join(v))
-        .collect();
+    let source_dirs = if use_maven_layout {
+        let mut dirs = vec![root.join("src/bench/java")];
+        if has_kotlin {
+            dirs.push(root.join("src/bench/kotlin"));
+        }
+        dirs
+    } else {
+        vec![root.join("bench")]
+    };
     BenchConfig {
         jmh_version: raw.jmh_version,
         source_dirs,

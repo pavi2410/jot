@@ -50,6 +50,10 @@ jobs:
             path: samples/java/multi-module-workspace
           - name: Webserver sample
             path: samples/java/webserver
+          - name: Annotation processing sample
+            path: samples/java/annotation-processing
+          - name: Benchmarks sample
+            path: samples/java/benchmarks
           - name: Kotlin minimal app sample
             path: samples/kotlin/minimal-app
           - name: Mixed Java+Kotlin sample

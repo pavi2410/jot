@@ -25,10 +25,7 @@ pub(crate) struct RawProject {
     pub(crate) group: Option<String>,
     #[serde(rename = "main-class")]
     pub(crate) main_class: Option<String>,
-    #[serde(rename = "source-dirs")]
-    pub(crate) source_dirs: Option<Vec<String>>,
-    #[serde(rename = "test-source-dirs")]
-    pub(crate) test_source_dirs: Option<Vec<String>>,
+    pub(crate) layout: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -110,8 +107,6 @@ pub(crate) struct RawLint {
 pub(crate) struct RawBench {
     #[serde(rename = "jmh-version")]
     pub(crate) jmh_version: Option<String>,
-    #[serde(rename = "source-dirs")]
-    pub(crate) source_dirs: Option<Vec<String>>,
     pub(crate) deps: Option<Vec<String>>,
 }
 

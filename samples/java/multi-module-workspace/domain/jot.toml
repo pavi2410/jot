@@ -1,6 +1,7 @@
 [project]
 name = "shopflow-domain"
 version = "1.0.0"
+layout = "maven"
 
 [dependencies]
 jackson = { catalog = "jackson-databind" }

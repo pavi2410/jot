@@ -2,6 +2,7 @@
 name = "mixed-java-kotlin"
 version = "0.1.0"
 main-class = "com.jot.samples.mixed.Main"
+layout = "maven"
 
 [toolchains]
 java = "21"

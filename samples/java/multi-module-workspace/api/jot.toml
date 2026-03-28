@@ -2,6 +2,7 @@
 name = "shopflow-api"
 version = "1.0.0"
 main-class = "com.jot.samples.workspace.api.ApiMain"
+layout = "maven"
 
 [dependencies]
 domain = { path = "../domain" }

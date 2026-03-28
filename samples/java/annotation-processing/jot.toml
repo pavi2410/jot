@@ -2,6 +2,7 @@
 name = "annotation-processing"
 version = "0.1.0"
 main-class = "com.jot.samples.ap.Main"
+layout = "maven"
 
 [toolchains]
 java = "21"
