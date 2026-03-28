@@ -924,6 +924,7 @@ mod tests {
             }),
             format: Default::default(),
             lint: Default::default(),
+            bench: Default::default(),
         };
         let coordinate = MavenCoordinate {
             group: "io.github.demo".into(),
@@ -1006,6 +1007,7 @@ mod tests {
             }),
             format: Default::default(),
             lint: Default::default(),
+            bench: Default::default(),
         };
         let build = BuildOutput {
             project,

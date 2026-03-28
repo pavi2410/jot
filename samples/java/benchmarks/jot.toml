@@ -1,0 +1,13 @@
+[project]
+name = "benchmarks"
+version = "0.1.0"
+
+[toolchains]
+java = "21"
+
+# [bench] is optional — jot pins JMH 1.37 and provides src/bench/java by default.
+# Uncomment to override:
+# [bench]
+# jmh-version = "1.37"
+# source-dirs = ["src/bench/java"]
+# deps = []

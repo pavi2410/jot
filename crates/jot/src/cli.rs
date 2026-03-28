@@ -114,6 +114,21 @@ pub(crate) enum Command {
         #[arg(long)]
         module: Option<String>,
     },
+    Bench {
+        /// Benchmark name filter regex (e.g. "MyBench", ".*sort.*")
+        filter: Option<String>,
+        #[arg(long)]
+        module: Option<String>,
+        /// Number of measurement iterations (default: JMH default = 5)
+        #[arg(long)]
+        iterations: Option<u32>,
+        /// Number of warmup iterations (default: JMH default = 5)
+        #[arg(long)]
+        warmup: Option<u32>,
+        /// Number of JVM forks (default: 1)
+        #[arg(long, default_value_t = 1)]
+        forks: u32,
+    },
     Doc {
         #[arg(long)]
         module: Option<String>,

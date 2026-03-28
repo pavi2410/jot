@@ -23,6 +23,14 @@ pub struct LintConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BenchConfig {
+    /// Override the JMH version pinned in jot. If `None`, jot's default is used.
+    pub jmh_version: Option<String>,
+    pub source_dirs: Vec<PathBuf>,
+    pub deps: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PublishConfig {
     pub license: Option<String>,
     pub description: Option<String>,
@@ -59,6 +67,7 @@ pub struct ProjectBuildConfig {
     pub publish: Option<PublishConfig>,
     pub format: FormatConfig,
     pub lint: LintConfig,
+    pub bench: BenchConfig,
 }
 
 impl ProjectBuildConfig {

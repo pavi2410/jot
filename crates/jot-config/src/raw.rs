@@ -15,6 +15,7 @@ pub(crate) struct RawConfig {
     pub(crate) publish: Option<RawPublish>,
     pub(crate) format: Option<RawFormat>,
     pub(crate) lint: Option<RawLint>,
+    pub(crate) bench: Option<RawBench>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -103,6 +104,15 @@ pub(crate) struct RawFormat {
 pub(crate) struct RawLint {
     #[serde(rename = "pmd-ruleset")]
     pub(crate) pmd_ruleset: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub(crate) struct RawBench {
+    #[serde(rename = "jmh-version")]
+    pub(crate) jmh_version: Option<String>,
+    #[serde(rename = "source-dirs")]
+    pub(crate) source_dirs: Option<Vec<String>>,
+    pub(crate) deps: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

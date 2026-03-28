@@ -56,6 +56,8 @@ pub enum BuildError {
     MissingKotlinToolchain(PathBuf),
     #[error("could not locate junit-platform-console-standalone in resolved test dependencies")]
     MissingJUnitConsole,
+    #[error("could not locate jmh-generator-annprocess in resolved bench dependencies")]
+    MissingJmhAnnotationProcessor,
     #[error("{tool} failed: {stderr}")]
     CommandFailed { tool: &'static str, stderr: String },
     #[error("{tool} exited with status {code:?}")]
