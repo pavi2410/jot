@@ -1,19 +1,33 @@
 package com.jot.samples.webserver.model;
 
+@SuppressWarnings("PMD.ShortClassName")
 public class Car {
-    private String make;
-    private int numberOfSeats;
-    private CarType type;
 
-    public enum CarType { SEDAN, SUV, TRUCK }
+  public enum CarType {
+    SEDAN,
+    SUV,
+    TRUCK
+  }
 
-    public Car(String make, int numberOfSeats, CarType type) {
-        this.make = make;
-        this.numberOfSeats = numberOfSeats;
-        this.type = type;
-    }
+  private String make;
+  private int numberOfSeats;
+  private CarType type;
 
-    public String getMake() { return make; }
-    public int getNumberOfSeats() { return numberOfSeats; }
-    public CarType getType() { return type; }
+  public Car(final String make, final int numberOfSeats, final CarType type) {
+    this.make = make;
+    this.numberOfSeats = numberOfSeats;
+    this.type = type;
+  }
+
+  public String getMake() {
+    return make;
+  }
+
+  public int getNumberOfSeats() {
+    return numberOfSeats;
+  }
+
+  public CarType getType() {
+    return type;
+  }
 }

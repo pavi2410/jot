@@ -1,12 +1,16 @@
 package com.jot.samples.workspace.api;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import com.jot.samples.workspace.domain.Order;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
+@SuppressWarnings("PMD.AtLeastOneConstructor")
 class ApiMainTest {
-    @Test
-    void sanityCheck() {
-        assertTrue(true);
-    }
+
+  @Test
+  void orderHasExpectedId() {
+    final Order order = new Order("A-1", "jot");
+    assertEquals("A-1", order.orderId());
+  }
 }

@@ -1,12 +1,15 @@
 package com.jot.samples.minimal;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
+@SuppressWarnings("PMD.AtLeastOneConstructor")
 class MainTest {
-    @Test
-    void sanityCheck() {
-        assertTrue(true);
-    }
+
+  @Test
+  void exitsWithZeroOnSuccess() {
+    final int code = new picocli.CommandLine(new Main()).execute("jot");
+    assertEquals(0, code);
+  }
 }

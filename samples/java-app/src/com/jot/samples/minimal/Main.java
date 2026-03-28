@@ -4,18 +4,20 @@ import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Parameters;
 
+@SuppressWarnings({"PMD.ShortClassName", "PMD.AtLeastOneConstructor"})
 @Command(name = "greet", mixinStandardHelpOptions = true, description = "Prints a greeting.")
 public final class Main implements Runnable {
 
-    @Parameters(index = "0", description = "Name to greet.", defaultValue = "world")
-    private String name;
+  @Parameters(index = "0", description = "Name to greet.", defaultValue = "world")
+  private String name;
 
-    @Override
-    public void run() {
-        System.out.println("hello " + name);
-    }
+  @Override
+  @SuppressWarnings("PMD.SystemPrintln")
+  public void run() {
+    System.out.println("hello " + name);
+  }
 
-    public static void main(String[] args) {
-        System.exit(new CommandLine(new Main()).execute(args));
-    }
+  public static void main(final String[] args) {
+    System.exit(new CommandLine(new Main()).execute(args));
+  }
 }

@@ -7,17 +7,23 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 
 public final class ApiMain {
-    public static void main(String[] args) throws IOException {
-        HttpServer server = HttpServer.create(new InetSocketAddress(8080), 0);
-        server.createContext("/health", exchange -> {
-            Order order = new Order("A-1", "jot");
-            byte[] body = ("ok:" + order.id()).getBytes();
-            exchange.sendResponseHeaders(200, body.length);
-            try (OutputStream output = exchange.getResponseBody()) {
-                output.write(body);
-            }
+
+  private ApiMain() {}
+
+  @SuppressWarnings("PMD.SystemPrintln")
+  public static void main(final String[] args) throws IOException {
+    final HttpServer server = HttpServer.create(new InetSocketAddress(8080), 0);
+    server.createContext(
+        "/health",
+        exchange -> {
+          final Order order = new Order("A-1", "jot");
+          final byte[] body = ("ok:" + order.orderId()).getBytes();
+          exchange.sendResponseHeaders(200, body.length);
+          try (OutputStream output = exchange.getResponseBody()) {
+            output.write(body);
+          }
         });
-        server.start();
-        System.out.println("shopflow api listening on :8080");
-    }
+    server.start();
+    System.out.println("shopflow api listening on :8080");
+  }
 }
