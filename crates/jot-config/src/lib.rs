@@ -657,12 +657,9 @@ mod tests {
         assert_eq!(config.group, None);
         assert_eq!(config.module_name, None);
         assert_eq!(config.main_class.as_deref(), Some("dev.demo.Main"));
-        assert_eq!(config.source_dirs, vec![temp.path().join("src/main/java")]);
-        assert_eq!(
-            config.test_source_dirs,
-            vec![temp.path().join("src/test/java")]
-        );
-        assert_eq!(config.resource_dir, temp.path().join("src/main/resources"));
+        assert_eq!(config.source_dirs, vec![temp.path().join("src")]);
+        assert_eq!(config.test_source_dirs, vec![temp.path().join("test")]);
+        assert_eq!(config.resource_dir, temp.path().join("res"));
         assert_eq!(
             config.dependencies,
             vec!["org.slf4j:slf4j-api:2.0.16".to_owned()]
@@ -670,6 +667,34 @@ mod tests {
         assert_eq!(config.path_dependencies, Vec::<std::path::PathBuf>::new());
         assert_eq!(config.test_dependencies, Vec::<String>::new());
         assert_eq!(config.toolchain.expect("toolchain").version, "21");
+    }
+
+    #[test]
+    fn loads_project_build_config_with_maven_layout() {
+        let temp = tempdir().expect("tempdir");
+        let config_path = temp.path().join("jot.toml");
+        fs::write(
+            &config_path,
+            "[project]\nname = \"demo\"\nversion = \"1.2.3\"\nlayout = \"maven\"\n\n[toolchains]\njava = \"21\"\nkotlin = \"2.1.0\"\n",
+        )
+        .expect("write config");
+
+        let config = load_project_build_config(temp.path()).expect("load project config");
+        assert_eq!(
+            config.source_dirs,
+            vec![
+                temp.path().join("src/main/java"),
+                temp.path().join("src/main/kotlin"),
+            ]
+        );
+        assert_eq!(
+            config.test_source_dirs,
+            vec![
+                temp.path().join("src/test/java"),
+                temp.path().join("src/test/kotlin"),
+            ]
+        );
+        assert_eq!(config.resource_dir, temp.path().join("src/main/resources"));
     }
 
     #[test]
