@@ -91,6 +91,52 @@ developer = { name = "Your Name", email = "you@example.com" }
 
 ---
 
+## Project Layout
+
+jot supports two source layouts, selected via `layout` in `[project]`.
+
+### Flat (default)
+
+Minimal nesting — good for single-module projects.
+
+```
+my-app/
+├── src/          # main sources (Java + Kotlin)
+├── test/         # test sources
+├── bench/        # JMH benchmark sources
+├── res/          # resources (copied to JAR root)
+└── jot.toml
+```
+
+### Maven
+
+Mirrors the Maven/Gradle convention — useful when migrating an existing project or using IDEs that expect it.
+
+```
+my-app/
+├── src/
+│   ├── main/
+│   │   ├── java/
+│   │   ├── kotlin/       # mixed projects only
+│   │   └── resources/
+│   ├── test/
+│   │   ├── java/
+│   │   └── kotlin/
+│   └── bench/
+│       ├── java/
+│       └── kotlin/
+└── jot.toml
+```
+
+Set it explicitly in `jot.toml`:
+
+```toml
+[project]
+layout = "maven"   # omit or set to "flat" for the default
+```
+
+---
+
 ## Command Reference
 
 ### Project lifecycle
@@ -101,6 +147,7 @@ developer = { name = "Your Name", email = "you@example.com" }
 | `jot build [--module <name>]` | Compile sources and produce a JAR (+ fat-JAR if `main-class` is set) |
 | `jot run [--module <name>] [-- <args>]` | Build and run the main class |
 | `jot test [--module <name>]` | Compile and run JUnit 5 tests |
+| `jot bench [--module <name>]` | Compile and run JMH benchmarks from `bench/` (flat) or `src/bench/java/` (maven) |
 | `jot publish [--module <name>] [--repository <target>] [--dry-run]` | Build publish artifacts, sign them with GPG, and upload them using Maven repository layout |
 | `jot clean` | Delete `target/` for the current project or workspace members |
 | `jot clean --global` | Wipe the global jot cache |
