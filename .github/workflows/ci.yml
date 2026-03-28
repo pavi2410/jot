@@ -41,23 +41,23 @@ jobs:
           - windows-latest
         sample:
           - name: CLI sample
-            path: samples/java/cli
+            path: samples/java-cli
           - name: Library sample
-            path: samples/java/library
+            path: samples/java-lib
           - name: Minimal app sample
-            path: samples/java/minimal-app
+            path: samples/java-app
           - name: Multi-module workspace sample
-            path: samples/java/multi-module-workspace
+            path: samples/java-workspace
           - name: Webserver sample
-            path: samples/java/webserver
+            path: samples/java-web
           - name: Annotation processing sample
-            path: samples/java/annotation-processing
+            path: samples/java-apt
           - name: Benchmarks sample
-            path: samples/java/benchmarks
+            path: samples/java-bench
           - name: Kotlin minimal app sample
-            path: samples/kotlin/minimal-app
+            path: samples/kotlin-app
           - name: Mixed Java+Kotlin sample
-            path: samples/kotlin/mixed-java-kotlin
+            path: samples/java-kotlin
         include:
           - os: ubuntu-latest
             binary: target/debug/jot
