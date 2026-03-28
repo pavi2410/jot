@@ -111,14 +111,12 @@ Release profile enables `lto = true`, `codegen-units = 1`, `strip = true`, `pani
 
 `samples/` contains working projects used as integration tests in CI. Each has a `jot.toml` and is independently buildable:
 
-- `java/minimal-app` — Hello World
-- `java/library` — Library (no main class)
-- `java/cli` — CLI app with dependencies
-- `java/webserver` — HTTP server
-- `java/multi-module-workspace` — Workspace with multiple modules
-- `java/annotation-processing` — APT example
-- `kotlin/minimal-app` — Kotlin Hello World
-- `kotlin/mixed-java-kotlin` — Mixed Java + Kotlin
+- `java-app` — Flat layout; CLI app using picocli, fat JAR
+- `java-lib` — Flat layout; library with JMH benchmarks (`jot bench`)
+- `java-web` — Maven layout; HTTP server with MapStruct annotation processing
+- `java-workspace` — Maven layout; workspace with `domain`, `api`, `cli` modules and path dependencies
+- `java-kotlin` — Maven layout; mixed Java + Kotlin project
+- `kotlin-app` — Flat layout; Kotlin-only app
 
 When adding new features, update the relevant sample or add a new one to verify end-to-end behavior.
 

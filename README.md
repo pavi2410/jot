@@ -70,6 +70,7 @@ jot self uninstall       # remove the binary
 name = "my-app"
 version = "1.0.0"
 main-class = "com.example.App"
+layout = "flat"   # "flat" (default) or "maven"
 
 [toolchains]
 java = "21"
@@ -221,13 +222,14 @@ Notes:
 
 ## Sample Projects
 
-| Sample | Description |
-|---|---|
-| `samples/java/minimal-app` | Single-file Hello World |
-| `samples/java/library` | Library-only project, no main class |
-| `samples/java/cli` | Command-line application |
-| `samples/java/webserver` | Lightweight HTTP server |
-| `samples/java/multi-module-workspace` | Workspace with `domain`, `api`, `cli` modules |
+| Sample | Layout | Description |
+|---|---|---|
+| `samples/java-app` | flat | CLI app using picocli; fat JAR |
+| `samples/java-lib` | flat | Library with JMH benchmarks |
+| `samples/java-web` | maven | HTTP server with MapStruct annotation processing |
+| `samples/java-workspace` | maven | Workspace with `domain`, `api`, `cli` modules and path dependencies |
+| `samples/java-kotlin` | maven | Mixed Java + Kotlin project |
+| `samples/kotlin-app` | flat | Kotlin-only app |
 
 ---
 
