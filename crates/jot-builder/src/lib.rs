@@ -18,12 +18,16 @@ use jot_config::{ProjectBuildConfig, load_project_build_config};
 use jot_resolver::{MavenResolver, ResolvedArtifact};
 use jot_toolchain::{InstalledJdk, InstalledKotlin, ToolchainManager};
 
-use compile::{build_compiler_chain, compile_pipeline, resolve_annotation_processing};
+use compile::{
+    AnnotationProcessingConfig, build_compiler_chain, compile_pipeline,
+    resolve_annotation_processing,
+};
 use package::{build_fat_jar, copy_resources, package_jar};
 
 const DEFAULT_RESOLVE_DEPTH: usize = 8;
 const DEFAULT_JUNIT_CONSOLE_COORD: &str =
     "org.junit.platform:junit-platform-console-standalone:6.0.3";
+const DEFAULT_JMH_VERSION: &str = "1.37";
 
 #[derive(Debug)]
 pub struct JavaProjectBuilder {
@@ -326,6 +330,191 @@ impl JavaProjectBuilder {
         })
     }
 
+    pub fn bench(
+        &self,
+        start: &Path,
+        filter: Option<&str>,
+        forks: u32,
+        warmup: Option<u32>,
+        iterations: Option<u32>,
+    ) -> Result<BenchOutput, BuildError> {
+        let project = load_project_build_config(start)?;
+        let mut cache = HashMap::<PathBuf, BuildOutput>::new();
+        let mut stack = Vec::<PathBuf>::new();
+        let mut path_dependency_jars = Vec::new();
+        for dependency_root in &project.path_dependencies {
+            let dependency_project = load_project_build_config(dependency_root)?;
+            let dependency_output =
+                self.build_project_with_cache(dependency_project, &mut cache, &mut stack)?;
+            path_dependency_jars.push(dependency_output.jar_path.clone());
+        }
+
+        let toolchain_request = project
+            .toolchain
+            .clone()
+            .ok_or_else(|| BuildError::MissingJavaToolchain(project.config_path.clone()))?;
+        let installed_jdk = self.toolchains.ensure_installed(&toolchain_request)?;
+
+        let installed_kotlin = match &project.kotlin_toolchain {
+            Some(request) => Some(self.toolchains.ensure_kotlin_installed(request)?),
+            None => None,
+        };
+
+        let jmh_version = project
+            .bench
+            .jmh_version
+            .as_deref()
+            .unwrap_or(DEFAULT_JMH_VERSION);
+        let jmh_core_coord = format!("org.openjdk.jmh:jmh-core:{jmh_version}");
+        let jmh_annprocess_coord =
+            format!("org.openjdk.jmh:jmh-generator-annprocess:{jmh_version}");
+
+        let compile_dependencies = self
+            .resolver
+            .resolve_artifacts(&project.dependencies, DEFAULT_RESOLVE_DEPTH)?;
+
+        let mut jmh_dep_inputs = vec![jmh_core_coord, jmh_annprocess_coord];
+        jmh_dep_inputs.extend(project.bench.deps.iter().cloned());
+        let jmh_dependencies = self
+            .resolver
+            .resolve_artifacts(&jmh_dep_inputs, DEFAULT_RESOLVE_DEPTH)?;
+
+        let target_dir = project.project_root.join("target");
+        let classes_dir = target_dir.join("classes");
+        prepare_directory(&classes_dir)?;
+
+        let main_java_sources = jot_common::collect_files_by_ext(&project.source_dirs, "java");
+        let main_kotlin_sources = jot_common::collect_files_by_ext(&project.source_dirs, "kt");
+
+        let jvm_target = project
+            .toolchain
+            .as_ref()
+            .map(|value| value.version.as_str());
+
+        if !main_java_sources.is_empty() || !main_kotlin_sources.is_empty() {
+            let main_compile_classpath = ClasspathAssembler::new()
+                .with_artifacts(&compile_dependencies)
+                .with_paths(path_dependency_jars.iter().cloned())
+                .with_optional_unique_path(kotlin_stdlib_jar(installed_kotlin.as_ref()))
+                .build();
+
+            let annotation_processing =
+                resolve_annotation_processing(&project, &self.resolver, &target_dir)?;
+            let main_compilers = build_compiler_chain(
+                installed_kotlin.as_ref(),
+                &installed_jdk,
+                Some(project.source_dirs.as_slice()),
+                annotation_processing,
+            );
+            compile_pipeline(
+                &main_compilers,
+                &project.source_dirs,
+                &main_compile_classpath,
+                &classes_dir,
+                &project.project_root,
+                jvm_target,
+            )?;
+
+            copy_resources(&project.resource_dir, &classes_dir)?;
+        }
+
+        let bench_java_sources =
+            jot_common::collect_files_by_ext(&project.bench.source_dirs, "java");
+        let bench_kotlin_sources =
+            jot_common::collect_files_by_ext(&project.bench.source_dirs, "kt");
+
+        if bench_java_sources.is_empty() && bench_kotlin_sources.is_empty() {
+            return Ok(BenchOutput {
+                project,
+                benchmarks_found: false,
+            });
+        }
+
+        let bench_classes_dir = target_dir.join("bench-classes");
+        prepare_directory(&bench_classes_dir)?;
+
+        let bench_compile_classpath = ClasspathAssembler::new()
+            .with_paths([classes_dir.clone()])
+            .with_artifacts(&compile_dependencies)
+            .with_paths(path_dependency_jars.iter().cloned())
+            .with_artifacts(&jmh_dependencies)
+            .with_optional_unique_path(kotlin_stdlib_jar(installed_kotlin.as_ref()))
+            .build();
+
+        let jmh_annprocess_jar = jmh_dependencies
+            .iter()
+            .find(|a| a.coordinate.artifact == "jmh-generator-annprocess")
+            .map(|a| a.path.clone())
+            .ok_or(BuildError::MissingJmhAnnotationProcessor)?;
+
+        let generated_bench_sources_dir = target_dir.join("generated-bench-sources");
+        prepare_directory(&generated_bench_sources_dir)?;
+
+        let bench_ap = Some(AnnotationProcessingConfig {
+            processor_paths: vec![jmh_annprocess_jar],
+            options: std::collections::BTreeMap::new(),
+            generated_sources_dir: generated_bench_sources_dir,
+        });
+        let bench_compilers = build_compiler_chain(
+            installed_kotlin.as_ref(),
+            &installed_jdk,
+            Some(project.bench.source_dirs.as_slice()),
+            bench_ap,
+        );
+        compile_pipeline(
+            &bench_compilers,
+            &project.bench.source_dirs,
+            &bench_compile_classpath,
+            &bench_classes_dir,
+            &project.project_root,
+            jvm_target,
+        )?;
+
+        let runtime_classpath = ClasspathAssembler::new()
+            .with_paths([classes_dir, bench_classes_dir])
+            .with_artifacts(&compile_dependencies)
+            .with_paths(path_dependency_jars)
+            .with_artifacts(&jmh_dependencies)
+            .with_optional_unique_path(kotlin_stdlib_jar(installed_kotlin.as_ref()))
+            .build();
+        let classpath = std::env::join_paths(&runtime_classpath)?;
+
+        let mut cmd = Command::new(installed_jdk.java_binary());
+        cmd.current_dir(&project.project_root)
+            .arg("-cp")
+            .arg(classpath)
+            .arg("org.openjdk.jmh.Main");
+
+        if let Some(filter) = filter {
+            cmd.arg(filter);
+        }
+        cmd.args(["-f", &forks.to_string()]);
+        if let Some(w) = warmup {
+            cmd.args(["-wi", &w.to_string()]);
+        }
+        if let Some(i) = iterations {
+            cmd.args(["-i", &i.to_string()]);
+        }
+
+        let status = cmd
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()?;
+
+        if !status.success() {
+            return Err(BuildError::ProcessExit {
+                tool: "jmh",
+                code: status.code(),
+            });
+        }
+
+        Ok(BenchOutput {
+            project,
+            benchmarks_found: true,
+        })
+    }
+
     pub fn doc(&self, start: &Path) -> Result<DocOutput, BuildError> {
         let project = load_project_build_config(start)?;
         let toolchain_request = project
@@ -367,6 +556,12 @@ pub struct BuildOutput {
 pub struct TestOutput {
     pub project: ProjectBuildConfig,
     pub tests_found: bool,
+}
+
+#[derive(Debug)]
+pub struct BenchOutput {
+    pub project: ProjectBuildConfig,
+    pub benchmarks_found: bool,
 }
 
 #[derive(Debug)]

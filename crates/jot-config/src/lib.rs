@@ -15,8 +15,8 @@ pub use discovery::{
 pub use editing::{DependencySpec, add_dependency, pin_java_toolchain, remove_dependency};
 pub use errors::ConfigError;
 pub use models::{
-    FormatConfig, JavaFormatStyle, LintConfig, ProjectBuildConfig, PublishConfig, PublishDeveloper,
-    WorkspaceBuildConfig, WorkspaceDependencySet, WorkspaceMemberBuildConfig,
+    BenchConfig, FormatConfig, JavaFormatStyle, LintConfig, ProjectBuildConfig, PublishConfig,
+    PublishDeveloper, WorkspaceBuildConfig, WorkspaceDependencySet, WorkspaceMemberBuildConfig,
     WorkspaceMemberDependencies,
 };
 
@@ -31,7 +31,8 @@ use crate::dependencies::{
 };
 use crate::models::WorkspaceInheritance;
 use crate::raw::{
-    RawConfig, RawFormat, RawJavaToolchain, RawLint, RawPublish, RawPublishDeveloper, RawToolchains,
+    RawBench, RawConfig, RawFormat, RawJavaToolchain, RawLint, RawPublish, RawPublishDeveloper,
+    RawToolchains,
 };
 
 pub fn load_project_build_config(start: &Path) -> Result<ProjectBuildConfig, ConfigError> {
@@ -271,6 +272,7 @@ fn load_project_build_config_from_file_with_inheritance(
         publish: parse_publish_config(config.publish, inherited_publish),
         format: parse_format_config(config.format, inherited_format),
         lint: parse_lint_config(config.lint, inherited_lint, &project_root),
+        bench: parse_bench_config(config.bench, has_kotlin, &project_root),
     })
 }
 
@@ -320,6 +322,27 @@ fn parse_lint_config(
         config.pmd_ruleset = Some(config_root.join(pmd_ruleset));
     }
     config
+}
+
+fn parse_bench_config(raw: Option<RawBench>, has_kotlin: bool, root: &Path) -> BenchConfig {
+    let raw = raw.unwrap_or_default();
+    let source_dirs = raw
+        .source_dirs
+        .unwrap_or_else(|| {
+            let mut dirs = vec!["src/bench/java".to_owned()];
+            if has_kotlin {
+                dirs.push("src/bench/kotlin".to_owned());
+            }
+            dirs
+        })
+        .into_iter()
+        .map(|v| root.join(v))
+        .collect();
+    BenchConfig {
+        jmh_version: raw.jmh_version,
+        source_dirs,
+        deps: raw.deps.unwrap_or_default(),
+    }
 }
 
 fn parse_publish_config(
@@ -927,6 +950,7 @@ junit = "org.junit.jupiter:junit-jupiter:5.11.0"
                 publish: None,
                 format: FormatConfig::default(),
                 lint: LintConfig::default(),
+                bench: Default::default(),
             },
         };
 
