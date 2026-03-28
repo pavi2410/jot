@@ -37,22 +37,23 @@ pub(crate) fn run_dokka(
         .collect::<Result<_, _>>()?;
 
     // 2. Collect source roots that exist
-    let source_roots: Vec<&PathBuf> = project
-        .source_dirs
-        .iter()
-        .filter(|d| d.exists())
-        .collect();
+    let source_roots: Vec<&PathBuf> = project.source_dirs.iter().filter(|d| d.exists()).collect();
     if source_roots.is_empty() {
         return Err(BuildError::NoSources(project.project_root.clone()));
     }
 
     // 3. Write Dokka JSON config
     let config = build_config(project, &source_roots, classpath, &plugin_jars, docs_dir);
-    let config_path = project.project_root.join("target").join("dokka-config.json");
+    let config_path = project
+        .project_root
+        .join("target")
+        .join("dokka-config.json");
     std::fs::write(
         &config_path,
-        serde_json::to_string_pretty(&config)
-            .map_err(|e| BuildError::CommandFailed { tool: "dokka", stderr: e.to_string() })?,
+        serde_json::to_string_pretty(&config).map_err(|e| BuildError::CommandFailed {
+            tool: "dokka",
+            stderr: e.to_string(),
+        })?,
     )?;
 
     // 4. Run Dokka (suppress verbose progress output; show stderr only on failure)

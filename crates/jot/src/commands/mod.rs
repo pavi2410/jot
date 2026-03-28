@@ -105,7 +105,9 @@ pub(crate) fn run() -> anyhow::Result<()> {
             warmup,
             iterations,
         )?,
-        Command::Doc { module, open } => build::handle_doc(paths, manager, module.as_deref(), open)?,
+        Command::Doc { module, open } => {
+            build::handle_doc(paths, manager, module.as_deref(), open)?
+        }
         Command::SelfCmd(command) => self_mgmt::handle_self(command, paths)?,
         Command::Tree {
             dependency,

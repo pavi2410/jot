@@ -441,17 +441,20 @@ impl JavaProjectBuilder {
             .with_optional_unique_path(kotlin_stdlib_jar(installed_kotlin.as_ref()))
             .build();
 
-        let jmh_annprocess_jar = jmh_dependencies
+        // Verify the annotation processor is present in the resolved deps
+        jmh_dependencies
             .iter()
             .find(|a| a.coordinate.artifact == "jmh-generator-annprocess")
-            .map(|a| a.path.clone())
             .ok_or(BuildError::MissingJmhAnnotationProcessor)?;
+
+        // All JMH deps go on processor path so jmh-generator-annprocess can load jmh-generator-core
+        let jmh_processor_paths: Vec<_> = jmh_dependencies.iter().map(|a| a.path.clone()).collect();
 
         let generated_bench_sources_dir = target_dir.join("generated-bench-sources");
         prepare_directory(&generated_bench_sources_dir)?;
 
         let bench_ap = Some(AnnotationProcessingConfig {
-            processor_paths: vec![jmh_annprocess_jar],
+            processor_paths: jmh_processor_paths,
             options: std::collections::BTreeMap::new(),
             generated_sources_dir: generated_bench_sources_dir,
         });
@@ -534,7 +537,13 @@ impl JavaProjectBuilder {
             .with_artifacts(&dependencies)
             .build();
 
-        doc::run_dokka(&self.resolver, &installed_jdk, &project, &classpath, &docs_dir)?;
+        doc::run_dokka(
+            &self.resolver,
+            &installed_jdk,
+            &project,
+            &classpath,
+            &docs_dir,
+        )?;
 
         Ok(DocOutput { project, docs_dir })
     }
