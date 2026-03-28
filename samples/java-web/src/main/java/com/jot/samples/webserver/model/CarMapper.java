@@ -1,7 +1,5 @@
-package com.jot.samples.ap.mapper;
+package com.jot.samples.webserver.model;
 
-import com.jot.samples.ap.dto.Car;
-import com.jot.samples.ap.dto.CarDto;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.mapstruct.factory.Mappers;

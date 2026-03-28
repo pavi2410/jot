@@ -6,5 +6,8 @@ main-class = "com.jot.samples.minimal.Main"
 [toolchains]
 java = "21"
 
+[dependencies]
+picocli = "info.picocli:picocli:4.7.6"
+
 [test-dependencies]
 junit = "org.junit.jupiter:junit-jupiter:5.11.0"

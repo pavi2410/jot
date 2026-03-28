@@ -1,4 +1,4 @@
-package com.jot.samples.ap.dto;
+package com.jot.samples.webserver.model;
 
 public class Car {
     private String make;

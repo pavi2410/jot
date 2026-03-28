@@ -1,4 +1,4 @@
-package com.example;
+package com.jot.samples.library;
 
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -12,19 +12,12 @@ import java.util.concurrent.TimeUnit;
 @State(Scope.Thread)
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
-public class StringConcatBenchmark {
+public class GreetingServiceBenchmark {
+
+    private final GreetingService service = new GreetingService();
 
     @Benchmark
-    public String plusConcat() {
-        return "Hello" + ", " + "world!";
-    }
-
-    @Benchmark
-    public String builderConcat() {
-        return new StringBuilder()
-                .append("Hello")
-                .append(", ")
-                .append("world!")
-                .toString();
+    public String greetingFor() {
+        return service.greetingFor("jot");
     }
 }

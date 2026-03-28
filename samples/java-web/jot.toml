@@ -7,5 +7,11 @@ layout = "maven"
 [toolchains]
 java = "21"
 
+[dependencies]
+mapstruct = "org.mapstruct:mapstruct:1.6.3"
+
+[processors]
+mapstruct = "org.mapstruct:mapstruct-processor:1.6.3"
+
 [test-dependencies]
 junit = "org.junit.jupiter:junit-jupiter:5.11.0"
