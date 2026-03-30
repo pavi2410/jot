@@ -8,10 +8,10 @@ use serde_json::{Value, json};
 
 use crate::errors::BuildError;
 
-const DOKKA_CLI: &str = "org.jetbrains.dokka:dokka-cli:1.9.20";
+const DOKKA_CLI: &str = "org.jetbrains.dokka:dokka-cli:2.2.0";
 const DOKKA_PLUGINS: &[&str] = &[
-    "org.jetbrains.dokka:dokka-base:1.9.20",
-    "org.jetbrains.dokka:analysis-kotlin-descriptors:1.9.20",
+    "org.jetbrains.dokka:dokka-base:2.2.0",
+    "org.jetbrains.dokka:analysis-kotlin-descriptors:2.2.0",
     "org.jetbrains.kotlinx:kotlinx-html-jvm:0.8.0",
     "org.freemarker:freemarker:2.3.31",
 ];
