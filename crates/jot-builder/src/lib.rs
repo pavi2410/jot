@@ -165,13 +165,7 @@ impl JavaProjectBuilder {
 
         // Persist the updated manifest after a successful compilation.
         if classes_rebuilt {
-            if let Ok(new_manifest) = manifest::build_updated_manifest(
-                toolchain_hash,
-                classpath_hash,
-                &all_sources,
-            ) {
-                let _ = new_manifest.save(&manifest_path);
-            }
+            try_save_manifest(&manifest_path, toolchain_hash, classpath_hash, &all_sources);
         }
 
         let jar_path = target_dir.join(format!("{}-{}.jar", project.name, project.version));
@@ -368,13 +362,12 @@ impl JavaProjectBuilder {
             copy_resources(&project.resource_dir, &classes_dir)?;
 
             if main_compiled {
-                if let Ok(m) = manifest::build_updated_manifest(
+                try_save_manifest(
+                    &main_manifest_path,
                     toolchain_hash.clone(),
                     main_classpath_hash,
                     &all_main_sources,
-                ) {
-                    let _ = m.save(&main_manifest_path);
-                }
+                );
             }
         } else {
             ensure_directory(&classes_dir)?;
@@ -458,13 +451,12 @@ impl JavaProjectBuilder {
         };
 
         if test_compiled {
-            if let Ok(m) = manifest::build_updated_manifest(
+            try_save_manifest(
+                &test_manifest_path,
                 toolchain_hash,
                 test_classpath_hash,
                 &all_test_sources,
-            ) {
-                let _ = m.save(&test_manifest_path);
-            }
+            );
         }
 
         let console_jar = test_dependencies
@@ -648,13 +640,12 @@ impl JavaProjectBuilder {
             copy_resources(&project.resource_dir, &classes_dir)?;
 
             if main_compiled {
-                if let Ok(m) = manifest::build_updated_manifest(
+                try_save_manifest(
+                    &main_manifest_path,
                     toolchain_hash.clone(),
                     main_classpath_hash,
                     &all_main_sources,
-                ) {
-                    let _ = m.save(&main_manifest_path);
-                }
+                );
             }
         } else {
             ensure_directory(&classes_dir)?;
@@ -737,13 +728,12 @@ impl JavaProjectBuilder {
                     jvm_target,
                     None,
                 )?;
-                if let Ok(m) = manifest::build_updated_manifest(
+                try_save_manifest(
+                    &bench_manifest_path,
                     toolchain_hash,
                     bench_classpath_hash,
                     &all_bench_sources,
-                ) {
-                    let _ = m.save(&bench_manifest_path);
-                }
+                );
             }
             manifest::IncrementalStatus::Incremental { dirty } => {
                 ensure_directory(&bench_classes_dir)?;
@@ -758,13 +748,12 @@ impl JavaProjectBuilder {
                     jvm_target,
                     Some(&dirty_set),
                 )?;
-                if let Ok(m) = manifest::build_updated_manifest(
+                try_save_manifest(
+                    &bench_manifest_path,
                     toolchain_hash,
                     bench_classpath_hash,
                     &all_bench_sources,
-                ) {
-                    let _ = m.save(&bench_manifest_path);
-                }
+                );
             }
             manifest::IncrementalStatus::UpToDate => {
                 ensure_directory(&bench_classes_dir)?;
@@ -937,6 +926,28 @@ fn ensure_directory(path: &Path) -> Result<(), BuildError> {
         fs::create_dir_all(path)?;
     }
     Ok(())
+}
+
+/// Build and persist an updated build manifest. Emits a warning to stderr if
+/// fingerprinting or writing the manifest fails, but never returns an error —
+/// a missing or corrupt manifest simply forces a full rebuild on the next run.
+fn try_save_manifest(
+    manifest_path: &Path,
+    toolchain_hash: String,
+    classpath_hash: String,
+    sources: &[PathBuf],
+) {
+    match manifest::build_updated_manifest(toolchain_hash, classpath_hash, sources) {
+        Ok(m) => {
+            if let Err(e) = m.save(manifest_path) {
+                eprintln!(
+                    "jot: warning: could not save build manifest {}: {e}",
+                    manifest_path.display()
+                );
+            }
+        }
+        Err(e) => eprintln!("jot: warning: could not fingerprint sources for build manifest: {e}"),
+    }
 }
 
 #[cfg(test)]
