@@ -3,13 +3,14 @@ mod diagnostics;
 mod doc;
 pub mod errors;
 mod graph;
+mod manifest;
 mod package;
 mod workspace;
 
 pub use errors::BuildError;
 pub use workspace::{WorkspaceBuildOutput, WorkspaceModuleBuildOutput};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -71,13 +72,19 @@ impl JavaProjectBuilder {
             .resolve_artifacts(&project.dependencies, DEFAULT_RESOLVE_DEPTH)?;
         let target_dir = project.project_root.join("target");
         let classes_dir = target_dir.join("classes");
-        prepare_directory(&classes_dir)?;
 
         let java_sources = jot_common::collect_files_by_ext(&project.source_dirs, "java");
         let kotlin_sources = jot_common::collect_files_by_ext(&project.source_dirs, "kt");
         if java_sources.is_empty() && kotlin_sources.is_empty() {
             return Err(BuildError::NoSources(project.project_root.clone()));
         }
+
+        // Combine all sources for incremental tracking.
+        let all_sources: Vec<PathBuf> = {
+            let mut v = java_sources;
+            v.extend(kotlin_sources);
+            v
+        };
 
         let dependency_paths = ClasspathAssembler::new()
             .with_artifacts(&dependencies)
@@ -92,24 +99,86 @@ impl JavaProjectBuilder {
 
         let annotation_processing =
             resolve_annotation_processing(&project, &self.resolver, &target_dir)?;
+
+        // Compute hashes for the toolchain and full classpath (deps + processors)
+        // before moving annotation_processing into the compiler chain.
+        let kotlin_version = project.kotlin_toolchain.as_ref().map(|tc| tc.version.as_str());
+        let toolchain_hash =
+            manifest::compute_toolchain_hash(&toolchain_request.version, kotlin_version);
+        let mut hash_paths = dependency_paths.clone();
+        if let Some(ap) = &annotation_processing {
+            hash_paths.extend_from_slice(&ap.processor_paths);
+        }
+        let classpath_hash = manifest::compute_classpath_hash(&hash_paths);
+
         let compilers = build_compiler_chain(
             installed_kotlin.as_ref(),
             &installed_jdk,
             Some(project.source_dirs.as_slice()),
             annotation_processing,
         );
-        compile_pipeline(
-            &compilers,
-            &project.source_dirs,
-            &dependency_paths,
-            &classes_dir,
-            &project.project_root,
-            jvm_target,
+
+        let manifest_path = target_dir.join(manifest::MANIFEST_FILENAME);
+        let existing_manifest = manifest::BuildManifest::load(&manifest_path);
+        let status = manifest::classify_sources(
+            existing_manifest.as_ref(),
+            &toolchain_hash,
+            &classpath_hash,
+            &all_sources,
         )?;
 
+        let classes_rebuilt = match &status {
+            manifest::IncrementalStatus::FullRebuild { .. } => {
+                prepare_directory(&classes_dir)?;
+                compile_pipeline(
+                    &compilers,
+                    &project.source_dirs,
+                    &dependency_paths,
+                    &classes_dir,
+                    &project.project_root,
+                    jvm_target,
+                    None,
+                )?;
+                true
+            }
+            manifest::IncrementalStatus::Incremental { dirty } => {
+                ensure_directory(&classes_dir)?;
+                let dirty_set: HashSet<PathBuf> = dirty.iter().cloned().collect();
+                compile_pipeline(
+                    &compilers,
+                    &project.source_dirs,
+                    &dependency_paths,
+                    &classes_dir,
+                    &project.project_root,
+                    jvm_target,
+                    Some(&dirty_set),
+                )?;
+                true
+            }
+            manifest::IncrementalStatus::UpToDate => {
+                ensure_directory(&classes_dir)?;
+                false
+            }
+        };
+
         copy_resources(&project.resource_dir, &classes_dir)?;
+
+        // Persist the updated manifest after a successful compilation.
+        if classes_rebuilt {
+            if let Ok(new_manifest) = manifest::build_updated_manifest(
+                toolchain_hash,
+                classpath_hash,
+                &all_sources,
+            ) {
+                let _ = new_manifest.save(&manifest_path);
+            }
+        }
+
         let jar_path = target_dir.join(format!("{}-{}.jar", project.name, project.version));
-        package_jar(&installed_jdk, &classes_dir, &jar_path, None)?;
+        // Re-package the JAR whenever sources were recompiled, or if the JAR is missing.
+        if classes_rebuilt || !jar_path.exists() {
+            package_jar(&installed_jdk, &classes_dir, &jar_path, None)?;
+        }
 
         let (fat_jar_path, fat_jar_warnings) =
             if let Some(main_class) = project.main_class.as_deref() {
@@ -213,7 +282,6 @@ impl JavaProjectBuilder {
 
         let target_dir = project.project_root.join("target");
         let classes_dir = target_dir.join("classes");
-        prepare_directory(&classes_dir)?;
 
         let main_java_sources = jot_common::collect_files_by_ext(&project.source_dirs, "java");
         let main_kotlin_sources = jot_common::collect_files_by_ext(&project.source_dirs, "kt");
@@ -222,6 +290,10 @@ impl JavaProjectBuilder {
             .toolchain
             .as_ref()
             .map(|value| value.version.as_str());
+
+        let kotlin_version = project.kotlin_toolchain.as_ref().map(|tc| tc.version.as_str());
+        let toolchain_hash =
+            manifest::compute_toolchain_hash(&toolchain_request.version, kotlin_version);
 
         if !main_java_sources.is_empty() || !main_kotlin_sources.is_empty() {
             let main_compile_classpath = ClasspathAssembler::new()
@@ -232,22 +304,80 @@ impl JavaProjectBuilder {
 
             let annotation_processing =
                 resolve_annotation_processing(&project, &self.resolver, &target_dir)?;
+            let mut hash_paths = main_compile_classpath.clone();
+            if let Some(ap) = &annotation_processing {
+                hash_paths.extend_from_slice(&ap.processor_paths);
+            }
+            let main_classpath_hash = manifest::compute_classpath_hash(&hash_paths);
+            let main_manifest_path = target_dir.join(manifest::MANIFEST_FILENAME);
+            let main_existing = manifest::BuildManifest::load(&main_manifest_path);
+
+            let all_main_sources: Vec<PathBuf> = {
+                let mut v = main_java_sources;
+                v.extend(main_kotlin_sources);
+                v
+            };
+            let main_status = manifest::classify_sources(
+                main_existing.as_ref(),
+                &toolchain_hash,
+                &main_classpath_hash,
+                &all_main_sources,
+            )?;
+
             let main_compilers = build_compiler_chain(
                 installed_kotlin.as_ref(),
                 &installed_jdk,
                 Some(project.source_dirs.as_slice()),
                 annotation_processing,
             );
-            compile_pipeline(
-                &main_compilers,
-                &project.source_dirs,
-                &main_compile_classpath,
-                &classes_dir,
-                &project.project_root,
-                jvm_target,
-            )?;
+
+            let main_compiled = match &main_status {
+                manifest::IncrementalStatus::FullRebuild { .. } => {
+                    prepare_directory(&classes_dir)?;
+                    compile_pipeline(
+                        &main_compilers,
+                        &project.source_dirs,
+                        &main_compile_classpath,
+                        &classes_dir,
+                        &project.project_root,
+                        jvm_target,
+                        None,
+                    )?;
+                    true
+                }
+                manifest::IncrementalStatus::Incremental { dirty } => {
+                    ensure_directory(&classes_dir)?;
+                    let dirty_set: HashSet<PathBuf> = dirty.iter().cloned().collect();
+                    compile_pipeline(
+                        &main_compilers,
+                        &project.source_dirs,
+                        &main_compile_classpath,
+                        &classes_dir,
+                        &project.project_root,
+                        jvm_target,
+                        Some(&dirty_set),
+                    )?;
+                    true
+                }
+                manifest::IncrementalStatus::UpToDate => {
+                    ensure_directory(&classes_dir)?;
+                    false
+                }
+            };
 
             copy_resources(&project.resource_dir, &classes_dir)?;
+
+            if main_compiled {
+                if let Ok(m) = manifest::build_updated_manifest(
+                    toolchain_hash.clone(),
+                    main_classpath_hash,
+                    &all_main_sources,
+                ) {
+                    let _ = m.save(&main_manifest_path);
+                }
+            }
+        } else {
+            ensure_directory(&classes_dir)?;
         }
 
         let test_java_sources = jot_common::collect_files_by_ext(&project.test_source_dirs, "java");
@@ -261,7 +391,6 @@ impl JavaProjectBuilder {
         }
 
         let test_classes_dir = target_dir.join("test-classes");
-        prepare_directory(&test_classes_dir)?;
         let test_compile_classpath = ClasspathAssembler::new()
             .with_paths([classes_dir.clone()])
             .with_artifacts(&compile_dependencies)
@@ -270,6 +399,22 @@ impl JavaProjectBuilder {
             .with_optional_unique_path(kotlin_stdlib_jar(installed_kotlin.as_ref()))
             .build();
 
+        let test_classpath_hash = manifest::compute_classpath_hash(&test_compile_classpath);
+        let test_manifest_path = target_dir.join(manifest::TEST_MANIFEST_FILENAME);
+        let test_existing = manifest::BuildManifest::load(&test_manifest_path);
+
+        let all_test_sources: Vec<PathBuf> = {
+            let mut v = test_java_sources;
+            v.extend(test_kotlin_sources);
+            v
+        };
+        let test_status = manifest::classify_sources(
+            test_existing.as_ref(),
+            &toolchain_hash,
+            &test_classpath_hash,
+            &all_test_sources,
+        )?;
+
         // Test sources: no annotation processing
         let test_compilers = build_compiler_chain(
             installed_kotlin.as_ref(),
@@ -277,14 +422,50 @@ impl JavaProjectBuilder {
             Some(project.test_source_dirs.as_slice()),
             None,
         );
-        compile_pipeline(
-            &test_compilers,
-            &project.test_source_dirs,
-            &test_compile_classpath,
-            &test_classes_dir,
-            &project.project_root,
-            jvm_target,
-        )?;
+
+        let test_compiled = match &test_status {
+            manifest::IncrementalStatus::FullRebuild { .. } => {
+                prepare_directory(&test_classes_dir)?;
+                compile_pipeline(
+                    &test_compilers,
+                    &project.test_source_dirs,
+                    &test_compile_classpath,
+                    &test_classes_dir,
+                    &project.project_root,
+                    jvm_target,
+                    None,
+                )?;
+                true
+            }
+            manifest::IncrementalStatus::Incremental { dirty } => {
+                ensure_directory(&test_classes_dir)?;
+                let dirty_set: HashSet<PathBuf> = dirty.iter().cloned().collect();
+                compile_pipeline(
+                    &test_compilers,
+                    &project.test_source_dirs,
+                    &test_compile_classpath,
+                    &test_classes_dir,
+                    &project.project_root,
+                    jvm_target,
+                    Some(&dirty_set),
+                )?;
+                true
+            }
+            manifest::IncrementalStatus::UpToDate => {
+                ensure_directory(&test_classes_dir)?;
+                false
+            }
+        };
+
+        if test_compiled {
+            if let Ok(m) = manifest::build_updated_manifest(
+                toolchain_hash,
+                test_classpath_hash,
+                &all_test_sources,
+            ) {
+                let _ = m.save(&test_manifest_path);
+            }
+        }
 
         let console_jar = test_dependencies
             .iter()
@@ -381,7 +562,6 @@ impl JavaProjectBuilder {
 
         let target_dir = project.project_root.join("target");
         let classes_dir = target_dir.join("classes");
-        prepare_directory(&classes_dir)?;
 
         let main_java_sources = jot_common::collect_files_by_ext(&project.source_dirs, "java");
         let main_kotlin_sources = jot_common::collect_files_by_ext(&project.source_dirs, "kt");
@@ -390,6 +570,10 @@ impl JavaProjectBuilder {
             .toolchain
             .as_ref()
             .map(|value| value.version.as_str());
+
+        let kotlin_version = project.kotlin_toolchain.as_ref().map(|tc| tc.version.as_str());
+        let toolchain_hash =
+            manifest::compute_toolchain_hash(&toolchain_request.version, kotlin_version);
 
         if !main_java_sources.is_empty() || !main_kotlin_sources.is_empty() {
             let main_compile_classpath = ClasspathAssembler::new()
@@ -400,22 +584,80 @@ impl JavaProjectBuilder {
 
             let annotation_processing =
                 resolve_annotation_processing(&project, &self.resolver, &target_dir)?;
+            let mut hash_paths = main_compile_classpath.clone();
+            if let Some(ap) = &annotation_processing {
+                hash_paths.extend_from_slice(&ap.processor_paths);
+            }
+            let main_classpath_hash = manifest::compute_classpath_hash(&hash_paths);
+            let main_manifest_path = target_dir.join(manifest::MANIFEST_FILENAME);
+            let main_existing = manifest::BuildManifest::load(&main_manifest_path);
+
+            let all_main_sources: Vec<PathBuf> = {
+                let mut v = main_java_sources;
+                v.extend(main_kotlin_sources);
+                v
+            };
+            let main_status = manifest::classify_sources(
+                main_existing.as_ref(),
+                &toolchain_hash,
+                &main_classpath_hash,
+                &all_main_sources,
+            )?;
+
             let main_compilers = build_compiler_chain(
                 installed_kotlin.as_ref(),
                 &installed_jdk,
                 Some(project.source_dirs.as_slice()),
                 annotation_processing,
             );
-            compile_pipeline(
-                &main_compilers,
-                &project.source_dirs,
-                &main_compile_classpath,
-                &classes_dir,
-                &project.project_root,
-                jvm_target,
-            )?;
+
+            let main_compiled = match &main_status {
+                manifest::IncrementalStatus::FullRebuild { .. } => {
+                    prepare_directory(&classes_dir)?;
+                    compile_pipeline(
+                        &main_compilers,
+                        &project.source_dirs,
+                        &main_compile_classpath,
+                        &classes_dir,
+                        &project.project_root,
+                        jvm_target,
+                        None,
+                    )?;
+                    true
+                }
+                manifest::IncrementalStatus::Incremental { dirty } => {
+                    ensure_directory(&classes_dir)?;
+                    let dirty_set: HashSet<PathBuf> = dirty.iter().cloned().collect();
+                    compile_pipeline(
+                        &main_compilers,
+                        &project.source_dirs,
+                        &main_compile_classpath,
+                        &classes_dir,
+                        &project.project_root,
+                        jvm_target,
+                        Some(&dirty_set),
+                    )?;
+                    true
+                }
+                manifest::IncrementalStatus::UpToDate => {
+                    ensure_directory(&classes_dir)?;
+                    false
+                }
+            };
 
             copy_resources(&project.resource_dir, &classes_dir)?;
+
+            if main_compiled {
+                if let Ok(m) = manifest::build_updated_manifest(
+                    toolchain_hash.clone(),
+                    main_classpath_hash,
+                    &all_main_sources,
+                ) {
+                    let _ = m.save(&main_manifest_path);
+                }
+            }
+        } else {
+            ensure_directory(&classes_dir)?;
         }
 
         let bench_java_sources =
@@ -431,7 +673,6 @@ impl JavaProjectBuilder {
         }
 
         let bench_classes_dir = target_dir.join("bench-classes");
-        prepare_directory(&bench_classes_dir)?;
 
         let bench_compile_classpath = ClasspathAssembler::new()
             .with_paths([classes_dir.clone()])
@@ -451,12 +692,30 @@ impl JavaProjectBuilder {
         let jmh_processor_paths: Vec<_> = jmh_dependencies.iter().map(|a| a.path.clone()).collect();
 
         let generated_bench_sources_dir = target_dir.join("generated-bench-sources");
-        prepare_directory(&generated_bench_sources_dir)?;
+
+        // Compute bench classpath hash including processor paths.
+        let mut bench_hash_paths = bench_compile_classpath.clone();
+        bench_hash_paths.extend_from_slice(&jmh_processor_paths);
+        let bench_classpath_hash = manifest::compute_classpath_hash(&bench_hash_paths);
+        let bench_manifest_path = target_dir.join(manifest::BENCH_MANIFEST_FILENAME);
+        let bench_existing = manifest::BuildManifest::load(&bench_manifest_path);
+
+        let all_bench_sources: Vec<PathBuf> = {
+            let mut v = bench_java_sources;
+            v.extend(bench_kotlin_sources);
+            v
+        };
+        let bench_status = manifest::classify_sources(
+            bench_existing.as_ref(),
+            &toolchain_hash,
+            &bench_classpath_hash,
+            &all_bench_sources,
+        )?;
 
         let bench_ap = Some(AnnotationProcessingConfig {
             processor_paths: jmh_processor_paths,
             options: std::collections::BTreeMap::new(),
-            generated_sources_dir: generated_bench_sources_dir,
+            generated_sources_dir: generated_bench_sources_dir.clone(),
         });
         let bench_compilers = build_compiler_chain(
             installed_kotlin.as_ref(),
@@ -464,14 +723,54 @@ impl JavaProjectBuilder {
             Some(project.bench.source_dirs.as_slice()),
             bench_ap,
         );
-        compile_pipeline(
-            &bench_compilers,
-            &project.bench.source_dirs,
-            &bench_compile_classpath,
-            &bench_classes_dir,
-            &project.project_root,
-            jvm_target,
-        )?;
+
+        match &bench_status {
+            manifest::IncrementalStatus::FullRebuild { .. } => {
+                prepare_directory(&bench_classes_dir)?;
+                prepare_directory(&generated_bench_sources_dir)?;
+                compile_pipeline(
+                    &bench_compilers,
+                    &project.bench.source_dirs,
+                    &bench_compile_classpath,
+                    &bench_classes_dir,
+                    &project.project_root,
+                    jvm_target,
+                    None,
+                )?;
+                if let Ok(m) = manifest::build_updated_manifest(
+                    toolchain_hash,
+                    bench_classpath_hash,
+                    &all_bench_sources,
+                ) {
+                    let _ = m.save(&bench_manifest_path);
+                }
+            }
+            manifest::IncrementalStatus::Incremental { dirty } => {
+                ensure_directory(&bench_classes_dir)?;
+                ensure_directory(&generated_bench_sources_dir)?;
+                let dirty_set: HashSet<PathBuf> = dirty.iter().cloned().collect();
+                compile_pipeline(
+                    &bench_compilers,
+                    &project.bench.source_dirs,
+                    &bench_compile_classpath,
+                    &bench_classes_dir,
+                    &project.project_root,
+                    jvm_target,
+                    Some(&dirty_set),
+                )?;
+                if let Ok(m) = manifest::build_updated_manifest(
+                    toolchain_hash,
+                    bench_classpath_hash,
+                    &all_bench_sources,
+                ) {
+                    let _ = m.save(&bench_manifest_path);
+                }
+            }
+            manifest::IncrementalStatus::UpToDate => {
+                ensure_directory(&bench_classes_dir)?;
+                ensure_directory(&generated_bench_sources_dir)?;
+            }
+        }
 
         let runtime_classpath = ClasspathAssembler::new()
             .with_paths([classes_dir, bench_classes_dir])
@@ -628,6 +927,15 @@ fn prepare_directory(path: &Path) -> Result<(), BuildError> {
         fs::remove_dir_all(path)?;
     }
     fs::create_dir_all(path)?;
+    Ok(())
+}
+
+/// Create the directory if it does not already exist, without removing its contents.
+/// Used for incremental builds where existing class files should be preserved.
+fn ensure_directory(path: &Path) -> Result<(), BuildError> {
+    if !path.exists() {
+        fs::create_dir_all(path)?;
+    }
     Ok(())
 }
 

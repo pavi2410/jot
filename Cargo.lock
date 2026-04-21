@@ -866,6 +866,7 @@ dependencies = [
  "jot-config",
  "jot-resolver",
  "jot-toolchain",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",

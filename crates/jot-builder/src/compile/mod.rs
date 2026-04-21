@@ -40,6 +40,10 @@ pub(crate) trait SourceCompiler {
 // ── Pipeline ────────────────────────────────────────────────────────────────
 
 /// Run compilers in order. Each compiler's output extends the classpath for the next.
+///
+/// When `dirty_filter` is `Some`, only source files present in that set are
+/// compiled (incremental mode). When `None`, all sources collected by each
+/// compiler are compiled (full rebuild mode).
 pub(crate) fn compile_pipeline(
     compilers: &[Box<dyn SourceCompiler>],
     source_dirs: &[PathBuf],
@@ -47,11 +51,15 @@ pub(crate) fn compile_pipeline(
     output_dir: &Path,
     project_root: &Path,
     jvm_target: Option<&str>,
+    dirty_filter: Option<&std::collections::HashSet<PathBuf>>,
 ) -> Result<(), BuildError> {
     let mut classpath = base_classpath.to_vec();
 
     for compiler in compilers {
-        let sources = compiler.collect_sources(source_dirs)?;
+        let mut sources = compiler.collect_sources(source_dirs)?;
+        if let Some(dirty) = dirty_filter {
+            sources.retain(|s| dirty.contains(s));
+        }
         if sources.is_empty() {
             continue;
         }
