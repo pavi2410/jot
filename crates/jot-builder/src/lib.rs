@@ -157,6 +157,8 @@ impl JavaProjectBuilder {
             }
             manifest::IncrementalStatus::UpToDate => {
                 ensure_directory(&classes_dir)?;
+                jot_common::spinner("Sources up to date")
+                    .finish_with_message("Sources up to date — skipped compilation");
                 false
             }
         };
@@ -355,6 +357,8 @@ impl JavaProjectBuilder {
                 }
                 manifest::IncrementalStatus::UpToDate => {
                     ensure_directory(&classes_dir)?;
+                    jot_common::spinner("Sources up to date")
+                        .finish_with_message("Sources up to date — skipped compilation");
                     false
                 }
             };
@@ -446,6 +450,8 @@ impl JavaProjectBuilder {
             }
             manifest::IncrementalStatus::UpToDate => {
                 ensure_directory(&test_classes_dir)?;
+                jot_common::spinner("Test sources up to date")
+                    .finish_with_message("Test sources up to date — skipped compilation");
                 false
             }
         };
@@ -633,6 +639,8 @@ impl JavaProjectBuilder {
                 }
                 manifest::IncrementalStatus::UpToDate => {
                     ensure_directory(&classes_dir)?;
+                    jot_common::spinner("Sources up to date")
+                        .finish_with_message("Sources up to date — skipped compilation");
                     false
                 }
             };
@@ -758,6 +766,8 @@ impl JavaProjectBuilder {
             manifest::IncrementalStatus::UpToDate => {
                 ensure_directory(&bench_classes_dir)?;
                 ensure_directory(&generated_bench_sources_dir)?;
+                jot_common::spinner("Bench sources up to date")
+                    .finish_with_message("Bench sources up to date — skipped compilation");
             }
         }
 

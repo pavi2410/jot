@@ -380,6 +380,44 @@ mod tests {
     }
 
     #[test]
+    fn classify_sources_up_to_date_overhead_is_negligible() {
+        // Create 200 real Java source files, fingerprint them, then measure how
+        // fast classify_sources runs on an already-up-to-date project.
+        //
+        // The goal: prove that the incremental check overhead is far below the
+        // time saved by skipping javac (javac startup alone is typically >500ms).
+        let tmp = tempdir().unwrap();
+        let n = 200_usize;
+        let mut sources = Vec::with_capacity(n);
+        for i in 0..n {
+            let path = tmp.path().join(format!("Class{i}.java"));
+            fs::write(&path, format!("class Class{i} {{ int x = {i}; }}").as_bytes()).unwrap();
+            sources.push(path);
+        }
+
+        let m = build_updated_manifest("tool-hash".to_string(), "cp-hash".to_string(), &sources)
+            .expect("manifest build should succeed");
+        let path = tmp.path().join("manifest.json");
+        m.save(&path).unwrap();
+
+        let loaded = BuildManifest::load(&path).expect("should load");
+
+        let start = std::time::Instant::now();
+        let status = classify_sources(Some(&loaded), "tool-hash", "cp-hash", &sources).unwrap();
+        let elapsed = start.elapsed();
+
+        // Must return UpToDate since nothing changed.
+        assert!(matches!(status, IncrementalStatus::UpToDate));
+
+        // The check overhead for 200 files must be under 200ms (javac startup
+        // alone typically exceeds 500ms, so any value here represents a net win).
+        assert!(
+            elapsed.as_millis() < 200,
+            "classify_sources took {elapsed:?} for {n} files — unexpectedly slow",
+        );
+    }
+
+    #[test]
     fn build_updated_manifest_fingerprints_all_sources() {
         let tmp = tempdir().unwrap();
         let src1 = tmp.path().join("A.java");

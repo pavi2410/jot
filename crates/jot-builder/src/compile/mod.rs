@@ -74,11 +74,14 @@ pub(crate) fn compile_pipeline(
             output_dir: output_dir.to_path_buf(),
             jvm_target: jvm_target.map(|s| s.to_owned()),
         };
+        let start = std::time::Instant::now();
         let result = compiler.compile(&config, &sources)?;
+        let elapsed = start.elapsed();
         progress.finish_with_message(format!(
-            "Compiled {} {} sources",
+            "Compiled {} {} sources in {:.2?}",
             sources.len(),
             compiler.name(),
+            elapsed,
         ));
         classpath.extend(result.extra_classpath);
     }
