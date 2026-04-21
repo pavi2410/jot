@@ -165,15 +165,17 @@ impl JavaProjectBuilder {
 
         copy_resources(&project.resource_dir, &classes_dir)?;
 
-        // Persist the updated manifest after a successful compilation.
-        if classes_rebuilt {
-            try_save_manifest(&manifest_path, toolchain_hash, classpath_hash, &all_sources);
-        }
-
         let jar_path = target_dir.join(format!("{}-{}.jar", project.name, project.version));
         // Re-package the JAR whenever sources were recompiled, or if the JAR is missing.
         if classes_rebuilt || !jar_path.exists() {
             package_jar(&installed_jdk, &classes_dir, &jar_path, None)?;
+        }
+
+        // Persist the manifest only after the JAR has been successfully packaged.
+        // Saving it before packaging means a packaging failure (e.g. disk full)
+        // would leave a stale manifest that suppresses a rebuild on the next run.
+        if classes_rebuilt {
+            try_save_manifest(&manifest_path, toolchain_hash, classpath_hash, &all_sources);
         }
 
         let (fat_jar_path, fat_jar_warnings) =
@@ -291,6 +293,10 @@ impl JavaProjectBuilder {
         let toolchain_hash =
             manifest::compute_toolchain_hash(&toolchain_request.version, kotlin_version);
 
+        // Tracks whether main sources were recompiled; used below to invalidate
+        // the test manifest when the main API changes.
+        let mut main_compiled = false;
+
         if !main_java_sources.is_empty() || !main_kotlin_sources.is_empty() {
             let main_compile_classpath = ClasspathAssembler::new()
                 .with_artifacts(&compile_dependencies)
@@ -327,7 +333,7 @@ impl JavaProjectBuilder {
                 annotation_processing,
             );
 
-            let main_compiled = match &main_status {
+            main_compiled = match &main_status {
                 manifest::IncrementalStatus::FullRebuild { .. } => {
                     prepare_directory(&classes_dir)?;
                     compile_pipeline(
@@ -411,6 +417,14 @@ impl JavaProjectBuilder {
             &test_classpath_hash,
             &all_test_sources,
         )?;
+        // If main sources were recompiled, test classes may be stale against
+        // the new API (risk of NoSuchMethodError / IncompatibleClassChangeError).
+        // Force a full rebuild of test sources whenever main was touched.
+        let test_status = if main_compiled {
+            manifest::IncrementalStatus::FullRebuild { reason: "main sources recompiled" }
+        } else {
+            test_status
+        };
 
         // Test sources: no annotation processing
         let test_compilers = build_compiler_chain(
@@ -573,6 +587,10 @@ impl JavaProjectBuilder {
         let toolchain_hash =
             manifest::compute_toolchain_hash(&toolchain_request.version, kotlin_version);
 
+        // Tracks whether main sources were recompiled; used below to invalidate
+        // the bench manifest when the main API changes.
+        let mut main_compiled = false;
+
         if !main_java_sources.is_empty() || !main_kotlin_sources.is_empty() {
             let main_compile_classpath = ClasspathAssembler::new()
                 .with_artifacts(&compile_dependencies)
@@ -609,7 +627,7 @@ impl JavaProjectBuilder {
                 annotation_processing,
             );
 
-            let main_compiled = match &main_status {
+            main_compiled = match &main_status {
                 manifest::IncrementalStatus::FullRebuild { .. } => {
                     prepare_directory(&classes_dir)?;
                     compile_pipeline(
@@ -710,6 +728,13 @@ impl JavaProjectBuilder {
             &bench_classpath_hash,
             &all_bench_sources,
         )?;
+        // If main sources were recompiled, bench classes may be stale against
+        // the new API. Force a full rebuild of bench sources whenever main was touched.
+        let bench_status = if main_compiled {
+            manifest::IncrementalStatus::FullRebuild { reason: "main sources recompiled" }
+        } else {
+            bench_status
+        };
 
         let bench_ap = Some(AnnotationProcessingConfig {
             processor_paths: jmh_processor_paths,

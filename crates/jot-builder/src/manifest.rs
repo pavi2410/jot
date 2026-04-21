@@ -65,6 +65,12 @@ impl BuildManifest {
 // ── Fingerprinting helpers ────────────────────────────────────────────────────
 
 /// Compute a deterministic SHA-256 over a sorted list of classpath path strings.
+///
+/// **Known limitation:** the hash covers JAR file _paths_, not their contents.
+/// A JAR replaced in-place at the same cached path (e.g., a local SNAPSHOT
+/// overwriting the cached file) will not invalidate the manifest.  This is an
+/// accepted trade-off for the current implementation; hashing every JAR on
+/// every build would itself be expensive.
 pub fn compute_classpath_hash(classpath: &[PathBuf]) -> String {
     let mut sorted: Vec<&PathBuf> = classpath.iter().collect();
     sorted.sort();
@@ -162,7 +168,9 @@ pub fn classify_sources(
         });
     }
 
-    // Check for deleted source files (stale .class pruning requires full rebuild).
+    // Check for sources that were previously tracked but are no longer in the
+    // source set (e.g., deleted from disk, or moved outside of source_dirs).
+    // Stale .class pruning requires a full rebuild in either case.
     let current_paths: std::collections::HashSet<String> = all_sources
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
@@ -170,7 +178,7 @@ pub fn classify_sources(
     for prev_path in manifest.sources.keys() {
         if !current_paths.contains(prev_path) {
             return Ok(IncrementalStatus::FullRebuild {
-                reason: "source file deleted",
+                reason: "source file no longer in the source set",
             });
         }
     }
@@ -301,7 +309,7 @@ mod tests {
         // `gone` is NOT written to disk — it represents a deleted file.
         let m = make_manifest(&[(&gone, "deadbeef")], "tool-hash", "cp-hash");
         let result = classify_sources(Some(&m), "tool-hash", "cp-hash", &[]).unwrap();
-        assert!(matches!(result, IncrementalStatus::FullRebuild { reason } if reason.contains("deleted")));
+        assert!(matches!(result, IncrementalStatus::FullRebuild { reason } if reason.contains("no longer")));
     }
 
     #[test]
