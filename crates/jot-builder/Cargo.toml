@@ -10,6 +10,7 @@ jot-common = { path = "../jot-common" }
 jot-config = { path = "../jot-config" }
 jot-resolver = { path = "../jot-resolver" }
 jot-toolchain = { path = "../jot-toolchain" }
+serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 zip.workspace = true

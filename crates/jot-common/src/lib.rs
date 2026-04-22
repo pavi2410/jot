@@ -84,7 +84,15 @@ pub fn count_bar(total: usize, message: &str) -> ProgressBar {
     progress
 }
 
-// ── SHA-256 file hashing ───────────────────────────────────────────────────
+// ── SHA-256 hashing ────────────────────────────────────────────────────────
+
+/// Return the hex-encoded SHA-256 digest of the given bytes.
+pub fn sha256_bytes(data: &[u8]) -> String {
+    use sha2::Digest;
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hex::encode(hasher.finalize())
+}
 
 pub fn sha256_file(path: &Path) -> Result<String, std::io::Error> {
     let file = fs::File::open(path)?;
