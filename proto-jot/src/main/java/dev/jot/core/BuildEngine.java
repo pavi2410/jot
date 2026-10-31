@@ -1,7 +1,7 @@
 package dev.jot.core;
 
-import dev.jot.core.resolve.MavenResolver;
 import dev.jot.core.resolve.Lockfile;
+import dev.jot.core.resolve.MavenResolver;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -53,23 +53,15 @@ public final class BuildEngine {
         }
         Path artifact = target.resolve(config.name() + "-" + config.version() + ".jar");
         Path stateFile = target.resolve(".jot/build-state.properties");
-        String compileFingerprint = compileFingerprint(project, sources, externalArtifacts);
+        String compileFingerprint = compileFingerprint(project, externalArtifacts);
         Properties previousState = readState(stateFile);
-        boolean compileRequired = !compiledClassesAreReusable(classes, previousState,
-                compileFingerprint);
-        if (compileRequired) {
-            deleteTree(classes);
-            Files.createDirectories(classes);
-            List<String> javac = new ArrayList<>(List.of(jdkTool("javac"), "--release",
-                    config.javaVersion(), "-d", classes.toString()));
-            String classpath = classpath(project, externalArtifacts);
-            if (!classpath.isBlank()) javac.addAll(List.of("-classpath", classpath));
-            sources.forEach(path -> javac.add(path.toString()));
-            runProcess(root, javac);
-        }
+        IncrementalJavaCompiler.Result compilation = IncrementalJavaCompiler.compile(root,
+                classes, config.javaVersion(), classpath(project, externalArtifacts),
+                compileFingerprint, sources, previousState);
+        boolean compileRequired = compilation.compiled();
 
         copyResources(resources, classes, previousState);
-        String classesHash = classFingerprint(classes);
+        String classesHash = compilation.classHash();
         String outputHash = directoryFingerprint(classes);
         String packageFingerprint = packageFingerprint(config, classesHash);
         boolean artifactIsIntact = Files.isRegularFile(artifact)
@@ -88,7 +80,9 @@ public final class BuildEngine {
         }
         Properties state = new Properties();
         for (String key : previousState.stringPropertyNames()) {
-            if (key.startsWith("resource.")) state.setProperty(key, previousState.getProperty(key));
+            if (key.startsWith("resource.") || key.startsWith("compile-source.")) {
+                state.setProperty(key, previousState.getProperty(key));
+            }
         }
         state.setProperty("compile-fingerprint", compileFingerprint);
         state.setProperty("compiled-classes-sha256", classesHash);
@@ -200,7 +194,7 @@ public final class BuildEngine {
         runProcess(root, runner);
     }
 
-    private static String compileFingerprint(WorkspaceProject project, List<Path> sources,
+    private static String compileFingerprint(WorkspaceProject project,
                                              List<MavenResolver.ResolvedArtifact> externalArtifacts)
             throws IOException, NoSuchAlgorithmException {
         Path root = project.root();
@@ -210,10 +204,6 @@ public final class BuildEngine {
         updateDigest(digest, config.sourceDirectories().toString());
         updateDigest(digest, config.outputDirectory());
         updateDigest(digest, System.getProperty("java.version"));
-        for (Path source : sources) {
-            updateDigest(digest, root.relativize(source).toString());
-            digest.update(Files.readAllBytes(source));
-        }
         for (WorkspaceProject dependency : transitiveDependencies(project)) {
             updateDigest(digest, dependency.root().toString());
             Path dependencyClasses = dependency.root().resolve(dependency.config().outputDirectory());
@@ -257,25 +247,6 @@ public final class BuildEngine {
             }
         }
         return state;
-    }
-
-    private static boolean compiledClassesAreReusable(Path classes, Properties state,
-                                                      String compileFingerprint) throws Exception {
-        return Files.isDirectory(classes)
-                && compileFingerprint.equals(state.getProperty("compile-fingerprint"))
-                && classFingerprint(classes).equals(state.getProperty("compiled-classes-sha256"));
-    }
-
-    private static String classFingerprint(Path directory) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        try (Stream<Path> paths = Files.walk(directory)) {
-            for (Path file : paths.filter(Files::isRegularFile)
-                    .filter(path -> path.toString().endsWith(".class")).sorted().toList()) {
-                updateDigest(digest, directory.relativize(file).toString());
-                digest.update(Files.readAllBytes(file));
-            }
-        }
-        return HexFormat.of().formatHex(digest.digest());
     }
 
     private static String directoryFingerprint(Path directory) throws Exception {

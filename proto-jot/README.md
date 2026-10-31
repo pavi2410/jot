@@ -41,7 +41,9 @@ build and run.
 
 The build cache fingerprints compiler inputs separately from package inputs.
 Resource-only changes update the class output and JAR without recompiling Java
-sources; changed Java sources currently trigger a full project compile.
+sources. Java source edits are compiled on their own when their class outputs
+and binary APIs remain stable; additions, deletions, binary API changes, or
+compiler and classpath changes trigger a full project compile.
 
 The Java CLI resolves pinned Maven coordinates and their compile/runtime
 transitive dependencies from POMs, checking repository SHA-256 sidecars when

@@ -4,18 +4,20 @@ import dev.jot.core.resolve.MavenCoordinate;
 import dev.jot.core.resolve.MavenResolver;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.net.URLClassLoader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.zip.ZipFile;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
+import java.util.zip.ZipFile;
 import javax.tools.ToolProvider;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -242,6 +244,92 @@ class BuildEngineTest {
             assertNull(jar.getEntry("config/app.properties"),
                     "deleted resources should disappear from the rebuilt JAR");
         }
+        byte[] withoutResource = Files.readAllBytes(artifact);
+        BuildEngine.build(project);
+        assertEquals(unchangedClassTimestamp, Files.getLastModifiedTime(compiledClass),
+                "an unchanged project should skip javac");
+        assertArrayEquals(withoutResource, Files.readAllBytes(artifact),
+                "an unchanged project should keep its artifact");
+    }
+
+    @Test
+    void incrementallyCompilesApiStableChangesAndFullyRebuildsForApiChanges() throws Exception {
+        write("src/sample/Library.java", """
+                package sample;
+                public final class Library {
+                    public static String message() { return "before"; }
+                }
+                """);
+        write("src/sample/Main.java", """
+                package sample;
+                public final class Main {
+                    public static String message() { return Library.message(); }
+                }
+                """);
+        write("jot.toml", """
+                [project]
+                name = "incremental-app"
+                [toolchains]
+                java = "27"
+                """);
+        ProjectConfig config = ProjectConfig.read(temp.resolve("jot.toml"), null);
+        WorkspaceProject project = new WorkspaceProject(temp, config, List.of());
+        BuildEngine.build(project);
+
+        Path mainClass = temp.resolve("target/classes/sample/Main.class");
+        Path libraryClass = temp.resolve("target/classes/sample/Library.class");
+        FileTime sentinel = FileTime.fromMillis(1_234_567_890_000L);
+        Files.setLastModifiedTime(mainClass, sentinel);
+        byte[] oldLibraryClass = Files.readAllBytes(libraryClass);
+        write("src/sample/Library.java", """
+                package sample;
+                public final class Library {
+                    public static String message() { return "after"; }
+                }
+                """);
+
+        BuildEngine.build(project);
+
+        assertEquals(sentinel, Files.getLastModifiedTime(mainClass),
+                "an API-stable edit should leave dependent classes untouched");
+        assertTrue(!java.util.Arrays.equals(oldLibraryClass, Files.readAllBytes(libraryClass)));
+        try (URLClassLoader loader = new URLClassLoader(
+                new java.net.URL[] {temp.resolve("target/classes").toUri().toURL()}, null)) {
+            assertEquals("after", loader.loadClass("sample.Library").getMethod("message").invoke(null));
+        }
+
+        Files.setLastModifiedTime(mainClass, sentinel);
+        write("src/sample/Library.java", """
+                package sample;
+                public final class Library {
+                    public static String greeting() { return "api-changed"; }
+                }
+                """);
+        write("src/sample/Main.java", """
+                package sample;
+                public final class Main {
+                    public static String message() { return Library.greeting(); }
+                }
+                """);
+
+        BuildEngine.build(project);
+
+        assertNotEquals(sentinel, Files.getLastModifiedTime(mainClass),
+                "an API change should recompile dependent project sources");
+
+        Files.setLastModifiedTime(mainClass, sentinel);
+        write("src/sample/Extra.java", "package sample; public final class Extra {}\n");
+        BuildEngine.build(project);
+        assertTrue(Files.isRegularFile(temp.resolve("target/classes/sample/Extra.class")));
+        assertNotEquals(sentinel, Files.getLastModifiedTime(mainClass),
+                "adding a source should rebuild the complete source set");
+
+        Files.setLastModifiedTime(mainClass, sentinel);
+        Files.delete(temp.resolve("src/sample/Extra.java"));
+        BuildEngine.build(project);
+        assertTrue(!Files.exists(temp.resolve("target/classes/sample/Extra.class")));
+        assertNotEquals(sentinel, Files.getLastModifiedTime(mainClass),
+                "deleting a source should remove stale classes in a full rebuild");
     }
 
     private void write(String relativePath, String contents) throws Exception {
