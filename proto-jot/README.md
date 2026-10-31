@@ -24,8 +24,17 @@ export PATH="$JAVA_HOME/bin:$PATH"
 java -jar target/proto-jot-0.1.0.jar build
 ```
 
-The prototype supports `build`, `run`, and `clean`, and accepts `--project` to
-select a project directory. Build source directories and the Java release are
-read from `jot.toml`. It is still limited to one module, Java sources, and no
-external dependencies. Its TOML reader intentionally supports only the string
-values and string arrays this project needs today.
+The prototype supports `build`, `run`, and `clean`, and accepts `--project` and
+`--module`. Build source directories and the Java release are read from
+`jot.toml`. Workspaces list their members explicitly and local dependencies use
+`{ path = "../module" }`. `examples/tiny-workspace` demonstrates a two-module
+build and run.
+
+External Maven dependencies, tests, Kotlin, and the full TOML specification are
+not implemented yet. The parser currently handles the strings, string arrays,
+and path dependency inline tables needed by this slice.
+
+```sh
+"$JAVA_HOME/bin/java" -jar target/bin/proto-jot.jar build --project examples/tiny-workspace
+"$JAVA_HOME/bin/java" -jar target/bin/proto-jot.jar run --project examples/tiny-workspace --module app
+```

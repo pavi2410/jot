@@ -1,0 +1,7 @@
+[project]
+name = "greeting"
+version = "0.1.0"
+layout = "maven"
+
+[build]
+source-dirs = ["src/main/java"]

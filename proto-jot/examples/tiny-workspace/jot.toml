@@ -1,0 +1,5 @@
+[workspace]
+members = ["greeting", "app"]
+
+[toolchains]
+java = "27"
