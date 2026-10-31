@@ -41,6 +41,10 @@ Explicit source and resource directories override those defaults. Workspaces lis
 `{ path = "../module" }`. `examples/tiny-workspace` demonstrates a two-module
 build and run.
 
+Jot currently uses the JDK it is running on. That JDK must be at least as new
+as the Java release requested by the project; Jot reports a direct error when
+it is too old.
+
 The build cache fingerprints compiler inputs separately from package inputs.
 Resource-only changes update the class output and JAR without recompiling Java
 sources. Java source edits are compiled on their own when their class outputs

@@ -26,6 +26,7 @@ public final class BuildEngine {
     public static void build(WorkspaceProject project, MavenResolver resolver) throws Exception {
         Path root = project.root();
         ProjectConfig config = project.config();
+        JavaToolchain.requireCompatible(config.javaVersion());
         List<MavenResolver.ResolvedArtifact> externalArtifacts = resolveExternalArtifacts(project,
                 resolver);
         List<Path> sources = new ArrayList<>();
@@ -109,6 +110,7 @@ public final class BuildEngine {
 
     public static void run(WorkspaceProject project, List<String> arguments,
                            MavenResolver resolver) throws Exception {
+        JavaToolchain.requireCompatible(project.config().javaVersion());
         List<String> classpathEntries = new ArrayList<>();
         classpathEntries.add(project.root().resolve(project.config().outputDirectory()).toString());
         for (WorkspaceProject dependency : transitiveDependencies(project)) {
