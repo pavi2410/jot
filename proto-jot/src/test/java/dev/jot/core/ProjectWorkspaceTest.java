@@ -14,6 +14,22 @@ class ProjectWorkspaceTest {
   @TempDir Path temp;
 
   @Test
+  void inheritsSeparateGraalVmToolchainIntoWorkspaceMembers() throws Exception {
+    Path root = temp.resolve("graal-workspace");
+    Files.createDirectories(root.resolve("app"));
+    Files.writeString(
+        root.resolve("jot.toml"),
+        "[workspace]\nmembers = [\"app\"]\n[toolchains]\njava = \"21\"\ngraalvm = \"25\"\n");
+    Files.writeString(
+        root.resolve("app/jot.toml"), "[project]\nname = \"app\"\nmain-class = \"sample.Main\"\n");
+
+    ProjectConfig config = ProjectConfig.read(root.resolve("jot.toml"), null);
+    ProjectWorkspace workspace = ProjectWorkspace.load(root, config);
+
+    assertEquals("25", workspace.ordered().getFirst().config().graalVmVersion());
+  }
+
+  @Test
   void ordersModulesByLocalDependenciesAndInheritsTheJavaToolchain() throws Exception {
     write(
         "jot.toml",

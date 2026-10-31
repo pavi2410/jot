@@ -20,6 +20,7 @@ class JavaToolchainTest {
     assertNull(JavaToolchain.parseRequest("21").vendor());
     assertEquals("corretto", JavaToolchain.parseRequest("corretto-21").vendor());
     assertEquals("adoptium-21", JavaToolchain.parseRequest("temurin-21").specification());
+    assertEquals("graalvm", JavaToolchain.parseRequest("graalvm-25").vendor());
   }
 
   @Test
@@ -40,6 +41,16 @@ class JavaToolchainTest {
     Path running = temp.resolve("running-jdk-27");
 
     assertEquals(running, JavaToolchain.selectHome("21", running, 27, List.of()));
+  }
+
+  @Test
+  void selectsManagedJdkWhenRunningInsideANativeImageWithoutJavaHome() {
+    Path managed = temp.resolve("jdk-25");
+
+    assertEquals(
+        managed,
+        JavaToolchain.selectHome(
+            "25", null, 25, List.of(new JavaToolchain.Installation(25, "25.0.4", managed))));
   }
 
   @Test

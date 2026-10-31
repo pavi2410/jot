@@ -20,10 +20,15 @@ public final class JavaToolchain {
   public static Path javaHome(String requestedRelease, String requestedVendor) throws IOException {
     Path managedJdks =
         Path.of(System.getProperty("user.home"), ".jot", "jdks").toAbsolutePath().normalize();
+    String runningHomeValue = System.getProperty("java.home");
+    Path runningHome =
+        runningHomeValue == null || runningHomeValue.isBlank()
+            ? null
+            : Path.of(runningHomeValue).toAbsolutePath().normalize();
     return selectHome(
         requestedRelease,
         requestedVendor,
-        Path.of(System.getProperty("java.home")).toAbsolutePath().normalize(),
+        runningHome,
         Runtime.version().feature(),
         canonicalVendor(System.getProperty("java.vendor")),
         installedJdks(managedJdks));
@@ -48,7 +53,8 @@ public final class JavaToolchain {
         return installation.home();
     }
 
-    if (runningFeature >= requested
+    if (runningHome != null
+        && runningFeature >= requested
         && (requestedVendor == null || requestedVendor.equals(runningVendor))) return runningHome;
 
     throw new IllegalStateException(
@@ -72,8 +78,7 @@ public final class JavaToolchain {
       for (Path releaseFile :
           files
               .filter(path -> path.getFileName().toString().equals("release"))
-              .filter(path -> Files.isRegularFile(path.resolveSibling("bin/java")))
-              .filter(path -> Files.isRegularFile(path.resolveSibling("bin/javac")))
+              .filter(path -> isJdkHome(path.getParent()))
               .toList()) {
         Path home = releaseFile.getParent();
         Properties release = new Properties();
@@ -134,6 +139,7 @@ public final class JavaToolchain {
             case "corretto" -> "corretto";
             case "zulu" -> "zulu";
             case "oracle" -> "oracle";
+            case "graalvm" -> "graalvm";
             default -> null;
           };
       if (vendor != null) version = specification.substring(separator + 1);
@@ -149,6 +155,7 @@ public final class JavaToolchain {
     if (value.contains("amazon") || value.contains("corretto")) return "corretto";
     if (value.contains("azul") || value.contains("zulu")) return "zulu";
     if (value.contains("oracle")) return "oracle";
+    if (value.contains("graalvm")) return "graalvm";
     return value;
   }
 
@@ -163,10 +170,16 @@ public final class JavaToolchain {
       install = install.getParent();
     }
     String name = install.getFileName() == null ? "" : install.getFileName().toString();
-    for (String vendor : List.of("adoptium", "corretto", "zulu", "oracle")) {
+    for (String vendor : List.of("adoptium", "corretto", "zulu", "oracle", "graalvm")) {
       if (name.startsWith(vendor + "-")) return vendor;
     }
     return "unknown";
+  }
+
+  private static boolean isJdkHome(Path home) {
+    String suffix = System.getProperty("os.name").startsWith("Windows") ? ".exe" : "";
+    return Files.isRegularFile(home.resolve("bin/java" + suffix))
+        && Files.isRegularFile(home.resolve("bin/javac" + suffix));
   }
 
   public static Path tool(Path javaHome, String name) {

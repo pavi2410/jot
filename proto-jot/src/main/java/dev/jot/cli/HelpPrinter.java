@@ -23,7 +23,8 @@ final class HelpPrinter {
               "[OPTIONS]",
               projectOptions(
                   opt("--module <name>", "Build one workspace module"),
-                  opt("--clean", "Remove build outputs before building"))),
+                  opt("--clean", "Remove build outputs before building"),
+                  opt("--native", "Build a GraalVM native executable"))),
           command(
               "run",
               "Build and run the project",
@@ -108,7 +109,7 @@ final class HelpPrinter {
                   opt("--depth <levels>", "Limit dependency depth"))),
           command(
               "toolchain",
-              "Manage Java toolchains",
+              "Manage Java and GraalVM toolchains",
               "<COMMAND>",
               List.of(),
               List.of(
@@ -117,12 +118,12 @@ final class HelpPrinter {
                   command(
                       "toolchain pin",
                       "Pin a Java toolchain in the manifest",
-                      "java@<version|vendor-version> [--workspace]",
+                      "java@<version|vendor-version>|graalvm@<release> [--workspace]",
                       opt("--workspace", "Pin the workspace toolchain")),
                   command(
                       "toolchain install",
-                      "Install a Java toolchain",
-                      "java@<version|vendor-version> [OPTIONS]",
+                      "Install a Java or GraalVM toolchain",
+                      "java@<version|vendor-version>|graalvm@<release> [OPTIONS]",
                       opt("--force", "Replace an existing installation"),
                       opt("--offline", "Use cached toolchain archives only")))),
           command(

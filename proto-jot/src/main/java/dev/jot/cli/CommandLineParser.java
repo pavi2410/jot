@@ -38,6 +38,7 @@ final class CommandLineParser {
           "test",
           "global",
           "clean",
+          "native",
           "dry-run",
           "allow-snapshot");
 

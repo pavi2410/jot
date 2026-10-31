@@ -119,6 +119,18 @@ class ManifestEditorTest {
   }
 
   @Test
+  void pinsGraalVmToolchainWithoutChangingTheJavaCompilerToolchain() throws Exception {
+    Path manifest = temp.resolve("graalvm-jot.toml");
+    Files.writeString(manifest, "[project]\nname = \"demo\"\n[toolchains]\njava = \"21\"\n");
+
+    ManifestEditor.pinGraalVmToolchain(manifest, "25");
+
+    ProjectConfig parsed = ProjectConfig.read(manifest, null);
+    assertEquals("21", parsed.javaVersion());
+    assertEquals("25", parsed.graalVmVersion());
+  }
+
+  @Test
   void pinsVendorQualifiedJavaToolchainsAsRustCompatibleInlineTables() throws Exception {
     Path manifest = temp.resolve("vendor-jot.toml");
     Files.writeString(manifest, "[project]\nname = \"demo\"\n[toolchains]\njava = \"21\"\n");

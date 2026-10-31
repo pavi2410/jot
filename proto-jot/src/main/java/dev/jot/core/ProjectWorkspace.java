@@ -20,6 +20,7 @@ public record ProjectWorkspace(List<WorkspaceProject> ordered) {
           root.resolve(member),
           rootConfig.javaSpecification(),
           rootConfig.group(),
+          rootConfig.graalVmVersion(),
           visiting,
           byPath,
           ordered);
@@ -57,7 +58,8 @@ public record ProjectWorkspace(List<WorkspaceProject> ordered) {
         throw new IllegalArgumentException("missing project manifest: " + manifest);
       }
       ProjectConfig dependencyConfig =
-          ProjectConfig.read(manifest, config.javaSpecification(), config.group());
+          ProjectConfig.read(
+              manifest, config.javaSpecification(), config.group(), config.graalVmVersion());
       dependencies.add(visitProject(dependencyRoot, dependencyConfig, visiting, byPath, ordered));
     }
     visiting.removeLast();
@@ -72,6 +74,7 @@ public record ProjectWorkspace(List<WorkspaceProject> ordered) {
       Path projectRoot,
       String inheritedJava,
       String inheritedGroup,
+      String inheritedGraalVm,
       List<Path> visiting,
       Map<Path, WorkspaceProject> byPath,
       List<WorkspaceProject> ordered)
@@ -90,7 +93,8 @@ public record ProjectWorkspace(List<WorkspaceProject> ordered) {
     if (!Files.isRegularFile(manifest)) {
       throw new IllegalArgumentException("missing project manifest: " + manifest);
     }
-    ProjectConfig config = ProjectConfig.read(manifest, inheritedJava, inheritedGroup);
+    ProjectConfig config =
+        ProjectConfig.read(manifest, inheritedJava, inheritedGroup, inheritedGraalVm);
     visiting.add(normalizedRoot);
     List<WorkspaceProject> dependencies = new ArrayList<>();
     for (String dependencyPath : config.pathDependencies().values()) {
@@ -99,6 +103,7 @@ public record ProjectWorkspace(List<WorkspaceProject> ordered) {
               normalizedRoot.resolve(dependencyPath),
               config.javaSpecification(),
               config.group(),
+              config.graalVmVersion(),
               visiting,
               byPath,
               ordered));

@@ -42,6 +42,17 @@ public final class ManifestEditor {
     writeValidated(manifest, String.join("\n", lines) + "\n");
   }
 
+  public static void pinGraalVmToolchain(Path manifest, String version) throws IOException {
+    if (version == null || version.isBlank())
+      throw new IllegalArgumentException("GraalVM Java release cannot be blank");
+    dev.jot.core.JavaToolchain.parseRelease(version);
+    TomlDocument.read(manifest);
+    List<String> lines = new ArrayList<>(Files.readAllLines(manifest));
+    removeEntry(lines, "toolchains", "graalvm");
+    insertEntry(lines, "toolchains", "graalvm", version);
+    writeValidated(manifest, String.join("\n", lines) + "\n");
+  }
+
   private static void addDependencyValue(Path manifest, String name, Object value, boolean test)
       throws IOException {
     if (name == null || name.isBlank())

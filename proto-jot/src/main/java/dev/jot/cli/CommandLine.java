@@ -33,7 +33,7 @@ record CommandLine(
           Toolchain,
           Self {}
 
-  record Build(String module, boolean clean) implements Command {}
+  record Build(String module, boolean clean, boolean nativeImage) implements Command {}
 
   record Run(String module, List<String> arguments) implements Command {}
 

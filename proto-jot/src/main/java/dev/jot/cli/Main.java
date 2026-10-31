@@ -5,6 +5,7 @@ import dev.jot.core.DependencyAuditor;
 import dev.jot.core.DependencyListing;
 import dev.jot.core.DependencyTree;
 import dev.jot.core.GlobalCache;
+import dev.jot.core.GraalVmToolchainManager;
 import dev.jot.core.JavaToolchain;
 import dev.jot.core.JavaToolchainManager;
 import dev.jot.core.MavenPublisher;
@@ -13,6 +14,7 @@ import dev.jot.core.ProjectInitializer;
 import dev.jot.core.ProjectWorkspace;
 import dev.jot.core.WorkspaceProject;
 import dev.jot.core.config.ManifestEditor;
+import dev.jot.core.packaging.NativeImagePackager;
 import dev.jot.core.resolve.MavenCoordinate;
 import dev.jot.core.resolve.MavenResolver;
 import java.nio.file.Files;
@@ -193,7 +195,7 @@ public final class Main {
     MavenResolver resolver = newResolver(commandLine.offline());
     switch (commandLine.command()) {
       case CommandLine.Build build ->
-          build(config, workspace, build.module(), build.clean(), resolver);
+          build(config, workspace, build.module(), build.clean(), build.nativeImage(), resolver);
       case CommandLine.Run run -> run(config, workspace, run.module(), run.arguments(), resolver);
       case CommandLine.Test test -> test(config, workspace, test.module(), resolver);
       case CommandLine.Doc doc -> doc(config, workspace, doc.module(), doc.open(), resolver);
@@ -464,8 +466,17 @@ public final class Main {
       throws Exception {
     if (command.action() instanceof CommandLine.InstallToolchain install) {
       String spec = install.specification();
+      if (spec.startsWith("graalvm@")) {
+        String version = spec.substring("graalvm@".length());
+        JavaToolchain.Installation installation =
+            new GraalVmToolchainManager().install(version, install.force(), globals.offline());
+        System.out.println(
+            "install: graalvm java " + installation.version() + " -> " + installation.home());
+        return;
+      }
       if (!spec.startsWith("java@")) {
-        throw new IllegalArgumentException("expected java@<version>, got " + spec);
+        throw new IllegalArgumentException(
+            "expected java@<version> or graalvm@<release>, got " + spec);
       }
       String version = spec.substring("java@".length());
       JavaToolchain.ToolchainRequest request = JavaToolchain.parseRequest(version);
@@ -490,9 +501,13 @@ public final class Main {
       }
       for (JavaToolchain.Installation installation : installed) {
         System.out.println(
-            "java@"
-                + (installation.vendor().equals("unknown") ? "" : installation.vendor() + "-")
-                + installation.feature()
+            (installation.vendor().equals("graalvm")
+                    ? "graalvm@" + installation.feature()
+                    : "java@"
+                        + (installation.vendor().equals("unknown")
+                            ? ""
+                            : installation.vendor() + "-")
+                        + installation.feature())
                 + " ("
                 + installation.version()
                 + ") -> "
@@ -503,8 +518,22 @@ public final class Main {
 
     CommandLine.PinToolchain pin = (CommandLine.PinToolchain) command.action();
     String spec = pin.specification();
+    if (spec.startsWith("graalvm@")) {
+      String version = spec.substring("graalvm@".length());
+      JavaToolchain.parseRelease(version);
+      Path start =
+          globals.projectRoot() == null ? Path.of("").toAbsolutePath() : globals.projectRoot();
+      Path manifest =
+          pin.workspace()
+              ? findWorkspaceManifest(start)
+              : findProjectRoot(start).resolve("jot.toml");
+      ManifestEditor.pinGraalVmToolchain(manifest, version);
+      System.out.println("toolchain: pinned graalvm@" + version + " in " + manifest);
+      return;
+    }
     if (!spec.startsWith("java@")) {
-      throw new IllegalArgumentException("expected java@<version>, got " + spec);
+      throw new IllegalArgumentException(
+          "expected java@<version> or graalvm@<release>, got " + spec);
     }
     String version = spec.substring("java@".length());
     JavaToolchain.ToolchainRequest request = JavaToolchain.parseRequest(version);
@@ -535,6 +564,7 @@ public final class Main {
       ProjectWorkspace workspace,
       String module,
       boolean clean,
+      boolean nativeImage,
       MavenResolver resolver)
       throws Exception {
     long started = System.nanoTime();
@@ -545,6 +575,11 @@ public final class Main {
         module == null && config.isWorkspace()
             ? workspace.ordered()
             : workspace.dependenciesFirst(workspace.find(module == null ? config.name() : module));
+    if (nativeImage
+        && projects.stream().noneMatch(project -> !project.config().mainClass().isBlank())) {
+      throw new IllegalArgumentException(
+          "--native requires a selected project with project.main-class configured");
+    }
     if (clean) {
       Path runningJar = SelfManager.runningJarIfPackaged();
       for (WorkspaceProject project : projects) {
@@ -556,7 +591,12 @@ public final class Main {
         }
       }
     }
-    for (WorkspaceProject project : projects) BuildEngine.build(project, resolver);
+    for (WorkspaceProject project : projects) {
+      BuildEngine.build(project, resolver);
+      if (nativeImage && !project.config().mainClass().isBlank()) {
+        NativeImagePackager.build(project);
+      }
+    }
     double seconds = (System.nanoTime() - started) / 1_000_000_000.0;
     System.out.printf(java.util.Locale.ROOT, "build: finished in %.3f s%n", seconds);
   }

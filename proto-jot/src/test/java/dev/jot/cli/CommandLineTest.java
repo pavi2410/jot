@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.jot.core.ProjectConfig;
 import dev.jot.core.ProjectInitializer;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -48,11 +49,22 @@ class CommandLineTest {
             CommandLineParser.parse(new String[] {"build", "--module", "core"}).command());
     assertEquals("core", build.module());
     assertTrue(!build.clean());
+    assertTrue(!build.nativeImage());
     CommandLine.Build cleanBuild =
         assertInstanceOf(
             CommandLine.Build.class,
             CommandLineParser.parse(new String[] {"build", "--clean"}).command());
     assertTrue(cleanBuild.clean());
+    CommandLine.Build nativeBuild =
+        assertInstanceOf(
+            CommandLine.Build.class,
+            CommandLineParser.parse(new String[] {"build", "--native"}).command());
+    assertTrue(nativeBuild.nativeImage());
+    assertTrue(
+        assertInstanceOf(
+                CommandLine.Build.class,
+                CommandLineParser.parse(new String[] {"build", "--clean", "--native"}).command())
+            .clean());
     assertInstanceOf(
         CommandLine.Test.class, CommandLineParser.parse(new String[] {"test"}).command());
     assertInstanceOf(
@@ -154,6 +166,21 @@ class CommandLineTest {
     assertEquals("java@zulu-21", installAction.specification());
     assertTrue(installAction.force());
     assertTrue(install.offline());
+    CommandLine.Toolchain graalvmInstall =
+        assertInstanceOf(
+            CommandLine.Toolchain.class,
+            CommandLineParser.parse(new String[] {"toolchain", "install", "graalvm@25"}).command());
+    assertEquals(
+        "graalvm@25",
+        assertInstanceOf(CommandLine.InstallToolchain.class, graalvmInstall.action())
+            .specification());
+    CommandLine.Toolchain graalvmPin =
+        assertInstanceOf(
+            CommandLine.Toolchain.class,
+            CommandLineParser.parse(new String[] {"toolchain", "pin", "graalvm@25"}).command());
+    assertEquals(
+        "graalvm@25",
+        assertInstanceOf(CommandLine.PinToolchain.class, graalvmPin.action()).specification());
     assertEquals(
         "--force only applies to toolchain install",
         parseError("toolchain", "pin", "java@21", "--force"));
@@ -246,10 +273,11 @@ class CommandLineTest {
     assertTrue(buildHelp.contains("Usage: jot build [OPTIONS]"));
     assertTrue(buildHelp.contains("--module <name>"));
     assertTrue(buildHelp.contains("--clean"));
+    assertTrue(buildHelp.contains("--native"));
     assertTrue(buildHelp.contains("-h, --help"));
 
     String toolchainHelp = HelpPrinter.render("toolchain", "1.2.3");
-    assertTrue(toolchainHelp.contains("install  Install a Java toolchain"));
+    assertTrue(toolchainHelp.contains("Install a Java or GraalVM toolchain"));
     assertTrue(HelpPrinter.render("self update", "1.2.3").contains("--version <version>"));
   }
 
@@ -300,7 +328,9 @@ class CommandLineTest {
 
   @Test
   void pinsJavaToolchainFromTheCli() throws Exception {
-    Files.writeString(temp.resolve("jot.toml"), "[project]\nname = \"toolchain-cli\"\n");
+    Files.writeString(
+        temp.resolve("jot.toml"),
+        "[project]\nname = \"toolchain-cli\"\n[toolchains]\njava = \"21\"\n");
     String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
     Process process =
         new ProcessBuilder(
@@ -323,6 +353,19 @@ class CommandLineTest {
         Files.readString(temp.resolve("jot.toml"))
             .contains("java = { version = \"21\", vendor = \"corretto\" }"));
     assertTrue(output.contains("pinned java@corretto-21"));
+  }
+
+  @Test
+  void pinsGraalVmToolchainFromTheCli() throws Exception {
+    Files.writeString(
+        temp.resolve("jot.toml"),
+        "[project]\nname = \"toolchain-cli\"\n[toolchains]\njava = \"21\"\n");
+
+    Main.execute(new String[] {"toolchain", "pin", "graalvm@25", "--project", temp.toString()});
+
+    ProjectConfig config = ProjectConfig.read(temp.resolve("jot.toml"), null);
+    assertEquals("25", config.graalVmVersion());
+    assertEquals("21", config.javaVersion());
   }
 
   @Test

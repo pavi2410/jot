@@ -16,6 +16,7 @@ public record ProjectConfig(
     String mainClass,
     String javaVersion,
     String javaVendor,
+    String graalVmVersion,
     java.util.List<String> sourceDirectories,
     String outputDirectory,
     java.util.List<String> resourceDirectories,
@@ -45,6 +46,12 @@ public record ProjectConfig(
 
   public static ProjectConfig read(Path file, String inheritedJava, String inheritedGroup)
       throws IOException {
+    return read(file, inheritedJava, inheritedGroup, null);
+  }
+
+  public static ProjectConfig read(
+      Path file, String inheritedJava, String inheritedGroup, String inheritedGraalVm)
+      throws IOException {
     TomlDocument document = TomlDocument.read(file);
     String projectName = document.string("project.name", "");
     if (projectName.isBlank()) {
@@ -64,7 +71,7 @@ public record ProjectConfig(
         throw new IllegalArgumentException("toolchains.java.vendor must be a string in " + file);
       if (vendor != null) {
         String name = ((String) vendor).toLowerCase(java.util.Locale.ROOT);
-        if (!java.util.Set.of("adoptium", "corretto", "zulu", "oracle").contains(name))
+        if (!java.util.Set.of("adoptium", "corretto", "zulu", "oracle", "graalvm").contains(name))
           throw new IllegalArgumentException("unsupported Java vendor `" + vendor + "` in " + file);
         javaSpecification = name + "-" + release;
       } else {
@@ -77,6 +84,16 @@ public record ProjectConfig(
       throw new IllegalArgumentException("missing toolchains.java in " + file);
     }
     JavaToolchain.ToolchainRequest javaRequest = JavaToolchain.parseRequest(javaSpecification);
+    Object rawGraalVm = document.table("toolchains").get("graalvm");
+    String graalVmVersion = inheritedGraalVm;
+    if (rawGraalVm != null) {
+      if (!(rawGraalVm instanceof String release)) {
+        throw new IllegalArgumentException(
+            "toolchains.graalvm must be a Java release string in " + file);
+      }
+      JavaToolchain.parseRelease(release);
+      graalVmVersion = release;
+    }
     String layout = document.string("project.layout", "standard");
     if (!layout.equals("standard") && !layout.equals("maven")) {
       throw new IllegalArgumentException("project.layout must be `standard` or `maven` in " + file);
@@ -118,6 +135,7 @@ public record ProjectConfig(
         document.string("project.main-class", ""),
         javaRequest.version(),
         javaRequest.vendor(),
+        graalVmVersion,
         document.stringList("build.source-dirs", sourceDefaults),
         document.string("build.output-directory", "target/classes"),
         document.stringList("build.resource-dirs", resourceDefaults),

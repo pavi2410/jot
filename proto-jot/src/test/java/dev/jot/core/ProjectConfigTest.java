@@ -12,6 +12,19 @@ class ProjectConfigTest {
   @TempDir Path temp;
 
   @Test
+  void readsGraalVmNativeToolchainSeparatelyFromTheJavaCompilerToolchain() throws Exception {
+    Path manifest = temp.resolve("jot.toml");
+    Files.writeString(
+        manifest,
+        "[project]\nname = \"native-app\"\n[toolchains]\njava = \"21\"\ngraalvm = \"25\"\n");
+
+    ProjectConfig config = ProjectConfig.read(manifest, null);
+
+    assertEquals("21", config.javaVersion());
+    assertEquals("25", config.graalVmVersion());
+  }
+
+  @Test
   void mavenLayoutProvidesJavaResourceAndTestDefaults() throws Exception {
     Path manifest = temp.resolve("jot.toml");
     Files.writeString(

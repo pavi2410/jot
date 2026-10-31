@@ -16,7 +16,7 @@ final class ToolchainCommandParser {
     int expected = action.equals("list") ? 1 : 2;
     if (args.positionals().size() != expected)
       throw new IllegalArgumentException(
-          "toolchain " + action + " needs java@<version|vendor-version>");
+          "toolchain " + action + " needs java@<version|vendor-version> or graalvm@<release>");
     String spec = expected == 2 ? args.positionals().get(1) : null;
     boolean workspace = args.flag("workspace");
     boolean force = args.flag("force");

@@ -69,6 +69,18 @@ Runnable projects also produce `target/bin/<project>.jar`, an executable fat JAR
 that includes runtime Maven and workspace dependencies. The regular project JAR
 remains at `target/<project>-<version>.jar` for publishing and reuse; run the
 fat JAR with `java -jar target/bin/<project>.jar`.
+On a machine with GraalVM Native Image installed, `jot build --native` also
+produces `target/bin/<project>` (or `<project>.exe` on Windows). Jot uses the
+configured GraalVM toolchain when present; otherwise it looks for `native-image`
+under `GRAALVM_HOME`, the selected Java toolchain, then `PATH`.
+Native builds target the current host and require GraalVM Native Image plus its
+native C build tools.
+The GraalVM release must support at least the Java release selected in
+`toolchains.java`; for example, GraalVM 25 can build Java 25 or older bytecode.
+GraalVM can be managed separately from the Java compiler JDK: run
+`jot toolchain install graalvm@25`, then pin it in `jot.toml` with
+`[toolchains] graalvm = "25"` (or use `jot toolchain pin graalvm@25`). Jot installs
+the latest matching GraalVM Community release and selects it for native builds.
 
 The Java CLI resolves pinned Maven coordinates and their compile/runtime
 transitive dependencies from POMs, checking repository SHA-256 sidecars when

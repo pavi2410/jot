@@ -66,6 +66,9 @@ public final class JavaToolchainManager {
     JavaToolchain.ToolchainRequest request = JavaToolchain.parseRequest(requestedVersion);
     String version = request.version();
     String vendor = request.vendor() == null ? "adoptium" : request.vendor();
+    if (vendor.equals("graalvm")) {
+      return new GraalVmToolchainManager(jotHome).install(version, force, offline);
+    }
     String apiVendor =
         switch (vendor) {
           case "adoptium" -> "eclipse";
