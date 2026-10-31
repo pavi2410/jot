@@ -120,14 +120,27 @@ public final class BuildEngine {
     try (var output = Files.newOutputStream(stateFile)) {
       state.store(output, "Jot content fingerprint. Generated file.");
     }
+    String artifactSummary = displayArtifact + " (" + formatFileSize(Files.size(artifact)) + ")";
     if (compileRequired) {
       System.out.println(
-          "build: " + config.name() + " " + config.version() + " -> " + displayArtifact);
+          "build: " + config.name() + " " + config.version() + " -> " + artifactSummary);
     } else if (artifactIsIntact) {
       System.out.println("build: " + config.name() + " is up to date");
     } else {
-      System.out.println("package: " + config.name() + " -> " + displayArtifact);
+      System.out.println("package: " + config.name() + " -> " + artifactSummary);
     }
+  }
+
+  static String formatFileSize(long bytes) {
+    if (bytes < 1024) return bytes + " B";
+    String[] units = {"KiB", "MiB", "GiB", "TiB"};
+    double size = bytes;
+    int unit = -1;
+    do {
+      size /= 1024.0;
+      unit++;
+    } while (size >= 1024.0 && unit < units.length - 1);
+    return String.format(java.util.Locale.ROOT, "%.1f %s", size, units[unit]);
   }
 
   public static void run(WorkspaceProject project, List<String> arguments) throws Exception {

@@ -259,7 +259,12 @@ class CommandLineTest {
       System.setOut(originalOut);
     }
 
-    assertTrue(output.toString().contains("-> target/timed-build-0.1.0.jar"));
+    assertTrue(
+        output
+            .toString()
+            .matches(
+                "(?s).*-> target/timed-build-0.1.0.jar \\(\\d+(?:\\.\\d)?"
+                    + " (?:B|KiB|MiB|GiB|TiB)\\).*"));
     assertTrue(output.toString().matches("(?s).*build: finished in \\d+\\.\\d{3} s\\R?$"));
   }
 
