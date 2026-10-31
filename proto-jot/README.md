@@ -31,8 +31,11 @@ java -jar target/bin/jot-java.jar run -- --version
 ```
 
 The prototype supports `build`, `run`, `test`, `lock`, and `clean`, and accepts
-`--project`, `--module`, and `--offline`. Build source directories and the Java release are read from
-`jot.toml`. Workspaces list their members explicitly and local dependencies use
+`--project`, `--module`, and `--offline`. Build source directories, resource
+directories, and the Java release are read from `jot.toml`. A Jot manifest may
+select `project.layout = "maven"` for familiar Java source, resource, and test
+paths; this only selects directory defaults and does not import a `pom.xml`.
+Explicit source and resource directories override those defaults. Workspaces list their members explicitly and local dependencies use
 `{ path = "../module" }`. `examples/tiny-workspace` demonstrates a two-module
 build and run.
 

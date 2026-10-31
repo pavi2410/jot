@@ -10,6 +10,7 @@ import java.util.TreeMap;
 /** The explicit build inputs read from a project's jot.toml. */
 public record ProjectConfig(String name, String version, String mainClass, String javaVersion,
                             java.util.List<String> sourceDirectories, String outputDirectory,
+                            java.util.List<String> resourceDirectories,
                             java.util.List<String> testSourceDirectories,
                             String testOutputDirectory,
                             java.util.List<String> workspaceMembers,
@@ -31,6 +32,16 @@ public record ProjectConfig(String name, String version, String mainClass, Strin
         if (javaVersion == null || javaVersion.isBlank()) {
             throw new IllegalArgumentException("missing toolchains.java in " + file);
         }
+        String layout = document.string("project.layout", "standard");
+        if (!layout.equals("standard") && !layout.equals("maven")) {
+            throw new IllegalArgumentException("project.layout must be `standard` or `maven` in " + file);
+        }
+        java.util.List<String> sourceDefaults = layout.equals("maven")
+                ? java.util.List.of("src/main/java") : java.util.List.of("src");
+        java.util.List<String> testSourceDefaults = layout.equals("maven")
+                ? java.util.List.of("src/test/java") : java.util.List.of("test");
+        java.util.List<String> resourceDefaults = layout.equals("maven")
+                ? java.util.List.of("src/main/resources") : java.util.List.of("res");
         Map<String, String> pathDependencies = new TreeMap<>();
         Map<String, String> dependencies = parseDependencies(document.values(), "dependencies.",
                 pathDependencies);
@@ -39,9 +50,10 @@ public record ProjectConfig(String name, String version, String mainClass, Strin
         return new ProjectConfig(projectName,
                 document.string("project.version", "0.1.0"),
                 document.string("project.main-class", ""), javaVersion,
-                document.stringList("build.source-dirs", java.util.List.of("src")),
+                document.stringList("build.source-dirs", sourceDefaults),
                 document.string("build.output-directory", "target/classes"),
-                document.stringList("test.source-dirs", java.util.List.of("test")),
+                document.stringList("build.resource-dirs", resourceDefaults),
+                document.stringList("test.source-dirs", testSourceDefaults),
                 document.string("test.output-directory", "target/test-classes"),
                 document.stringList("workspace.members", java.util.List.of()),
                 Collections.unmodifiableMap(new TreeMap<>(pathDependencies)),

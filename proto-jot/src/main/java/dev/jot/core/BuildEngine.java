@@ -44,6 +44,7 @@ public final class BuildEngine {
             throw new IllegalStateException("no Java sources in configured build.source-dirs: "
                     + config.sourceDirectories());
         }
+        List<ResourceFile> resources = collectResources(root, config.resourceDirectories());
 
         Path classes = root.resolve(config.outputDirectory()).normalize();
         Path target = root.resolve("target");
@@ -52,7 +53,7 @@ public final class BuildEngine {
         }
         Path artifact = target.resolve(config.name() + "-" + config.version() + ".jar");
         Path stateFile = target.resolve(".jot/build-state.properties");
-        String fingerprint = fingerprint(project, sources, externalArtifacts);
+        String fingerprint = fingerprint(project, sources, resources, externalArtifacts);
         if (outputsAreIntact(classes, artifact, stateFile, fingerprint)) {
             System.out.println("build: " + config.name() + " is up to date");
             return;
@@ -66,6 +67,7 @@ public final class BuildEngine {
         if (!classpath.isBlank()) javac.addAll(List.of("-classpath", classpath));
         sources.forEach(path -> javac.add(path.toString()));
         runProcess(root, javac);
+        copyResources(resources, classes);
 
         Files.createDirectories(artifact.getParent());
         List<String> jar = new ArrayList<>(List.of(jdkTool("jar"), "--create", "--file",
@@ -177,6 +179,7 @@ public final class BuildEngine {
     }
 
     private static String fingerprint(WorkspaceProject project, List<Path> sources,
+                                      List<ResourceFile> resources,
                                       List<MavenResolver.ResolvedArtifact> externalArtifacts)
             throws IOException, NoSuchAlgorithmException {
         Path root = project.root();
@@ -185,11 +188,16 @@ public final class BuildEngine {
         updateDigest(digest, config.javaVersion());
         updateDigest(digest, config.mainClass());
         updateDigest(digest, config.sourceDirectories().toString());
+        updateDigest(digest, config.resourceDirectories().toString());
         updateDigest(digest, config.outputDirectory());
         updateDigest(digest, System.getProperty("java.version"));
         for (Path source : sources) {
             updateDigest(digest, root.relativize(source).toString());
             digest.update(Files.readAllBytes(source));
+        }
+        for (ResourceFile resource : resources) {
+            updateDigest(digest, resource.relativePath().toString());
+            digest.update(Files.readAllBytes(resource.source()));
         }
         for (WorkspaceProject dependency : transitiveDependencies(project)) {
             updateDigest(digest, dependency.root().toString());
@@ -271,6 +279,45 @@ public final class BuildEngine {
         return sources;
     }
 
+    private static List<ResourceFile> collectResources(Path root, List<String> resourceDirectories)
+            throws IOException {
+        java.util.Map<Path, ResourceFile> resources = new java.util.LinkedHashMap<>();
+        for (String directory : resourceDirectories) {
+            Path resourceRoot = root.resolve(directory).normalize();
+            if (!resourceRoot.startsWith(root)) {
+                throw new IllegalArgumentException("resource directory escapes project: " + directory);
+            }
+            if (!Files.isDirectory(resourceRoot)) continue;
+            try (Stream<Path> paths = Files.walk(resourceRoot)) {
+                for (Path file : paths.filter(Files::isRegularFile).toList()) {
+                    Path relativePath = resourceRoot.relativize(file);
+                    ResourceFile previous = resources.putIfAbsent(relativePath,
+                            new ResourceFile(file, relativePath));
+                    if (previous != null && !previous.source().equals(file)) {
+                        throw new IllegalArgumentException("resource path is declared more than once: "
+                                + relativePath);
+                    }
+                }
+            }
+        }
+        return resources.values().stream()
+                .sorted(Comparator.comparing(resource -> resource.relativePath().toString()))
+                .toList();
+    }
+
+    private static void copyResources(List<ResourceFile> resources, Path classes)
+            throws IOException {
+        for (ResourceFile resource : resources) {
+            Path destination = classes.resolve(resource.relativePath()).normalize();
+            if (!destination.startsWith(classes)) {
+                throw new IllegalArgumentException("resource path escapes build output: "
+                        + resource.relativePath());
+            }
+            Files.createDirectories(destination.getParent());
+            Files.copy(resource.source(), destination);
+        }
+    }
+
     private static List<MavenResolver.ResolvedArtifact> resolveExternalArtifacts(
             WorkspaceProject project, MavenResolver resolver) throws Exception {
         List<WorkspaceProject> dependencyProjects = new ArrayList<>();
@@ -337,4 +384,6 @@ public final class BuildEngine {
             for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.delete(path);
         }
     }
+
+    private record ResourceFile(Path source, Path relativePath) {}
 }

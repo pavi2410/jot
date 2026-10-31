@@ -4,6 +4,7 @@ import dev.jot.core.resolve.MavenCoordinate;
 import dev.jot.core.resolve.MavenResolver;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
@@ -11,6 +12,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.zip.ZipFile;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 import javax.tools.ToolProvider;
@@ -188,6 +190,50 @@ class BuildEngineTest {
         BuildEngine.run(project, List.of(), resolver);
 
         assertTrue(Files.isRegularFile(temp.resolve("target/with-external-1.0.0.jar")));
+    }
+
+    @Test
+    void packagesConfiguredResourcesAndRebuildsWhenTheyChange() throws Exception {
+        write("src/main/java/sample/Main.java", "package sample; public class Main {}\n");
+        write("assets/config/app.properties", "mode=first\n");
+        write("jot.toml", """
+                [project]
+                name = "resource-app"
+                version = "1.0.0"
+                layout = "maven"
+                [toolchains]
+                java = "27"
+                [build]
+                source-dirs = ["src/main/java"]
+                resource-dirs = ["assets"]
+                """);
+        ProjectConfig config = ProjectConfig.read(temp.resolve("jot.toml"), null);
+        WorkspaceProject project = new WorkspaceProject(temp, config, List.of());
+        Path artifact = temp.resolve("target/resource-app-1.0.0.jar");
+
+        BuildEngine.build(project);
+        byte[] firstBuild = Files.readAllBytes(artifact);
+        try (ZipFile jar = new ZipFile(artifact.toFile())) {
+            assertEquals("mode=first\n", new String(jar.getInputStream(
+                    jar.getEntry("config/app.properties")).readAllBytes()));
+        }
+
+        write("assets/config/app.properties", "mode=second\n");
+        BuildEngine.build(project);
+        byte[] secondBuild = Files.readAllBytes(artifact);
+        assertTrue(!java.util.Arrays.equals(firstBuild, secondBuild),
+                "resource changes should invalidate the build fingerprint");
+        try (ZipFile jar = new ZipFile(artifact.toFile())) {
+            assertEquals("mode=second\n", new String(jar.getInputStream(
+                    jar.getEntry("config/app.properties")).readAllBytes()));
+        }
+
+        Files.delete(temp.resolve("assets/config/app.properties"));
+        BuildEngine.build(project);
+        try (ZipFile jar = new ZipFile(artifact.toFile())) {
+            assertNull(jar.getEntry("config/app.properties"),
+                    "deleted resources should disappear from the rebuilt JAR");
+        }
     }
 
     private void write(String relativePath, String contents) throws Exception {
