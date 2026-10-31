@@ -4,205 +4,202 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Parsed command and the options shared by the bootstrap CLI. */
-record CommandLine(String command, Path projectRoot, String module, List<String> runArguments,
-                   boolean help, boolean version, boolean offline, String projectName,
-                   String template, String packageName, String dependencyCoordinate,
-                   String dependencyName, String dependencyCatalog, boolean testDependency,
-                   int treeDepth) {
-    static CommandLine parse(String[] arguments) {
-        Arguments input = new Arguments(arguments);
-        if (!input.hasNext()) return helpCommand();
+/** Parsed command and options accepted by the Jot CLI. */
+record CommandLine(
+    String command,
+    Path projectRoot,
+    String module,
+    List<String> runArguments,
+    boolean help,
+    boolean version,
+    boolean offline,
+    String projectName,
+    String template,
+    String packageName,
+    String dependencyCoordinate,
+    String dependencyName,
+    String dependencyCatalog,
+    boolean testDependency,
+    int treeDepth,
+    boolean formatCheck) {
 
-        boolean offline = false;
-        while (input.peekIs("--offline")) {
-            input.next();
-            offline = true;
-        }
-        if (!input.hasNext() || isHelp(input.peek())) return helpCommand();
-        if (isVersion(input.peek())) return versionCommand();
+  static CommandLine parse(String[] args) {
+    int index = 0;
+    boolean offline = false;
+    while (index < args.length && args[index].equals("--offline")) {
+      offline = true;
+      index++;
+    }
+    if (index == args.length || isHelp(args[index])) return specialCommand(true, false);
+    if (isVersion(args[index])) return specialCommand(false, true);
 
-        String command = input.next();
-        Options options = new Options(command, offline);
-        while (input.hasNext()) {
-            String token = input.next();
-            if (token.equals("--") && command.equals("run")) {
-                options.runArguments.addAll(input.remaining());
-                break;
-            }
-            if (token.startsWith("--")) {
-                options.parse(token, input);
-            } else {
-                options.parsePositional(token);
-            }
-        }
-        options.validate();
-        return options.toCommandLine();
+    Options options = new Options(args[index++], offline);
+    while (index < args.length) {
+      String argument = args[index++];
+      if (argument.equals("--") && options.command.equals("run")) {
+        options.runArguments.addAll(List.of(args).subList(index, args.length));
+        break;
+      }
+      if (argument.startsWith("--")) {
+        index = options.parseOption(argument, args, index);
+      } else {
+        options.parsePositional(argument);
+      }
+    }
+    options.validate();
+    return options.result();
+  }
+
+  private static boolean isHelp(String argument) {
+    return argument.equals("--help") || argument.equals("-h");
+  }
+
+  private static boolean isVersion(String argument) {
+    return argument.equals("--version") || argument.equals("-V");
+  }
+
+  private static CommandLine specialCommand(boolean help, boolean version) {
+    return new CommandLine(
+        "", null, null, List.of(), help, version, false, null, null, null, null, null, null, false,
+        0, false);
+  }
+
+  private static final class Options {
+    private final String command;
+    private final List<String> runArguments = new ArrayList<>();
+    private Path projectRoot;
+    private String module;
+    private String projectName;
+    private String template;
+    private String packageName;
+    private String dependencyCoordinate;
+    private String dependencyName;
+    private String dependencyCatalog;
+    private boolean offline;
+    private boolean testDependency;
+    private int treeDepth = 8;
+    private boolean formatCheck;
+
+    private Options(String command, boolean offline) {
+      this.command = command;
+      this.offline = offline;
     }
 
-    private static boolean isHelp(String argument) {
-        return argument.equals("--help") || argument.equals("-h");
+    private int parseOption(String option, String[] args, int index) {
+      switch (option) {
+        case "--project" ->
+            projectRoot = Path.of(value(option, args, index++)).toAbsolutePath().normalize();
+        case "--module" -> module = value(option, args, index++);
+        case "--depth" -> {
+          require(command.equals("tree"), option);
+          try {
+            treeDepth = Integer.parseInt(value(option, args, index++));
+          } catch (NumberFormatException error) {
+            throw new IllegalArgumentException("--depth needs a non-negative integer");
+          }
+          if (treeDepth < 0)
+            throw new IllegalArgumentException("--depth needs a non-negative integer");
+        }
+        case "--check" -> {
+          require(command.equals("fmt"), option);
+          formatCheck = true;
+        }
+        case "--offline" -> offline = true;
+        case "--test" -> {
+          require(command.equals("add") || command.equals("remove"), option);
+          testDependency = true;
+        }
+        case "--name" -> {
+          require(command.equals("add"), option);
+          dependencyName = value(option, args, index++);
+        }
+        case "--catalog" -> {
+          require(command.equals("add"), option);
+          dependencyCatalog = value(option, args, index++);
+        }
+        case "--template" -> {
+          require(command.equals("init"), option);
+          template = value(option, args, index++);
+        }
+        case "--package" -> {
+          require(command.equals("init"), option);
+          packageName = value(option, args, index++);
+        }
+        default -> throw new IllegalArgumentException("unknown argument: " + option);
+      }
+      return index;
     }
 
-    private static boolean isVersion(String argument) {
-        return argument.equals("--version") || argument.equals("-V");
+    private void parsePositional(String value) {
+      switch (command) {
+        case "init" -> {
+          if (projectName != null)
+            throw new IllegalArgumentException("init accepts one project name");
+          projectName = value;
+        }
+        case "add" -> {
+          if (dependencyCoordinate != null)
+            throw new IllegalArgumentException("add accepts one dependency coordinate");
+          dependencyCoordinate = value;
+        }
+        case "remove" -> {
+          if (dependencyName != null)
+            throw new IllegalArgumentException("remove accepts one dependency name");
+          dependencyName = value;
+        }
+        case "tree" -> {
+          if (dependencyCoordinate != null)
+            throw new IllegalArgumentException("tree accepts one dependency coordinate");
+          dependencyCoordinate = value;
+        }
+        default -> throw new IllegalArgumentException("unknown argument: " + value);
+      }
     }
 
-    private static CommandLine helpCommand() {
-        return new CommandLine("", null, null, List.of(), true, false, false,
-                null, null, null, null, null, null, false, 0);
+    private void validate() {
+      if (command.equals("add") && dependencyCoordinate == null && dependencyCatalog == null) {
+        throw new IllegalArgumentException("add needs a coordinate or --catalog alias");
+      }
+      if (command.equals("add") && dependencyCoordinate != null && dependencyCatalog != null) {
+        throw new IllegalArgumentException("use either a dependency coordinate or --catalog");
+      }
+      if (command.equals("remove") && dependencyName == null) {
+        throw new IllegalArgumentException("remove needs a dependency name");
+      }
+      if (command.equals("tree") && dependencyCoordinate == null) {
+        throw new IllegalArgumentException("tree needs a dependency coordinate");
+      }
     }
 
-    private static CommandLine versionCommand() {
-        return new CommandLine("", null, null, List.of(), false, true, false,
-                null, null, null, null, null, null, false, 0);
+    private CommandLine result() {
+      return new CommandLine(
+          command,
+          projectRoot,
+          module,
+          List.copyOf(runArguments),
+          false,
+          false,
+          offline,
+          projectName,
+          template,
+          packageName,
+          dependencyCoordinate,
+          dependencyName,
+          dependencyCatalog,
+          testDependency,
+          treeDepth,
+          formatCheck);
     }
 
-    private static final class Options {
-        private final String command;
-        private final List<String> runArguments = new ArrayList<>();
-        private Path projectRoot;
-        private String module;
-        private String projectName;
-        private String template;
-        private String packageName;
-        private String dependencyCoordinate;
-        private String dependencyName;
-        private String dependencyCatalog;
-        private boolean offline;
-        private boolean testDependency;
-        private int treeDepth = 8;
-
-        private Options(String command, boolean offline) {
-            this.command = command;
-            this.offline = offline;
-        }
-
-        private void parse(String option, Arguments input) {
-            switch (option) {
-                case "--project" -> projectRoot = Path.of(input.value(option)).toAbsolutePath().normalize();
-                case "--module" -> module = input.value(option);
-                case "--depth" -> {
-                    require(command.equals("tree"), option);
-                    try {
-                        treeDepth = Integer.parseInt(input.value(option));
-                    } catch (NumberFormatException error) {
-                        throw new IllegalArgumentException("--depth needs a non-negative integer");
-                    }
-                    if (treeDepth < 0) throw new IllegalArgumentException("--depth needs a non-negative integer");
-                }
-                case "--offline" -> offline = true;
-                case "--test" -> {
-                    require(command.equals("add") || command.equals("remove"), option);
-                    testDependency = true;
-                }
-                case "--name" -> {
-                    require(command.equals("add"), option);
-                    dependencyName = input.value(option);
-                }
-                case "--catalog" -> {
-                    require(command.equals("add"), option);
-                    dependencyCatalog = input.value(option);
-                }
-                case "--template" -> {
-                    require(command.equals("init"), option);
-                    template = input.value(option);
-                }
-                case "--package" -> {
-                    require(command.equals("init"), option);
-                    packageName = input.value(option);
-                }
-                default -> throw new IllegalArgumentException("unknown argument: " + option);
-            }
-        }
-
-        private void parsePositional(String value) {
-            switch (command) {
-                case "init" -> {
-                    if (projectName != null) throw new IllegalArgumentException("init accepts one project name");
-                    projectName = value;
-                }
-                case "add" -> {
-                    if (dependencyCoordinate != null) {
-                        throw new IllegalArgumentException("add accepts one dependency coordinate");
-                    }
-                    dependencyCoordinate = value;
-                }
-                case "remove" -> {
-                    if (dependencyName != null) throw new IllegalArgumentException("remove accepts one dependency name");
-                    dependencyName = value;
-                }
-                case "tree" -> {
-                    if (dependencyCoordinate != null) {
-                        throw new IllegalArgumentException("tree accepts one dependency coordinate");
-                    }
-                    dependencyCoordinate = value;
-                }
-                default -> throw new IllegalArgumentException("unknown argument: " + value);
-            }
-        }
-
-        private void validate() {
-            if (command.equals("add") && dependencyCoordinate == null && dependencyCatalog == null) {
-                throw new IllegalArgumentException("add needs a coordinate or --catalog alias");
-            }
-            if (command.equals("add") && dependencyCoordinate != null && dependencyCatalog != null) {
-                throw new IllegalArgumentException("use either a dependency coordinate or --catalog");
-            }
-            if (command.equals("remove") && dependencyName == null) {
-                throw new IllegalArgumentException("remove needs a dependency name");
-            }
-            if (command.equals("tree") && dependencyCoordinate == null) {
-                throw new IllegalArgumentException("tree needs a dependency coordinate");
-            }
-        }
-
-        private CommandLine toCommandLine() {
-            return new CommandLine(command, projectRoot, module, List.copyOf(runArguments),
-                    false, false, offline, projectName, template, packageName,
-                    dependencyCoordinate, dependencyName, dependencyCatalog, testDependency, treeDepth);
-        }
-
-        private static void require(boolean condition, String option) {
-            if (!condition) throw new IllegalArgumentException("unknown argument: " + option);
-        }
+    private static String value(String option, String[] args, int index) {
+      if (index >= args.length || args[index].equals("--")) {
+        throw new IllegalArgumentException(option + " needs a value");
+      }
+      return args[index];
     }
 
-    private static final class Arguments {
-        private final String[] values;
-        private int index;
-
-        private Arguments(String[] values) {
-            this.values = values;
-        }
-
-        private boolean hasNext() {
-            return index < values.length;
-        }
-
-        private String peek() {
-            return values[index];
-        }
-
-        private boolean peekIs(String value) {
-            return hasNext() && peek().equals(value);
-        }
-
-        private String next() {
-            return values[index++];
-        }
-
-        private String value(String option) {
-            if (!hasNext() || peek().equals("--")) {
-                throw new IllegalArgumentException(option + " needs a value");
-            }
-            return next();
-        }
-
-        private List<String> remaining() {
-            List<String> remaining = List.of(values).subList(index, values.length);
-            index = values.length;
-            return remaining;
-        }
+    private static void require(boolean condition, String option) {
+      if (!condition) throw new IllegalArgumentException("unknown argument: " + option);
     }
+  }
 }

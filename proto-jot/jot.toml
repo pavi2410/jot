@@ -14,6 +14,10 @@ output-directory = "target/classes"
 [dependencies]
 tomlj = "org.tomlj:tomlj:1.1.1"
 
+[format]
+java = "com.google.googlejavaformat:google-java-format:1.37.0"
+style = "google"
+
 [test]
 source-dirs = ["src/test/java"]
 output-directory = "target/test-classes"
