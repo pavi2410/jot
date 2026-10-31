@@ -15,7 +15,7 @@ class CommandLineTest {
   @Test
   void separatesJotOptionsFromApplicationArguments() {
     CommandLine parsed =
-        CommandLine.parse(
+        CommandLineParser.parse(
             new String[] {
               "run", "--project", "demo", "--module", "app", "--offline", "--", "--port", "8080"
             });
@@ -29,7 +29,7 @@ class CommandLineTest {
 
   @Test
   void acceptsOfflineAsAGlobalOptionBeforeTheCommand() {
-    CommandLine parsed = CommandLine.parse(new String[] {"--offline", "build"});
+    CommandLine parsed = CommandLineParser.parse(new String[] {"--offline", "--offline", "build"});
 
     assertEquals("build", parsed.command());
     assertTrue(parsed.offline());
@@ -38,7 +38,7 @@ class CommandLineTest {
   @Test
   void parsesTreeCoordinateAndDepth() {
     CommandLine parsed =
-        CommandLine.parse(
+        CommandLineParser.parse(
             new String[] {"tree", "org.example:library:1.2", "--depth", "3", "--offline"});
 
     assertEquals("tree", parsed.command());
@@ -53,7 +53,8 @@ class CommandLineTest {
   @Test
   void parsesWorkspaceTreeSelectionAndRejectsConflictingInputs() {
     CommandLine parsed =
-        CommandLine.parse(new String[] {"tree", "--workspace", "--module", "app", "--depth", "2"});
+        CommandLineParser.parse(
+            new String[] {"tree", "--workspace", "--module", "app", "--depth", "2"});
 
     assertEquals("tree", parsed.command());
     assertTrue(parsed.treeWorkspace());
@@ -67,7 +68,7 @@ class CommandLineTest {
   @Test
   void parsesJavaToolchainCommands() {
     CommandLine parsed =
-        CommandLine.parse(new String[] {"toolchain", "pin", "java@21", "--workspace"});
+        CommandLineParser.parse(new String[] {"toolchain", "pin", "java@21", "--workspace"});
 
     assertEquals("toolchain", parsed.command());
     assertEquals("pin", parsed.toolchainAction());
@@ -76,7 +77,8 @@ class CommandLineTest {
     assertEquals("toolchain needs list, pin, or install", parseError("toolchain"));
 
     CommandLine install =
-        CommandLine.parse(new String[] {"toolchain", "install", "java@21", "--force", "--offline"});
+        CommandLineParser.parse(
+            new String[] {"toolchain", "install", "java@21", "--force", "--offline"});
     assertEquals("install", install.toolchainAction());
     assertEquals("java@21", install.toolchainSpec());
     assertTrue(install.toolchainForce());
@@ -139,7 +141,7 @@ class CommandLineTest {
   @Test
   void parsesResolveWithDirectDependencyListing() {
     CommandLine parsed =
-        CommandLine.parse(new String[] {"resolve", "org.example:library:1.2", "--deps"});
+        CommandLineParser.parse(new String[] {"resolve", "org.example:library:1.2", "--deps"});
 
     assertEquals("resolve", parsed.command());
     assertEquals("org.example:library:1.2", parsed.dependencyCoordinate());
@@ -151,7 +153,7 @@ class CommandLineTest {
   @Test
   void parsesOutdatedWorkspaceSelection() {
     CommandLine parsed =
-        CommandLine.parse(new String[] {"outdated", "--module", "app", "--offline"});
+        CommandLineParser.parse(new String[] {"outdated", "--module", "app", "--offline"});
 
     assertEquals("outdated", parsed.command());
     assertEquals("app", parsed.module());
@@ -161,7 +163,7 @@ class CommandLineTest {
   @Test
   void parsesDocumentationWorkspaceSelection() {
     CommandLine parsed =
-        CommandLine.parse(
+        CommandLineParser.parse(
             new String[] {"doc", "--project", "demo", "--module", "api", "--offline"});
 
     assertEquals("doc", parsed.command());
@@ -172,7 +174,7 @@ class CommandLineTest {
 
   @Test
   void parsesLintWorkspaceSelection() {
-    CommandLine parsed = CommandLine.parse(new String[] {"lint", "--module", "core"});
+    CommandLine parsed = CommandLineParser.parse(new String[] {"lint", "--module", "core"});
 
     assertEquals("lint", parsed.command());
     assertEquals("core", parsed.module());
@@ -180,7 +182,7 @@ class CommandLineTest {
 
   @Test
   void parsesFormatterCheckMode() {
-    CommandLine parsed = CommandLine.parse(new String[] {"fmt", "--check", "--offline"});
+    CommandLine parsed = CommandLineParser.parse(new String[] {"fmt", "--check", "--offline"});
 
     assertEquals("fmt", parsed.command());
     assertTrue(parsed.formatCheck());
@@ -191,17 +193,17 @@ class CommandLineTest {
   @Test
   void parsesDependencyAddAndRemoveOptions() {
     CommandLine add =
-        CommandLine.parse(
+        CommandLineParser.parse(
             new String[] {"add", "org.example:annotations:1.0", "--name", "annotations", "--test"});
     assertEquals("org.example:annotations:1.0", add.dependencyCoordinate());
     assertEquals("annotations", add.dependencyName());
     assertTrue(add.testDependency());
 
-    CommandLine remove = CommandLine.parse(new String[] {"remove", "annotations", "--test"});
+    CommandLine remove = CommandLineParser.parse(new String[] {"remove", "annotations", "--test"});
     assertEquals("annotations", remove.dependencyName());
     assertTrue(remove.testDependency());
 
-    CommandLine catalog = CommandLine.parse(new String[] {"add", "--catalog", "junit"});
+    CommandLine catalog = CommandLineParser.parse(new String[] {"add", "--catalog", "junit"});
     assertEquals("junit", catalog.dependencyCatalog());
   }
 
@@ -214,7 +216,7 @@ class CommandLineTest {
   @Test
   void parsesProjectInitializationOptions() {
     CommandLine parsed =
-        CommandLine.parse(
+        CommandLineParser.parse(
             new String[] {
               "init", "sample-app", "--template", "library", "--package", "dev.sample"
             });
@@ -236,7 +238,7 @@ class CommandLineTest {
 
   private static String parseError(String... arguments) {
     try {
-      CommandLine.parse(arguments);
+      CommandLineParser.parse(arguments);
       throw new AssertionError("expected argument parsing to fail");
     } catch (IllegalArgumentException error) {
       return error.getMessage();

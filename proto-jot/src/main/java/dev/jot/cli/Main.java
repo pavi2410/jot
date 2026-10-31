@@ -49,7 +49,7 @@ public final class Main {
   }
 
   private static void execute(String[] rawArguments) throws Exception {
-    CommandLine commandLine = CommandLine.parse(rawArguments);
+    CommandLine commandLine = CommandLineParser.parse(rawArguments);
     if (commandLine.help()) {
       help();
       return;
