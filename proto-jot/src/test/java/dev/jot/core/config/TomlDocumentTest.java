@@ -33,7 +33,7 @@ class TomlDocumentTest {
         assertEquals(java.util.List.of("core", "cli"),
                 document.stringList("workspace.members", java.util.List.of()));
         assertEquals("../core,shared", ((java.util.Map<?, ?>)
-                document.values().get("dependencies.core")).get("path"));
+                document.table("dependencies").get("core")).get("path"));
     }
 
     @Test
@@ -64,5 +64,21 @@ class TomlDocumentTest {
         assertEquals(1, document.integer("version", -1));
         assertEquals(1, document.tableArray("roots").size());
         assertEquals("api", document.tableArray("roots").getFirst().get("artifact"));
+    }
+
+    @Test
+    void readsFullTomlStringsAndNestedDependencyTables() throws Exception {
+        Path manifest = temp.resolve("full.toml");
+        Files.writeString(manifest, "title = \"\"\"\n"
+                + "first line\nsecond line\n\"\"\"\n\n"
+                + "[dependencies.example]\npath = \"../example\"\noptional = true\n");
+
+        TomlDocument document = TomlDocument.read(manifest);
+
+        assertEquals("first line\nsecond line\n", document.string("title", ""));
+        java.util.Map<?, ?> dependency = (java.util.Map<?, ?>)
+                document.table("dependencies").get("example");
+        assertEquals("../example", dependency.get("path"));
+        assertEquals(true, dependency.get("optional"));
     }
 }

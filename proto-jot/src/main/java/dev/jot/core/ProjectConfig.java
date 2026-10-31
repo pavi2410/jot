@@ -43,10 +43,10 @@ public record ProjectConfig(String name, String version, String mainClass, Strin
         java.util.List<String> resourceDefaults = layout.equals("maven")
                 ? java.util.List.of("src/main/resources") : java.util.List.of("res");
         Map<String, String> pathDependencies = new TreeMap<>();
-        Map<String, String> dependencies = parseDependencies(document.values(), "dependencies.",
-                pathDependencies);
-        Map<String, String> testDependencies = parseDependencies(document.values(),
-                "test-dependencies.", new TreeMap<>());
+        Map<String, String> dependencies = parseDependencies(document.table("dependencies"),
+                pathDependencies, false);
+        Map<String, String> testDependencies = parseDependencies(document.table("test-dependencies"),
+                new TreeMap<>(), true);
         return new ProjectConfig(projectName,
                 document.string("project.version", "0.1.0"),
                 document.string("project.main-class", ""), javaVersion,
@@ -61,12 +61,12 @@ public record ProjectConfig(String name, String version, String mainClass, Strin
                 Collections.unmodifiableMap(new TreeMap<>(testDependencies)));
     }
 
-    private static Map<String, String> parseDependencies(Map<String, Object> values, String prefix,
-                                                         Map<String, String> pathDependencies) {
+    private static Map<String, String> parseDependencies(Map<String, Object> declarations,
+                                                         Map<String, String> pathDependencies,
+                                                         boolean testDependencies) {
         Map<String, String> coordinates = new TreeMap<>();
-        for (Map.Entry<String, Object> entry : values.entrySet()) {
-            if (!entry.getKey().startsWith(prefix)) continue;
-            String name = entry.getKey().substring(prefix.length());
+        for (Map.Entry<String, Object> entry : declarations.entrySet()) {
+            String name = entry.getKey();
             if (entry.getValue() instanceof String coordinate) {
                 coordinates.put(name, coordinate);
                 continue;
@@ -77,7 +77,7 @@ public record ProjectConfig(String name, String version, String mainClass, Strin
             Object path = specification.get("path");
             Object coordinate = specification.get("coords");
             if (path instanceof String pathString && !pathString.isBlank()) {
-                if (!prefix.equals("dependencies.")) {
+                if (testDependencies) {
                     throw new IllegalArgumentException("test dependency `" + name
                             + "` cannot be a path dependency");
                 }

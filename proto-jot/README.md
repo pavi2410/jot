@@ -1,9 +1,8 @@
 # proto-Jot
 
-This small Java prototype checks whether Jot can build a Java implementation
-of itself. It reads a narrow subset of `jot.toml`, compiles Java sources with
-`javac`, and packages an executable JAR with `jar`. It has no external runtime
-dependencies.
+This Java prototype checks whether Jot can build a Java implementation of
+itself. It reads `jot.toml` with Tomlj, compiles Java sources with `javac`, and
+packages JARs with `jar`.
 
 ## Bootstrap and self-build
 
@@ -20,9 +19,8 @@ For the Java Jot commands below, use the managed Java 27 installation as
 `JAVA_HOME` and put `$JAVA_HOME/bin` first on `PATH`.
 
 The Java implementation is one project, organized into packages for the CLI,
-configuration, workspace loading, and build execution. The TOML reader/writer
-and CLI parser are isolated classes, so they can be replaced by dedicated Java
-libraries without moving build logic. Use the resulting Java Jot to build
+configuration, workspace loading, and build execution. TOML parsing and writing
+and CLI parsing stay isolated from build logic. Use the resulting Java Jot to build
 itself:
 
 ```sh
@@ -56,8 +54,8 @@ transitive dependencies from POMs, checking repository SHA-256 sidecars when
 available. `jot lock` writes the shared version 1 `jot.lock` format with
 dependency roots and artifact SHA-256 hashes. Builds and tests validate locked
 artifacts, while `--offline` restricts resolution to the local cache. It caches
-downloads under `~/.jot/java-maven-cache`. Version ranges,
-snapshots, Kotlin, and the full TOML specification are not implemented yet.
+downloads under `~/.jot/java-maven-cache`. Version ranges, snapshots, and Kotlin
+are not implemented yet.
 
 The Java CLI includes a `test` command that compiles configured test sources and
 runs JUnit Platform Console. The prototype's own tests run through that command:
@@ -68,8 +66,8 @@ java -jar target/bin/jot-java.jar lock
 java -jar target/bin/jot-java.jar test --offline
 ```
 
-The bootstrap TOML reader currently handles strings, integers, string arrays,
-inline tables, and array tables. It remains a deliberately small subset of TOML.
+The TOML reader supports TOML 1.0 through Tomlj. The document writer remains
+isolated for generated manifests and lockfiles.
 
 ```sh
 java -jar target/bin/jot-java.jar build --project examples/tiny-workspace

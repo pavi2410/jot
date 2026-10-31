@@ -10,11 +10,28 @@ group = "org.junit.platform"
 artifact = "junit-platform-console"
 version = "1.11.0"
 
+[[roots]]
+group = "org.tomlj"
+artifact = "tomlj"
+version = "1.1.1"
+
+[[package]]
+group = "org.antlr"
+artifact = "antlr4-runtime"
+version = "4.11.1"
+sha256 = "e06c6553c1ccc14d36052ec4b0fc6f13b808cf957b5b1dc3f61bf401996ada59"
+
 [[package]]
 group = "org.apiguardian"
 artifact = "apiguardian-api"
 version = "1.1.2"
 sha256 = "b509448ac506d607319f182537f0b35d71007582ec741832a1f111e5b5b70b38"
+
+[[package]]
+group = "org.checkerframework"
+artifact = "checker-qual"
+version = "3.21.2"
+sha256 = "7e8554c902b9b839e61396cfe3a64c84ecabfb8eb652c410bfd8e4f5c1a8ece8"
 
 [[package]]
 group = "org.junit.jupiter"
@@ -75,3 +92,9 @@ group = "org.opentest4j"
 artifact = "opentest4j"
 version = "1.3.0"
 sha256 = "48e2df636cab6563ced64dcdff8abb2355627cb236ef0bf37598682ddf742f1b"
+
+[[package]]
+group = "org.tomlj"
+artifact = "tomlj"
+version = "1.1.1"
+sha256 = "383b7c66966c42ee4913ec977a7b6573631866bddc5318ec4a6215b688dd0d6c"

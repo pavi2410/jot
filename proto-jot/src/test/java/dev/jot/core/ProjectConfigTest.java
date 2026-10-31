@@ -28,4 +28,24 @@ class ProjectConfigTest {
         assertEquals(List.of("src/main/resources"), config.resourceDirectories());
         assertEquals(List.of("src/test/java"), config.testSourceDirectories());
     }
+
+    @Test
+    void readsDependenciesDeclaredAsTomlTables() throws Exception {
+        Path manifest = temp.resolve("jot.toml");
+        Files.writeString(manifest, """
+                [project]
+                name = "toml-dependencies"
+                [toolchains]
+                java = "27"
+                [dependencies.annotations]
+                coords = "org.example:annotations:1.0"
+                [dependencies.local]
+                path = "../local"
+                """);
+
+        ProjectConfig config = ProjectConfig.read(manifest, null);
+
+        assertEquals("org.example:annotations:1.0", config.dependencies().get("annotations"));
+        assertEquals("../local", config.pathDependencies().get("local"));
+    }
 }
