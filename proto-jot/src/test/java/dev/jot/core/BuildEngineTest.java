@@ -46,6 +46,17 @@ class BuildEngineTest {
         byte[] repeatBuild = Files.readAllBytes(artifact);
         assertArrayEquals(firstBuild, repeatBuild, "unchanged inputs should produce identical JAR bytes");
 
+        Path mainClass = temp.resolve("target/classes/sample/Main.class");
+        Files.delete(mainClass);
+        BuildEngine.build(project);
+        assertTrue(Files.isRegularFile(mainClass), "missing classes should be recompiled");
+        assertArrayEquals(repeatBuild, Files.readAllBytes(artifact));
+
+        Files.writeString(artifact, "damaged artifact");
+        BuildEngine.build(project);
+        assertArrayEquals(repeatBuild, Files.readAllBytes(artifact),
+                "a damaged JAR should be repackaged");
+
         Files.writeString(source, "package sample; public class Main { public static String value() { return \"two\"; } }");
         BuildEngine.build(project);
         assertTrue(!HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(firstBuild))

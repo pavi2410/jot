@@ -20,7 +20,7 @@ For the Java Jot commands below, use the managed Java 27 installation as
 `JAVA_HOME` and put `$JAVA_HOME/bin` first on `PATH`.
 
 The Java implementation is one project, organized into packages for the CLI,
-configuration, workspace loading, and build execution. The narrow TOML reader
+configuration, workspace loading, and build execution. The TOML reader/writer
 and CLI parser are isolated classes, so they can be replaced by dedicated Java
 libraries without moving build logic. Use the resulting Java Jot to build
 itself:
@@ -53,8 +53,8 @@ java -jar target/bin/jot-java.jar lock
 java -jar target/bin/jot-java.jar test --offline
 ```
 
-The TOML reader currently handles the strings, string arrays, and path
-dependency inline tables needed by this slice.
+The bootstrap TOML reader currently handles strings, integers, string arrays,
+inline tables, and array tables. It remains a deliberately small subset of TOML.
 
 ```sh
 java -jar target/bin/jot-java.jar build --project examples/tiny-workspace

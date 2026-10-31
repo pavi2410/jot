@@ -53,7 +53,7 @@ public final class BuildEngine {
         Path artifact = target.resolve(config.name() + "-" + config.version() + ".jar");
         Path stateFile = target.resolve(".jot/build-state.properties");
         String fingerprint = fingerprint(project, sources, externalArtifacts);
-        if (Files.isRegularFile(artifact) && fingerprint.equals(readFingerprint(stateFile))) {
+        if (outputsAreIntact(classes, artifact, stateFile, fingerprint)) {
             System.out.println("build: " + config.name() + " is up to date");
             return;
         }
@@ -75,6 +75,8 @@ public final class BuildEngine {
         runProcess(root, jar);
         Properties state = new Properties();
         state.setProperty("fingerprint", fingerprint);
+        state.setProperty("classes-sha256", directoryFingerprint(classes));
+        state.setProperty("artifact-sha256", fileFingerprint(artifact));
         Files.createDirectories(stateFile.getParent());
         try (var output = Files.newOutputStream(stateFile)) {
             state.store(output, "Jot content fingerprint. Generated file.");
@@ -213,13 +215,33 @@ public final class BuildEngine {
         digest.update((byte) 0);
     }
 
-    private static String readFingerprint(Path file) throws IOException {
-        if (!Files.isRegularFile(file)) return "";
+    private static boolean outputsAreIntact(Path classes, Path artifact, Path stateFile,
+                                            String fingerprint) throws Exception {
+        if (!Files.isDirectory(classes) || !Files.isRegularFile(artifact)
+                || !Files.isRegularFile(stateFile)) return false;
         Properties state = new Properties();
-        try (var input = Files.newInputStream(file)) {
+        try (var input = Files.newInputStream(stateFile)) {
             state.load(input);
         }
-        return state.getProperty("fingerprint", "");
+        return fingerprint.equals(state.getProperty("fingerprint"))
+                && directoryFingerprint(classes).equals(state.getProperty("classes-sha256"))
+                && fileFingerprint(artifact).equals(state.getProperty("artifact-sha256"));
+    }
+
+    private static String directoryFingerprint(Path directory) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        try (Stream<Path> paths = Files.walk(directory)) {
+            for (Path file : paths.filter(Files::isRegularFile).sorted().toList()) {
+                updateDigest(digest, directory.relativize(file).toString());
+                digest.update(Files.readAllBytes(file));
+            }
+        }
+        return HexFormat.of().formatHex(digest.digest());
+    }
+
+    private static String fileFingerprint(Path file) throws Exception {
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(Files.readAllBytes(file)));
     }
 
     private static String classpath(WorkspaceProject project,

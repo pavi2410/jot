@@ -1,6 +1,7 @@
 package dev.jot.core.resolve;
 
 import dev.jot.core.config.TomlWriter;
+import dev.jot.core.config.TomlDocument;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -33,48 +34,17 @@ public record Lockfile(List<MavenCoordinate> roots, List<LockedPackage> packages
 
     public static Lockfile read(Path file) throws IOException {
         if (!Files.isRegularFile(file)) throw new IOException("lockfile not found: " + file);
-        List<Map<String, String>> roots = new ArrayList<>();
-        List<Map<String, String>> packages = new ArrayList<>();
-        Map<String, String> current = null;
-        String section = "";
-        int lineNumber = 0;
-        for (String raw : Files.readAllLines(file)) {
-            lineNumber++;
-            String line = raw.strip();
-            if (line.isEmpty() || line.startsWith("#")) continue;
-            if (line.equals("[[roots]]")) {
-                section = "roots";
-                current = new LinkedHashMap<>();
-                roots.add(current);
-                continue;
-            }
-            if (line.equals("[[package]]")) {
-                section = "package";
-                current = new LinkedHashMap<>();
-                packages.add(current);
-                continue;
-            }
-            int equals = line.indexOf('=');
-            if (equals < 1) throw syntax(file, lineNumber, "expected key = value");
-            String key = line.substring(0, equals).trim();
-            String value = line.substring(equals + 1).trim();
-            if (section.isEmpty()) {
-                if (!key.equals("version") || !value.equals("1")) {
-                    throw syntax(file, lineNumber, "unsupported lockfile header");
-                }
-                continue;
-            }
-            if (current == null || value.length() < 2 || !value.startsWith("\"")
-                    || !value.endsWith("\"")) {
-                throw syntax(file, lineNumber, "lockfile values must be quoted strings");
-            }
-            current.put(key, unescape(value.substring(1, value.length() - 1), file, lineNumber));
+        TomlDocument document = TomlDocument.read(file);
+        if (document.integer("version", -1) != 1) {
+            throw new IOException("unsupported lockfile version in " + file);
         }
         List<MavenCoordinate> parsedRoots = new ArrayList<>();
-        for (Map<String, String> root : roots) parsedRoots.add(coordinate(root, file));
+        for (Map<String, Object> root : document.tableArray("roots")) {
+            parsedRoots.add(coordinate(root, file));
+        }
         List<LockedPackage> parsedPackages = new ArrayList<>();
-        for (Map<String, String> item : packages) {
-            String checksum = item.get("sha256");
+        for (Map<String, Object> item : document.tableArray("package")) {
+            String checksum = string(item, "sha256");
             if (checksum == null || !checksum.matches("[0-9a-fA-F]{64}")) {
                 throw new IOException("invalid sha256 entry in " + file);
             }
@@ -123,14 +93,20 @@ public record Lockfile(List<MavenCoordinate> roots, List<LockedPackage> packages
         }
     }
 
-    private static MavenCoordinate coordinate(Map<String, String> fields, Path file) throws IOException {
-        String group = fields.get("group");
-        String artifact = fields.get("artifact");
-        String version = fields.get("version");
+    private static MavenCoordinate coordinate(Map<String, Object> fields, Path file) throws IOException {
+        String group = string(fields, "group");
+        String artifact = string(fields, "artifact");
+        String version = string(fields, "version");
         if (group == null || artifact == null || version == null) {
             throw new IOException("incomplete coordinate in " + file);
         }
-        return new MavenCoordinate(group, artifact, version, fields.getOrDefault("classifier", ""));
+        return new MavenCoordinate(group, artifact, version,
+                java.util.Objects.requireNonNullElse(string(fields, "classifier"), ""));
+    }
+
+    private static String string(Map<String, Object> fields, String key) {
+        Object value = fields.get(key);
+        return value instanceof String string ? string : null;
     }
 
     private static Map<String, String> coordinateFields(MavenCoordinate coordinate) {
@@ -142,31 +118,6 @@ public record Lockfile(List<MavenCoordinate> roots, List<LockedPackage> packages
             fields.put("classifier", coordinate.classifier());
         }
         return fields;
-    }
-
-    private static String unescape(String value, Path file, int lineNumber) throws IOException {
-        StringBuilder result = new StringBuilder();
-        boolean escaped = false;
-        for (int i = 0; i < value.length(); i++) {
-            char character = value.charAt(i);
-            if (escaped) {
-                if (character != '\\' && character != '"') {
-                    throw syntax(file, lineNumber, "invalid string escape");
-                }
-                result.append(character);
-                escaped = false;
-            } else if (character == '\\') {
-                escaped = true;
-            } else {
-                result.append(character);
-            }
-        }
-        if (escaped) throw syntax(file, lineNumber, "unfinished string escape");
-        return result.toString();
-    }
-
-    private static IOException syntax(Path file, int lineNumber, String message) {
-        return new IOException(file + ":" + lineNumber + ": " + message);
     }
 
     public record LockedPackage(MavenCoordinate coordinate, String sha256) {}

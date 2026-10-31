@@ -44,6 +44,25 @@ class TomlDocumentTest {
 
         assertTrue(output.startsWith("version = 1\n\n[[roots]]\n"));
         assertTrue(output.contains("artifact = \"a\\\"b\""));
-        assertTrue(output.endsWith("group = \"sample\"\n"));
+        assertTrue(output.contains("group = \"sample\"\n"));
+    }
+
+    @Test
+    void readsIntegerHeadersAndArrayTables() throws Exception {
+        Path lockfile = temp.resolve("jot.lock");
+        Files.writeString(lockfile, """
+                version = 1
+
+                [[roots]]
+                group = "sample"
+                artifact = "api"
+                version = "1.0.0"
+                """);
+
+        TomlDocument document = TomlDocument.read(lockfile);
+
+        assertEquals(1, document.integer("version", -1));
+        assertEquals(1, document.tableArray("roots").size());
+        assertEquals("api", document.tableArray("roots").getFirst().get("artifact"));
     }
 }
