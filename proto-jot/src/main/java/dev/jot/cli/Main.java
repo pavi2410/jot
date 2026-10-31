@@ -21,7 +21,7 @@ import java.util.List;
 
 /** Command-line entry point for the Java Jot implementation. */
 public final class Main {
-  private static final String VERSION = "0.2.0-dev";
+  private static final String VERSION = version();
 
   private Main() {}
 
@@ -59,6 +59,13 @@ public final class Main {
     }
     if (commandLine.version()) {
       System.out.println("jot " + VERSION);
+      return;
+    }
+    if (commandLine.command() instanceof CommandLine.Self self) {
+      if (commandLine.offline() && self.action() instanceof CommandLine.SelfUpdate) {
+        throw new IllegalArgumentException("self update requires network access");
+      }
+      SelfManager.execute(self, VERSION);
       return;
     }
     if (commandLine.command() instanceof CommandLine.Clean clean && clean.global()) {
@@ -209,6 +216,17 @@ public final class Main {
         for (WorkspaceProject project : workspace.ordered()) BuildEngine.clean(project);
       }
       default -> throw new IllegalStateException("command handled before project loading");
+    }
+  }
+
+  private static String version() {
+    try (var input = Main.class.getResourceAsStream("/jot-version.properties")) {
+      if (input == null) return "0.2.0-dev";
+      var properties = new java.util.Properties();
+      properties.load(input);
+      return properties.getProperty("version", "0.2.0-dev");
+    } catch (Exception ignored) {
+      return "0.2.0-dev";
     }
   }
 

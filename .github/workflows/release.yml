@@ -67,10 +67,33 @@ jobs:
           path: jot-${{ matrix.target }}${{ matrix.binary_suffix }}
           if-no-files-found: error
 
+  java-build:
+    name: Build universal Java JAR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '27'
+      - name: Set release version
+        working-directory: proto-jot
+        run: sed -i "s/^version=.*/version=${GITHUB_REF_NAME#v}/" src/main/resources/jot-version.properties
+      - name: Build Java Jot
+        working-directory: proto-jot
+        run: cargo run --locked --manifest-path ../Cargo.toml -p jot -- build
+      - name: Upload Java JAR
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-java
+          path: proto-jot/target/bin/jot-java.jar
+          if-no-files-found: error
+
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, java-build]
 
     steps:
       - name: Download binaries
@@ -85,6 +108,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${{ github.ref_name }}"
+          mv jot-java.jar "jot-java-${version}.jar"
           for binary in jot-*; do
             if [[ "$binary" == *.exe ]]; then
               triple="${binary%.exe}"
@@ -101,7 +125,7 @@ jobs:
               rm jot
             fi
           done
-          sha256sum jot-"${version}"-* > SHA256SUMS
+          sha256sum jot-"${version}"-* "jot-java-${version}.jar" > SHA256SUMS
 
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
@@ -109,4 +133,5 @@ jobs:
           files: |
             dist/jot-*.tar.gz
             dist/jot-*.zip
+            dist/jot-java-*.jar
             dist/SHA256SUMS

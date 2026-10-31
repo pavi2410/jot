@@ -25,7 +25,8 @@ record CommandLine(
           Bench,
           Audit,
           Publish,
-          Toolchain {}
+          Toolchain,
+          Self {}
 
   record Build(String module) implements Command {}
 
@@ -77,6 +78,14 @@ record CommandLine(
       implements Command {}
 
   record Toolchain(ToolchainAction action) implements Command {}
+
+  record Self(SelfAction action) implements Command {}
+
+  sealed interface SelfAction permits SelfUpdate, SelfUninstall {}
+
+  record SelfUpdate(String version, boolean check, boolean yes) implements SelfAction {}
+
+  record SelfUninstall(boolean yes) implements SelfAction {}
 
   sealed interface ToolchainAction permits ListToolchains, PinToolchain, InstallToolchain {}
 

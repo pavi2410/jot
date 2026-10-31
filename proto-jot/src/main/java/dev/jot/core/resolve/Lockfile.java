@@ -20,7 +20,16 @@ public record Lockfile(List<MavenCoordinate> roots, List<LockedPackage> packages
       Iterable<String> declaredRoots, List<MavenResolver.ResolvedArtifact> artifacts)
       throws Exception {
     List<MavenCoordinate> roots = new ArrayList<>();
-    for (String root : declaredRoots) roots.add(MavenCoordinate.parse(root));
+    Map<String, MavenCoordinate> resolvedByModule = new LinkedHashMap<>();
+    for (MavenResolver.ResolvedArtifact artifact : artifacts)
+      resolvedByModule.putIfAbsent(artifact.coordinate().moduleKey(), artifact.coordinate());
+    for (String notation : declaredRoots) {
+      MavenCoordinate declared = MavenCoordinate.parse(notation);
+      roots.add(
+          MavenVersions.isDynamic(declared.version())
+              ? resolvedByModule.getOrDefault(declared.moduleKey(), declared)
+              : declared);
+    }
     List<LockedPackage> packages = new ArrayList<>();
     for (MavenResolver.ResolvedArtifact artifact : artifacts) {
       byte[] bytes = Files.readAllBytes(artifact.jar());
@@ -74,8 +83,19 @@ public record Lockfile(List<MavenCoordinate> roots, List<LockedPackage> packages
     for (LockedPackage item : packages)
       lockedHashes.put(item.coordinate().notation(), item.sha256());
     for (String declared : declaredRoots) {
-      String notation = MavenCoordinate.parse(declared).notation();
-      if (roots.stream().noneMatch(root -> root.notation().equals(notation))) {
+      MavenCoordinate coordinate = MavenCoordinate.parse(declared);
+      String notation = coordinate.notation();
+      if (MavenVersions.isDynamic(coordinate.version())) {
+        notation =
+            resolved.stream()
+                .map(MavenResolver.ResolvedArtifact::coordinate)
+                .filter(item -> item.moduleKey().equals(coordinate.moduleKey()))
+                .map(MavenCoordinate::notation)
+                .findFirst()
+                .orElse(notation);
+      }
+      String expectedRoot = notation;
+      if (roots.stream().noneMatch(root -> root.notation().equals(expectedRoot))) {
         throw new IOException(
             "jot.lock is out of date: missing root " + notation + "; run `jot lock`");
       }

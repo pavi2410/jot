@@ -238,6 +238,74 @@ class MavenResolverTest {
   }
 
   @Test
+  void resolvesLatestReleaseAndMavenVersionRangesAndLocksTheSelectedVersion() throws Exception {
+    Path repository = temp.resolve("dynamic-version-repository");
+    String[] versions = {"1.0.0", "1.2.0", "1.5.0", "1.9.0-rc1", "2.0.0-SNAPSHOT"};
+    for (String version : versions) {
+      String notation = "sample:ranged:" + version;
+      addArtifact(repository, notation, "<project/>");
+    }
+    Path metadata = repository.resolve("sample/ranged/maven-metadata.xml");
+    Files.createDirectories(metadata.getParent());
+    Files.writeString(
+        metadata,
+        """
+        <metadata><groupId>sample</groupId><artifactId>ranged</artifactId>
+          <versioning><latest>2.0.0-SNAPSHOT</latest><release>1.5.0</release>
+            <versions><version>1.0.0</version><version>1.2.0</version>
+              <version>1.5.0</version><version>1.9.0-rc1</version>
+              <version>2.0.0-SNAPSHOT</version></versions>
+          </versioning>
+        </metadata>
+        """);
+    MavenResolver resolver =
+        new MavenResolver(temp.resolve("dynamic-version-cache"), repository.toUri());
+
+    assertEquals(
+        "sample:ranged:1.5.0", resolver.resolveCoordinate("sample:ranged:release").notation());
+    assertEquals(
+        "sample:ranged:1.5.0", resolver.resolveCoordinate("sample:ranged:latest").notation());
+    List<MavenResolver.ResolvedArtifact> resolved =
+        resolver.resolve(Map.of("range", "sample:ranged:[1.0.0,2.0.0)"));
+    assertEquals("sample:ranged:1.5.0", resolved.getFirst().coordinate().notation());
+
+    Lockfile lock = Lockfile.create(List.of("sample:ranged:[1.0.0,2.0.0)"), resolved);
+    assertEquals("sample:ranged:1.5.0", lock.roots().getFirst().notation());
+    lock.verify(List.of("sample:ranged:[1.0.0,2.0.0)"), resolved);
+  }
+
+  @Test
+  void resolvesTimestampedMavenSnapshotArtifactsAndPoms() throws Exception {
+    Path repository = temp.resolve("snapshot-repository");
+    Path versionDirectory = repository.resolve("sample/snapshot/1.0-SNAPSHOT");
+    Files.createDirectories(versionDirectory);
+    String timestampedVersion = "1.0-20261101.123456-2";
+    Files.writeString(
+        versionDirectory.resolve("maven-metadata.xml"),
+        """
+        <metadata><versioning>
+          <snapshot><timestamp>20261101.123456</timestamp><buildNumber>2</buildNumber></snapshot>
+          <snapshotVersions>
+            <snapshotVersion><extension>pom</extension><value>1.0-20261101.123456-2</value></snapshotVersion>
+            <snapshotVersion><extension>jar</extension><value>1.0-20261101.123456-2</value></snapshotVersion>
+          </snapshotVersions>
+        </versioning></metadata>
+        """);
+    Files.writeString(
+        versionDirectory.resolve("snapshot-" + timestampedVersion + ".pom"), "<project/>");
+    Files.writeString(
+        versionDirectory.resolve("snapshot-" + timestampedVersion + ".jar"), "snapshot artifact");
+    MavenResolver resolver = new MavenResolver(temp.resolve("snapshot-cache"), repository.toUri());
+
+    List<MavenResolver.ResolvedArtifact> resolved =
+        resolver.resolve(Map.of("snapshot", "sample:snapshot:1.0-SNAPSHOT"));
+
+    assertEquals("sample:snapshot:1.0-SNAPSHOT", resolved.getFirst().coordinate().notation());
+    assertTrue(resolved.getFirst().jar().toString().contains(timestampedVersion));
+    assertEquals("snapshot artifact", Files.readString(resolved.getFirst().jar()));
+  }
+
+  @Test
   void rejectsAnArtifactWhenTheRepositoryChecksumDoesNotMatch() throws Exception {
     Path repository = temp.resolve("bad-checksum-repository");
     String coordinateText = "sample:tampered:1.0.0";

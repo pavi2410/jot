@@ -151,6 +151,26 @@ class CommandLineTest {
   }
 
   @Test
+  void parsesSelfManagementSubcommands() {
+    CommandLine.Self update =
+        assertInstanceOf(
+            CommandLine.Self.class,
+            CommandLineParser.parse(new String[] {"self", "update", "--version", "1.2.3", "--yes"})
+                .command());
+    CommandLine.SelfUpdate updateAction =
+        assertInstanceOf(CommandLine.SelfUpdate.class, update.action());
+    assertEquals("1.2.3", updateAction.version());
+    assertTrue(updateAction.yes());
+
+    CommandLine.Self uninstall =
+        assertInstanceOf(
+            CommandLine.Self.class,
+            CommandLineParser.parse(new String[] {"self", "uninstall", "--yes"}).command());
+    assertTrue(assertInstanceOf(CommandLine.SelfUninstall.class, uninstall.action()).yes());
+    assertEquals("self needs update or uninstall", parseError("self"));
+  }
+
+  @Test
   void pinsJavaToolchainFromTheCli() throws Exception {
     Files.writeString(temp.resolve("jot.toml"), "[project]\nname = \"toolchain-cli\"\n");
     String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();

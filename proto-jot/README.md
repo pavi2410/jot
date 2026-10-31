@@ -26,11 +26,14 @@ itself:
 ```sh
 java -jar target/bin/jot-java.jar build
 java -jar target/bin/jot-java.jar run -- --version
+java -jar target/bin/jot-java.jar self update --check
 ```
 
 The prototype supports `init`, `build`, `run`, `test`, `bench`, `fmt`, `lint`, `doc`,
 `publish`, `add`, `remove`, `deps`, `outdated`, `resolve`, `tree`, `toolchain`, `lock`, `audit`, and
-`clean`, and accepts `--project`, `--module`, and global `--offline`. `jot clean --global`
+`clean`, and accepts `--project`, `--module`, and global `--offline`. `jot self update`
+checks GitHub releases and verifies the universal Java JAR checksum before replacing itself;
+`jot self uninstall` removes the current packaged JAR. `jot clean --global`
 clears managed JDK downloads and Maven artifact caches while preserving other files in `~/.jot`.
 `jot init [name]` creates a Jot-native Java app; `--template java-lib` creates a
 library, `java-cli` a Picocli command-line app, `java-server` a JDK HTTP server,
@@ -69,8 +72,9 @@ available. `jot lock` writes the shared version 1 `jot.lock` format with
 dependency roots and artifact SHA-256 hashes. Builds, tests, and benchmarks
 validate their locked artifacts; projects with benchmark sources lock JMH
 artifacts too. `--offline` restricts resolution to the local cache. It caches
-downloads under `~/.jot/java-maven-cache`. Version ranges, snapshots, and Kotlin
-are not implemented yet. `jot lock group:artifact:version [--depth levels]
+downloads under `~/.jot/java-maven-cache`. Maven version ranges, `latest`/`release`
+selectors, and timestamped snapshots resolve through Maven metadata. Kotlin
+is not implemented yet. `jot lock group:artifact:version [--depth levels]
 [--output path]` can also create a lockfile for ad hoc coordinates without a
 project manifest.
 

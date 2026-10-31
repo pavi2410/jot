@@ -23,6 +23,7 @@ final class CommandLineParser {
           "password",
           "signing-key",
           "output",
+          "version",
           "package");
   private static final java.util.Set<String> FLAG_OPTIONS =
       java.util.Set.of(
@@ -33,6 +34,7 @@ final class CommandLineParser {
           "ci",
           "workspace",
           "force",
+          "yes",
           "test",
           "global",
           "dry-run",
@@ -100,6 +102,7 @@ final class CommandLineParser {
           case "publish" -> PublishCommandParser.parse(args);
           case "lock" -> LockCommandParser.parse(args);
           case "toolchain" -> ToolchainCommandParser.parse(args);
+          case "self" -> SelfCommandParser.parse(args);
           case "build", "run", "test", "doc", "lint", "fmt", "deps", "outdated", "clean" ->
               SimpleCommandParser.parse(command, args);
           default -> throw new IllegalArgumentException("unknown command: " + command);

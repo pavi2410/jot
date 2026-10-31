@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HexFormat;
@@ -32,6 +33,8 @@ import org.w3c.dom.NodeList;
 /** Resolves pinned Maven coordinates, their compile/runtime POM dependencies, and JARs. */
 public final class MavenResolver {
   private static final URI CENTRAL = URI.create("https://repo.maven.apache.org/maven2/");
+  private static final Duration VERSION_METADATA_TTL = Duration.ofHours(6);
+  private static final Duration SNAPSHOT_METADATA_TTL = Duration.ofMinutes(5);
   private final Path cacheRoot;
   private final URI repository;
   private final boolean offline;
@@ -80,7 +83,7 @@ public final class MavenResolver {
     Map<String, ResolvedArtifact> selected = new LinkedHashMap<>();
     while (!pending.isEmpty()) {
       DependencyRequest request = pending.removeFirst();
-      MavenCoordinate coordinate = request.coordinate;
+      MavenCoordinate coordinate = resolveVersion(request.coordinate);
       if (request.exclusions.stream().anyMatch(exclusion -> exclusion.matches(coordinate)))
         continue;
       String moduleKey = coordinate.moduleKey();
@@ -105,19 +108,50 @@ public final class MavenResolver {
   }
 
   public Optional<String> latestAvailableVersion(MavenCoordinate coordinate) throws Exception {
+    ArtifactMetadata metadata = metadata(coordinate);
+    return Optional.ofNullable(
+        MavenVersions.best(metadata.release(), metadata.latest(), metadata.versions()));
+  }
+
+  private MavenCoordinate resolveVersion(MavenCoordinate coordinate) throws Exception {
+    String version = coordinate.version();
+    if (version.contains("${"))
+      throw new IOException("unsupported Maven version expression: " + coordinate.notation());
+    if (!MavenVersions.isDynamic(version)) return coordinate;
+    ArtifactMetadata metadata = metadata(coordinate);
+    String resolved =
+        MavenVersions.resolve(version, metadata.release(), metadata.latest(), metadata.versions());
+    if (resolved == null)
+      throw new IOException(
+          "no version in Maven metadata for "
+              + coordinate.group()
+              + ":"
+              + coordinate.artifact()
+              + " matches "
+              + version);
+    return new MavenCoordinate(
+        coordinate.group(), coordinate.artifact(), resolved, coordinate.classifier());
+  }
+
+  private ArtifactMetadata metadata(MavenCoordinate coordinate) throws Exception {
     String metadataPath =
         coordinate.group().replace('.', '/') + "/" + coordinate.artifact() + "/maven-metadata.xml";
-    byte[] metadata = fetch(repository.resolve(metadataPath), true);
-    Element versioning = child(parseXml(metadata).getDocumentElement(), "versioning");
-    String latest = text(versioning, "release");
-    if (latest == null) latest = text(versioning, "latest");
-    return Optional.ofNullable(latest);
+    byte[] bytes = fetch(repository.resolve(metadataPath), true, VERSION_METADATA_TTL);
+    Element versioning = child(parseXml(bytes).getDocumentElement(), "versioning");
+    List<String> versions =
+        children(child(versioning, "versions"), "version").stream()
+            .map(Element::getTextContent)
+            .map(String::trim)
+            .filter(value -> !value.isEmpty())
+            .toList();
+    return new ArtifactMetadata(text(versioning, "latest"), text(versioning, "release"), versions);
   }
 
   public List<TreeEntry> resolveDependencyTree(MavenCoordinate root, int maxDepth)
       throws Exception {
     if (maxDepth < 0) throw new IllegalArgumentException("tree depth cannot be negative");
     List<TreeEntry> entries = new ArrayList<>();
+    root = resolveVersion(root);
     entries.add(new TreeEntry(0, root, "", false, null));
     Set<String> ancestors = new LinkedHashSet<>();
     ancestors.add(root.notation());
@@ -127,7 +161,7 @@ public final class MavenResolver {
 
   /** Resolves a pinned coordinate by loading its effective POM model. */
   public MavenCoordinate resolveCoordinate(String notation) throws Exception {
-    MavenCoordinate coordinate = MavenCoordinate.parse(notation);
+    MavenCoordinate coordinate = resolveVersion(MavenCoordinate.parse(notation));
     model(coordinate, new LinkedHashSet<>());
     return coordinate;
   }
@@ -155,7 +189,7 @@ public final class MavenResolver {
       throws Exception {
     if (depth > maxDepth) return;
     for (PomDependency dependency : model(parent, new LinkedHashSet<>()).dependencies) {
-      MavenCoordinate coordinate = dependency.coordinate;
+      MavenCoordinate coordinate = resolveVersion(dependency.coordinate);
       String note = null;
       if (!dependency.isRuntimeVisible()) note = "scope omitted";
       else if (inheritedExclusions.stream().anyMatch(exclusion -> exclusion.matches(coordinate))) {
@@ -184,7 +218,7 @@ public final class MavenResolver {
       int depth, MavenCoordinate coordinate, String scope, boolean optional, String note) {}
 
   private Path resolveJar(MavenCoordinate coordinate) throws Exception {
-    URI uri = repository.resolve(coordinate.repositoryPath("jar"));
+    URI uri = resolveSnapshotUri(coordinate, "jar");
     byte[] jar = fetch(uri, true);
     byte[] checksum = fetch(URI.create(uri + ".sha256"), false);
     if (checksum != null) {
@@ -205,7 +239,7 @@ public final class MavenResolver {
     if (cachedModel != null) return cachedModel;
     if (!visiting.add(key)) throw new IOException("cyclic Maven POM parent/BOM: " + key);
 
-    URI pomUri = repository.resolve(coordinate.pomPath());
+    URI pomUri = resolveSnapshotUri(coordinate, "pom");
     byte[] pomBytes = fetch(pomUri, false);
     if (pomBytes == null) {
       if (offline) throw new IOException("offline mode: POM is not cached: " + pomUri);
@@ -224,7 +258,9 @@ public final class MavenResolver {
       String parentVersion = text(parentElement, "version");
       if (parentGroup != null && parentArtifact != null && parentVersion != null) {
         parent =
-            model(new MavenCoordinate(parentGroup, parentArtifact, parentVersion, ""), visiting);
+            model(
+                resolveVersion(new MavenCoordinate(parentGroup, parentArtifact, parentVersion, "")),
+                visiting);
       }
     }
 
@@ -247,7 +283,7 @@ public final class MavenResolver {
       PomDependency dependency = parseDependency(dependencyElement, properties, managedVersions);
       if (dependency == null) continue;
       if (dependency.scope.equals("import") && dependency.type.equals("pom")) {
-        PomModel imported = model(dependency.coordinate, visiting);
+        PomModel imported = model(resolveVersion(dependency.coordinate), visiting);
         managedVersions.putAll(imported.managedVersions);
       } else {
         managedVersions.put(managementKey(dependency.coordinate), dependency.coordinate.version());
@@ -304,9 +340,73 @@ public final class MavenResolver {
         Set.copyOf(exclusions));
   }
 
+  private URI resolveSnapshotUri(MavenCoordinate coordinate, String extension) throws Exception {
+    String version = coordinate.version();
+    if (!version.toUpperCase(java.util.Locale.ROOT).endsWith("-SNAPSHOT"))
+      return repository.resolve(
+          extension.equals("pom") ? coordinate.pomPath() : coordinate.repositoryPath(extension));
+
+    String versionDirectory =
+        coordinate.group().replace('.', '/') + "/" + coordinate.artifact() + "/" + version + "/";
+    URI metadataUri = repository.resolve(versionDirectory + "maven-metadata.xml");
+    byte[] bytes = fetch(metadataUri, false, SNAPSHOT_METADATA_TTL);
+    String resolvedVersion = null;
+    String requestedClassifier = extension.equals("pom") ? "" : coordinate.classifier();
+    String timestamp = null;
+    String buildNumber = null;
+    if (bytes != null) {
+      Element versioning = child(parseXml(bytes).getDocumentElement(), "versioning");
+      Element snapshot = child(versioning, "snapshot");
+      timestamp = text(snapshot, "timestamp");
+      buildNumber = text(snapshot, "buildNumber");
+      for (Element item : children(child(versioning, "snapshotVersions"), "snapshotVersion")) {
+        String itemExtension = text(item, "extension");
+        String itemClassifier = Objects.requireNonNullElse(text(item, "classifier"), "");
+        if (extension.equals(itemExtension) && requestedClassifier.equals(itemClassifier)) {
+          resolvedVersion = text(item, "value");
+          if (resolvedVersion != null) break;
+        }
+      }
+    }
+    if (resolvedVersion == null && timestamp != null && buildNumber != null) {
+      String base = version.substring(0, version.length() - "-SNAPSHOT".length());
+      resolvedVersion = base + "-" + timestamp + "-" + buildNumber;
+    }
+    if (resolvedVersion == null)
+      return repository.resolve(
+          versionDirectory
+              + coordinate.artifact()
+              + "-"
+              + version
+              + classifierAndExtension(requestedClassifier, extension));
+    return repository.resolve(
+        versionDirectory
+            + coordinate.artifact()
+            + "-"
+            + resolvedVersion
+            + classifierAndExtension(requestedClassifier, extension));
+  }
+
+  private static String classifierAndExtension(String classifier, String extension) {
+    return (classifier.isEmpty() ? "" : "-" + classifier) + "." + extension;
+  }
+
   private byte[] fetch(URI uri, boolean required) throws IOException, InterruptedException {
+    return fetch(uri, required, null);
+  }
+
+  private byte[] fetch(URI uri, boolean required, Duration cacheTtl)
+      throws IOException, InterruptedException {
     Path cached = cachePath(uri);
-    if (Files.isRegularFile(cached)) return Files.readAllBytes(cached);
+    if (Files.isRegularFile(cached)) {
+      boolean fresh =
+          cacheTtl == null
+              || Files.getLastModifiedTime(cached)
+                  .toInstant()
+                  .plus(cacheTtl)
+                  .isAfter(Instant.now());
+      if (offline || fresh) return Files.readAllBytes(cached);
+    }
     if (offline) {
       if (required) throw new IOException("offline mode: artifact is not cached: " + uri);
       return null;
@@ -474,6 +574,8 @@ public final class MavenResolver {
       return new PomModel(Map.of(), Map.of(), List.of());
     }
   }
+
+  private record ArtifactMetadata(String latest, String release, List<String> versions) {}
 
   public record ResolvedArtifact(MavenCoordinate coordinate, Path jar) {}
 }
