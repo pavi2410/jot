@@ -150,6 +150,44 @@ class MavenResolverTest {
   }
 
   @Test
+  void resolvesPinnedCoordinatesAndEffectiveDirectPomDependencies() throws Exception {
+    Path repository = temp.resolve("direct-dependencies-repository");
+    addArtifact(
+        repository,
+        "sample:api:1.0.0",
+        """
+        <project><groupId>sample</groupId><artifactId>api</artifactId><version>1.0.0</version>
+          <dependencyManagement><dependencies>
+            <dependency><groupId>sample</groupId><artifactId>managed</artifactId><version>2.0.0</version></dependency>
+          </dependencies></dependencyManagement>
+          <dependencies>
+            <dependency><groupId>sample</groupId><artifactId>managed</artifactId></dependency>
+            <dependency><groupId>sample</groupId><artifactId>runtime</artifactId><version>3.0.0</version><scope>runtime</scope><optional>true</optional></dependency>
+          </dependencies>
+        </project>
+        """);
+    MavenResolver resolver =
+        new MavenResolver(temp.resolve("direct-dependencies-cache"), repository.toUri());
+
+    MavenCoordinate coordinate = resolver.resolveCoordinate("sample:api:1.0.0");
+    List<MavenResolver.DirectDependency> dependencies =
+        resolver.resolveDirectDependencies(coordinate);
+
+    assertEquals("sample:api:1.0.0", coordinate.notation());
+    assertEquals(
+        List.of("sample:managed:2.0.0 [compile]", "sample:runtime:3.0.0 [runtime optional]"),
+        dependencies.stream()
+            .map(
+                dependency ->
+                    dependency.coordinate().notation()
+                        + " ["
+                        + dependency.scope()
+                        + (dependency.optional() ? " optional" : "")
+                        + "]")
+            .toList());
+  }
+
+  @Test
   void readsLatestReleaseMetadataAndUsesTheCacheOffline() throws Exception {
     Path repository = temp.resolve("metadata-repository");
     Path metadata = repository.resolve("sample/library/maven-metadata.xml");

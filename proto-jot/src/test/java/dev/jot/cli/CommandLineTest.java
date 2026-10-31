@@ -47,6 +47,18 @@ class CommandLineTest {
   }
 
   @Test
+  void parsesResolveWithDirectDependencyListing() {
+    CommandLine parsed =
+        CommandLine.parse(new String[] {"resolve", "org.example:library:1.2", "--deps"});
+
+    assertEquals("resolve", parsed.command());
+    assertEquals("org.example:library:1.2", parsed.dependencyCoordinate());
+    assertTrue(parsed.resolveDependencies());
+    assertEquals("resolve needs a dependency coordinate", parseError("resolve"));
+    assertEquals("unknown argument: --deps", parseError("build", "--deps"));
+  }
+
+  @Test
   void parsesOutdatedWorkspaceSelection() {
     CommandLine parsed =
         CommandLine.parse(new String[] {"outdated", "--module", "app", "--offline"});

@@ -19,6 +19,7 @@ record CommandLine(
     String dependencyCoordinate,
     String dependencyName,
     String dependencyCatalog,
+    boolean resolveDependencies,
     boolean testDependency,
     int treeDepth,
     boolean formatCheck) {
@@ -61,7 +62,7 @@ record CommandLine(
   private static CommandLine specialCommand(boolean help, boolean version) {
     return new CommandLine(
         "", null, null, List.of(), help, version, false, null, null, null, null, null, null, false,
-        0, false);
+        false, 0, false);
   }
 
   private static final class Options {
@@ -77,7 +78,8 @@ record CommandLine(
     private String dependencyCatalog;
     private boolean offline;
     private boolean testDependency;
-    private int treeDepth = 8;
+    private int treeDepth = 3;
+    private boolean resolveDependencies;
     private boolean formatCheck;
 
     private Options(String command, boolean offline) {
@@ -103,6 +105,10 @@ record CommandLine(
         case "--check" -> {
           require(command.equals("fmt"), option);
           formatCheck = true;
+        }
+        case "--deps" -> {
+          require(command.equals("resolve"), option);
+          resolveDependencies = true;
         }
         case "--offline" -> offline = true;
         case "--test" -> {
@@ -152,6 +158,11 @@ record CommandLine(
             throw new IllegalArgumentException("tree accepts one dependency coordinate");
           dependencyCoordinate = value;
         }
+        case "resolve" -> {
+          if (dependencyCoordinate != null)
+            throw new IllegalArgumentException("resolve accepts one dependency coordinate");
+          dependencyCoordinate = value;
+        }
         default -> throw new IllegalArgumentException("unknown argument: " + value);
       }
     }
@@ -168,6 +179,9 @@ record CommandLine(
       }
       if (command.equals("tree") && dependencyCoordinate == null) {
         throw new IllegalArgumentException("tree needs a dependency coordinate");
+      }
+      if (command.equals("resolve") && dependencyCoordinate == null) {
+        throw new IllegalArgumentException("resolve needs a dependency coordinate");
       }
     }
 
@@ -186,6 +200,7 @@ record CommandLine(
           dependencyCoordinate,
           dependencyName,
           dependencyCatalog,
+          resolveDependencies,
           testDependency,
           treeDepth,
           formatCheck);

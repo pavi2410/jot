@@ -95,6 +95,35 @@ public final class Main {
       return;
     }
 
+    if (commandLine.command().equals("resolve")) {
+      MavenResolver resolver =
+          new MavenResolver(
+              Path.of(System.getProperty("user.home"), ".jot", "java-maven-cache"),
+              MavenResolver.defaultRepository(),
+              commandLine.offline());
+      MavenCoordinate coordinate = resolver.resolveCoordinate(commandLine.dependencyCoordinate());
+      System.out.println("resolve: " + coordinate.notation());
+      if (commandLine.resolveDependencies()) {
+        List<MavenResolver.DirectDependency> dependencies =
+            resolver.resolveDirectDependencies(coordinate);
+        if (dependencies.isEmpty()) {
+          System.out.println("deps: no direct dependencies");
+        } else {
+          for (MavenResolver.DirectDependency dependency : dependencies) {
+            String optional = dependency.optional() ? " optional" : "";
+            System.out.println(
+                "dep: "
+                    + dependency.coordinate().notation()
+                    + " ["
+                    + dependency.scope()
+                    + optional
+                    + "]");
+          }
+        }
+      }
+      return;
+    }
+
     Path projectRoot = commandLine.projectRoot();
     if (projectRoot == null) projectRoot = findProjectRoot(Path.of("").toAbsolutePath());
     ProjectConfig config = ProjectConfig.read(projectRoot.resolve("jot.toml"), null);
@@ -309,7 +338,8 @@ public final class Main {
   private static void help() {
     System.out.println("jot " + VERSION + " — a Java build tool");
     System.out.println(
-        "Usage: jot <init|build|run|test|doc|lint|fmt|add|remove|deps|outdated|tree|lock|clean>"
+        "Usage: jot"
+            + " <init|build|run|test|doc|lint|fmt|add|remove|deps|outdated|resolve|tree|lock|clean>"
             + " [options]");
     System.out.println("       jot add <group:artifact:version> [--name <alias>] [--test]");
     System.out.println("       jot add --catalog <alias> [--name <dependency>] [--test]");
@@ -317,6 +347,7 @@ public final class Main {
     System.out.println("       jot deps [--module <name>]");
     System.out.println("       jot outdated [--module <name>] [--offline]");
     System.out.println("       jot tree <group:artifact:version> [--depth <levels>] [--offline]");
+    System.out.println("       jot resolve <group:artifact:version> [--deps] [--offline]");
     System.out.println("       jot doc [--project <directory>] [--module <name>] [--offline]");
     System.out.println("       jot lint [--project <directory>] [--module <name>] [--offline]");
     System.out.println(

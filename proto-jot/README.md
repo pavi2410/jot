@@ -29,7 +29,8 @@ java -jar target/bin/jot-java.jar run -- --version
 ```
 
 The prototype supports `init`, `build`, `run`, `test`, `add`, `remove`, `deps`,
-`lock`, and `clean`, and accepts `--project`, `--module`, and global `--offline`.
+`resolve`, `lock`, and `clean`, and accepts `--project`, `--module`, and global
+`--offline`.
 `jot init [name]` creates a Jot-native
 Java app; `--template library` creates a library, and `--package` sets its Java
 package. Build source directories, resource
@@ -67,6 +68,8 @@ the nearest `libs.versions.toml` up the project path.
 `jot outdated [--module name]` compares locked versions with Maven release metadata.
 `jot tree group:artifact:version [--depth levels]` displays Maven transitive
 dependencies, marking omitted scopes, optional dependencies, and cycles.
+`jot resolve group:artifact:version` verifies a pinned coordinate's POM, while
+`--deps` lists its effective direct dependencies.
 `jot doc [--module name]` generates Java API documentation under `target/docs`.
 `jot lint [--module name]` runs `javac -Xlint:all` and reports Java compiler warnings.
 Configure a pinned formatter with `[format] java = "group:artifact:version"` and

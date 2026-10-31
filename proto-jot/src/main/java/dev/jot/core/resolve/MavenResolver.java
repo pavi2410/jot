@@ -116,6 +116,26 @@ public final class MavenResolver {
     return List.copyOf(entries);
   }
 
+  /** Resolves a pinned coordinate by loading its effective POM model. */
+  public MavenCoordinate resolveCoordinate(String notation) throws Exception {
+    MavenCoordinate coordinate = MavenCoordinate.parse(notation);
+    model(coordinate, new LinkedHashSet<>());
+    return coordinate;
+  }
+
+  /** Returns the effective direct dependencies declared by a pinned artifact's POM. */
+  public List<DirectDependency> resolveDirectDependencies(MavenCoordinate coordinate)
+      throws Exception {
+    return model(coordinate, new LinkedHashSet<>()).dependencies().stream()
+        .map(
+            dependency ->
+                new DirectDependency(
+                    dependency.coordinate(), dependency.scope(), dependency.optional()))
+        .toList();
+  }
+
+  public record DirectDependency(MavenCoordinate coordinate, String scope, boolean optional) {}
+
   private void appendTree(
       MavenCoordinate parent,
       int depth,
