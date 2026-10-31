@@ -126,6 +126,28 @@ public final class BuildEngine {
         runProcess(project.root(), command);
     }
 
+    public static Path doc(WorkspaceProject project, MavenResolver resolver) throws Exception {
+        Path root = project.root();
+        ProjectConfig config = project.config();
+        JavaToolchain.requireCompatible(config.javaVersion());
+        List<Path> sources = collectSources(root, config.sourceDirectories());
+        if (sources.isEmpty()) {
+            throw new IllegalStateException("no Java sources in configured build.source-dirs: "
+                    + config.sourceDirectories());
+        }
+        List<MavenResolver.ResolvedArtifact> dependencies = resolveExternalArtifacts(project, resolver);
+        Path docs = root.resolve("target/docs");
+        deleteTree(docs);
+        Files.createDirectories(docs);
+        List<String> command = new ArrayList<>(List.of(jdkTool("javadoc"), "--release",
+                config.javaVersion(), "-quiet", "-Xdoclint:all,-missing", "-d", docs.toString()));
+        String classpath = classpath(project, dependencies);
+        if (!classpath.isBlank()) command.addAll(List.of("-classpath", classpath));
+        command.addAll(sources.stream().map(Path::toString).toList());
+        runProcess(root, command);
+        return docs;
+    }
+
     public static void clean(WorkspaceProject project) throws IOException {
         deleteTree(project.root().resolve("target"));
         System.out.println("clean: " + project.config().name());

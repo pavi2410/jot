@@ -26,6 +26,41 @@ class BuildEngineTest {
     @TempDir Path temp;
 
     @Test
+    void generatesJavadocsForConfiguredSources() throws Exception {
+        write("src/sample/PublicApi.java", """
+                package sample;
+                /** A public API for documentation generation. */
+                public final class PublicApi {
+                    /** Creates the API instance. */
+                    public PublicApi() {}
+                    /**
+                     * Returns the greeting.
+                     * @return the greeting text
+                     */
+                    public String greeting() { return "hello"; }
+                }
+                """);
+        write("jot.toml", """
+                [project]
+                name = "documented"
+                [toolchains]
+                java = "27"
+                """);
+        String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+        Process process = new ProcessBuilder(java, "-Duser.home=" + temp.resolve("home"),
+                "-cp", System.getProperty("java.class.path"), "dev.jot.cli.Main", "doc",
+                "--project", temp.toString())
+                .directory(temp.toFile())
+                .redirectErrorStream(true)
+                .start();
+        String output = new String(process.getInputStream().readAllBytes());
+
+        assertTrue(process.waitFor() == 0, output);
+        assertTrue(Files.isRegularFile(temp.resolve("target/docs/index.html")));
+        assertTrue(Files.isRegularFile(temp.resolve("target/docs/sample/PublicApi.html")));
+    }
+
+    @Test
     void producesRepeatableJarAndRebuildsAfterSourceChanges() throws Exception {
         Files.createDirectories(temp.resolve("src/main/java/sample"));
         Path source = temp.resolve("src/main/java/sample/Main.java");

@@ -53,6 +53,18 @@ class CommandLineTest {
     }
 
     @Test
+    void parsesDocumentationWorkspaceSelection() {
+        CommandLine parsed = CommandLine.parse(new String[] {
+                "doc", "--project", "demo", "--module", "api", "--offline"
+        });
+
+        assertEquals("doc", parsed.command());
+        assertEquals("api", parsed.module());
+        assertTrue(parsed.projectRoot().endsWith("demo"));
+        assertTrue(parsed.offline());
+    }
+
+    @Test
     void parsesDependencyAddAndRemoveOptions() {
         CommandLine add = CommandLine.parse(new String[] {
                 "add", "org.example:annotations:1.0", "--name", "annotations", "--test"
