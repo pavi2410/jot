@@ -59,6 +59,29 @@ class CommandLineTest {
   }
 
   @Test
+  void parsesAdHocLockCoordinatesDepthAndOutput() {
+    CommandLine.Lock lock =
+        assertInstanceOf(
+            CommandLine.Lock.class,
+            CommandLineParser.parse(
+                    new String[] {
+                      "lock",
+                      "sample:api:1.0",
+                      "sample:util:2.0",
+                      "--depth",
+                      "4",
+                      "--output",
+                      "build/custom.lock"
+                    })
+                .command());
+
+    assertEquals(List.of("sample:api:1.0", "sample:util:2.0"), lock.dependencies());
+    assertEquals(4, lock.depth());
+    assertEquals("build/custom.lock", lock.output());
+    assertEquals("--depth needs a non-negative integer", parseError("lock", "--depth", "-1"));
+  }
+
+  @Test
   void parsesTreeCoordinateAndDepth() {
     CommandLine parsed =
         CommandLineParser.parse(

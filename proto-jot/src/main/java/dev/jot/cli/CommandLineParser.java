@@ -22,6 +22,7 @@ final class CommandLineParser {
           "username",
           "password",
           "signing-key",
+          "output",
           "package");
   private static final java.util.Set<String> FLAG_OPTIONS =
       java.util.Set.of(
@@ -97,8 +98,9 @@ final class CommandLineParser {
           case "bench" -> BenchCommandParser.parse(args);
           case "audit" -> AuditCommandParser.parse(args);
           case "publish" -> PublishCommandParser.parse(args);
+          case "lock" -> LockCommandParser.parse(args);
           case "toolchain" -> ToolchainCommandParser.parse(args);
-          case "build", "run", "test", "doc", "lint", "fmt", "deps", "outdated", "lock", "clean" ->
+          case "build", "run", "test", "doc", "lint", "fmt", "deps", "outdated", "clean" ->
               SimpleCommandParser.parse(command, args);
           default -> throw new IllegalArgumentException("unknown command: " + command);
         };

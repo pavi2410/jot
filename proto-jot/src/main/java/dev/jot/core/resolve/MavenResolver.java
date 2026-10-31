@@ -67,9 +67,15 @@ public final class MavenResolver {
   }
 
   public List<ResolvedArtifact> resolve(Map<String, String> declaredDependencies) throws Exception {
+    return resolve(declaredDependencies, Integer.MAX_VALUE);
+  }
+
+  public List<ResolvedArtifact> resolve(Map<String, String> declaredDependencies, int maxDepth)
+      throws Exception {
+    if (maxDepth < 0) throw new IllegalArgumentException("dependency depth cannot be negative");
     ArrayDeque<DependencyRequest> pending = new ArrayDeque<>();
     for (String notation : declaredDependencies.values()) {
-      pending.addLast(new DependencyRequest(MavenCoordinate.parse(notation), Set.of()));
+      pending.addLast(new DependencyRequest(MavenCoordinate.parse(notation), Set.of(), 0));
     }
     Map<String, ResolvedArtifact> selected = new LinkedHashMap<>();
     while (!pending.isEmpty()) {
@@ -83,13 +89,16 @@ public final class MavenResolver {
       Path jar = resolveJar(coordinate);
       selected.put(moduleKey, new ResolvedArtifact(coordinate, jar));
       PomModel model = model(coordinate, new LinkedHashSet<>());
+      if (request.depth >= maxDepth) continue;
       for (PomDependency dependency : model.dependencies) {
         if (!dependency.isRuntimeVisible() || dependency.optional) continue;
         if (request.exclusions.stream().anyMatch(exclusion -> exclusion.matches(dependency)))
           continue;
         Set<Exclusion> exclusions = new LinkedHashSet<>(request.exclusions);
         exclusions.addAll(dependency.exclusions);
-        pending.addLast(new DependencyRequest(dependency.coordinate, Set.copyOf(exclusions)));
+        pending.addLast(
+            new DependencyRequest(
+                dependency.coordinate, Set.copyOf(exclusions), request.depth + 1));
       }
     }
     return List.copyOf(selected.values());
@@ -432,7 +441,8 @@ public final class MavenResolver {
     return element.getLocalName() == null ? element.getNodeName() : element.getLocalName();
   }
 
-  private record DependencyRequest(MavenCoordinate coordinate, Set<Exclusion> exclusions) {}
+  private record DependencyRequest(
+      MavenCoordinate coordinate, Set<Exclusion> exclusions, int depth) {}
 
   private record Exclusion(String group, String artifact) {
     boolean matches(MavenCoordinate coordinate) {

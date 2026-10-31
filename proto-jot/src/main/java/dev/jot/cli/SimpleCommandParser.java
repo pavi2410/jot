@@ -46,11 +46,6 @@ final class SimpleCommandParser {
         args.noPositionals(command);
         yield new CommandLine.Outdated(args.value("module"));
       }
-      case "lock" -> {
-        args.allow();
-        args.noPositionals(command);
-        yield new CommandLine.Lock();
-      }
       case "clean" -> {
         args.allow("global");
         args.noPositionals(command);

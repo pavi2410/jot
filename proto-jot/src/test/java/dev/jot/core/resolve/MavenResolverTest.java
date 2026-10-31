@@ -150,6 +150,31 @@ class MavenResolverTest {
   }
 
   @Test
+  void limitsResolvedTransitiveArtifactsToTheRequestedDepth() throws Exception {
+    Path repository = temp.resolve("bounded-repository");
+    addArtifact(
+        repository,
+        "sample:root:1.0",
+        "<project><groupId>sample</groupId><artifactId>root</artifactId><version>1.0</version>"
+            + "<dependencies><dependency><groupId>sample</groupId><artifactId>child</artifactId>"
+            + "<version>1.0</version></dependency></dependencies></project>");
+    addArtifact(repository, "sample:child:1.0", "<project/>");
+    MavenResolver resolver = new MavenResolver(temp.resolve("bounded-cache"), repository.toUri());
+    Map<String, String> roots = Map.of("root", "sample:root:1.0");
+
+    assertEquals(
+        List.of("sample:root:1.0"),
+        resolver.resolve(roots, 0).stream()
+            .map(artifact -> artifact.coordinate().notation())
+            .toList());
+    assertEquals(
+        List.of("sample:root:1.0", "sample:child:1.0"),
+        resolver.resolve(roots, 1).stream()
+            .map(artifact -> artifact.coordinate().notation())
+            .toList());
+  }
+
+  @Test
   void resolvesPinnedCoordinatesAndEffectiveDirectPomDependencies() throws Exception {
     Path repository = temp.resolve("direct-dependencies-repository");
     addArtifact(

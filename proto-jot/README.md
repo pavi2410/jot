@@ -67,7 +67,8 @@ dependency roots and artifact SHA-256 hashes. Builds, tests, and benchmarks
 validate their locked artifacts; projects with benchmark sources lock JMH
 artifacts too. `--offline` restricts resolution to the local cache. It caches
 downloads under `~/.jot/java-maven-cache`. Version ranges, snapshots, and Kotlin
-are not implemented yet.
+are not implemented yet. `jot lock group:artifact:version [--depth levels]
+[--output path]` can also create a lockfile for ad hoc coordinates.
 
 `jot add group:artifact:version [--name alias] [--test]` or
 `jot add --catalog alias [--name dependency] [--test]`, and

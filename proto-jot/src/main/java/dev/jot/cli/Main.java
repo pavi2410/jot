@@ -199,13 +199,32 @@ public final class Main {
       case CommandLine.Publish publish -> publish(config, workspace, publish, resolver);
       case CommandLine.Add add -> addDependency(projectRoot, add, resolver);
       case CommandLine.Remove remove -> removeDependency(projectRoot, remove, resolver);
-      case CommandLine.Lock ignored ->
-          BuildEngine.lock(workspace, projectRoot.resolve("jot.lock"), resolver);
+      case CommandLine.Lock lock -> lock(projectRoot, workspace, lock, resolver);
       case CommandLine.Clean ignored -> {
         for (WorkspaceProject project : workspace.ordered()) BuildEngine.clean(project);
       }
       default -> throw new IllegalStateException("command handled before project loading");
     }
+  }
+
+  private static void lock(
+      Path projectRoot,
+      ProjectWorkspace workspace,
+      CommandLine.Lock command,
+      MavenResolver resolver)
+      throws Exception {
+    Path output = projectRoot.resolve(command.output()).normalize();
+    if (command.dependencies().isEmpty()) {
+      BuildEngine.lock(workspace, output, resolver, command.depth());
+      return;
+    }
+    java.util.Map<String, String> roots = new java.util.LinkedHashMap<>();
+    for (int index = 0; index < command.dependencies().size(); index++) {
+      roots.put("dependency-" + index, command.dependencies().get(index));
+    }
+    List<MavenResolver.ResolvedArtifact> resolved = resolver.resolve(roots, command.depth());
+    dev.jot.core.resolve.Lockfile.create(roots.values(), resolved).write(output);
+    System.out.println("lock: wrote " + output);
   }
 
   private static void addDependency(
@@ -602,6 +621,7 @@ public final class Main {
     System.out.println(
         "       jot tree --workspace [--module <name>] [--depth <levels>] [--offline]");
     System.out.println("       jot resolve <group:artifact:version> [--deps] [--offline]");
+    System.out.println("       jot lock [coordinates...] [--depth <levels>] [--output <file>]");
     System.out.println("       jot toolchain list");
     System.out.println("       jot toolchain install java@<version> [--force] [--offline]");
     System.out.println("       jot toolchain pin java@<version> [--workspace]");

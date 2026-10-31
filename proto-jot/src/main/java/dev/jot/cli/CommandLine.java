@@ -47,7 +47,11 @@ record CommandLine(
 
   record Remove(String name, boolean test) implements Command {}
 
-  record Lock() implements Command {}
+  record Lock(List<String> dependencies, int depth, String output) implements Command {
+    Lock {
+      dependencies = List.copyOf(dependencies);
+    }
+  }
 
   record Clean(boolean global) implements Command {}
 

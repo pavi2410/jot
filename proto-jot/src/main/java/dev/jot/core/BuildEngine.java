@@ -289,6 +289,12 @@ public final class BuildEngine {
 
   public static void lock(ProjectWorkspace workspace, Path lockPath, MavenResolver resolver)
       throws Exception {
+    lock(workspace, lockPath, resolver, Integer.MAX_VALUE);
+  }
+
+  public static void lock(
+      ProjectWorkspace workspace, Path lockPath, MavenResolver resolver, int maxDepth)
+      throws Exception {
     java.util.Map<String, String> declarations = new java.util.LinkedHashMap<>();
     int index = 0;
     for (WorkspaceProject project : workspace.ordered()) {
@@ -321,7 +327,7 @@ public final class BuildEngine {
         }
       }
     }
-    List<MavenResolver.ResolvedArtifact> resolved = resolver.resolve(declarations);
+    List<MavenResolver.ResolvedArtifact> resolved = resolver.resolve(declarations, maxDepth);
     Lockfile.create(declarations.values(), resolved).write(lockPath);
     System.out.println("lock: wrote " + lockPath);
   }
