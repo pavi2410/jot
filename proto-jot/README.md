@@ -24,6 +24,8 @@ export PATH="$JAVA_HOME/bin:$PATH"
 java -jar target/proto-jot-0.1.0.jar build
 ```
 
-The prototype supports `build` and `clean`. It is intentionally limited to one
-module, Java sources, no dependencies, and string-valued project/toolchain
-settings. Its TOML reader is only a spike and is not suitable for production.
+The prototype supports `build`, `run`, and `clean`, and accepts `--project` to
+select a project directory. Build source directories and the Java release are
+read from `jot.toml`. It is still limited to one module, Java sources, and no
+external dependencies. Its TOML reader intentionally supports only the string
+values and string arrays this project needs today.

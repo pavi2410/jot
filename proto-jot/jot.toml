@@ -6,3 +6,7 @@ layout = "maven"
 
 [toolchains]
 java = "27"
+
+[build]
+source-dirs = ["src/main/java"]
+output-directory = "target/classes"
