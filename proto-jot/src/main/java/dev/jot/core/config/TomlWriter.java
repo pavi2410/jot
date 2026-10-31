@@ -41,10 +41,15 @@ public final class TomlWriter {
         return output.toString();
     }
 
-    private static String renderValue(Object value) {
+    public static String renderValue(Object value) {
         if (value instanceof String string) return "\"" + escape(string) + "\"";
         if (value instanceof Integer integer) return integer.toString();
         throw new IllegalArgumentException("unsupported TOML value type: " + value.getClass());
+    }
+
+    public static String renderKey(String key) {
+        if (key.matches("[A-Za-z0-9_-]+")) return key;
+        return "\"" + escape(key) + "\"";
     }
 
     private static String escape(String value) {

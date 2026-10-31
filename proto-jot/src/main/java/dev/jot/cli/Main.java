@@ -5,6 +5,8 @@ import dev.jot.core.ProjectConfig;
 import dev.jot.core.ProjectInitializer;
 import dev.jot.core.ProjectWorkspace;
 import dev.jot.core.WorkspaceProject;
+import dev.jot.core.config.ManifestEditor;
+import dev.jot.core.resolve.MavenCoordinate;
 import dev.jot.core.resolve.MavenResolver;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -83,12 +85,46 @@ public final class Main {
             case "build" -> build(config, workspace, commandLine.module(), resolver);
             case "run" -> run(config, workspace, commandLine.module(), commandLine.runArguments(), resolver);
             case "test" -> test(config, workspace, commandLine.module(), resolver);
+            case "add" -> addDependency(projectRoot, commandLine, resolver);
+            case "remove" -> removeDependency(projectRoot, commandLine, resolver);
             case "lock" -> BuildEngine.lock(workspace, projectRoot.resolve("jot.lock"), resolver);
             case "clean" -> {
                 for (WorkspaceProject project : workspace.ordered()) BuildEngine.clean(project);
             }
             default -> throw new IllegalArgumentException("unknown command: " + commandLine.command());
         }
+    }
+
+    private static void addDependency(Path projectRoot, CommandLine commandLine,
+                                      MavenResolver resolver) throws Exception {
+        MavenCoordinate coordinate = MavenCoordinate.parse(commandLine.dependencyCoordinate());
+        String name = commandLine.dependencyName() == null
+                ? coordinate.artifact() : commandLine.dependencyName();
+        Path manifest = projectRoot.resolve("jot.toml");
+        ManifestEditor.addDependency(manifest, name, coordinate.notation(),
+                commandLine.testDependency());
+        ProjectConfig updatedConfig = ProjectConfig.read(manifest, null);
+        ProjectWorkspace updatedWorkspace = updatedConfig.isWorkspace()
+                ? ProjectWorkspace.load(projectRoot, updatedConfig)
+                : ProjectWorkspace.loadProject(projectRoot, updatedConfig);
+        BuildEngine.lock(updatedWorkspace, projectRoot.resolve("jot.lock"), resolver);
+        System.out.println("add: " + name + " -> " + manifest);
+    }
+
+    private static void removeDependency(Path projectRoot, CommandLine commandLine,
+                                         MavenResolver resolver) throws Exception {
+        String name = commandLine.dependencyName();
+        Path manifest = projectRoot.resolve("jot.toml");
+        if (!ManifestEditor.removeDependency(manifest, name, commandLine.testDependency())) {
+            throw new IllegalArgumentException("dependency `" + name + "` was not found in ["
+                    + (commandLine.testDependency() ? "test-dependencies" : "dependencies") + "]");
+        }
+        ProjectConfig updatedConfig = ProjectConfig.read(manifest, null);
+        ProjectWorkspace updatedWorkspace = updatedConfig.isWorkspace()
+                ? ProjectWorkspace.load(projectRoot, updatedConfig)
+                : ProjectWorkspace.loadProject(projectRoot, updatedConfig);
+        BuildEngine.lock(updatedWorkspace, projectRoot.resolve("jot.lock"), resolver);
+        System.out.println("remove: " + name + " from " + manifest);
     }
 
     private static void build(ProjectConfig config, ProjectWorkspace workspace, String module,
@@ -133,7 +169,9 @@ public final class Main {
 
     private static void help() {
         System.out.println("jot " + VERSION + " — a Java build tool");
-        System.out.println("Usage: jot <init|build|run|test|lock|clean> [options]");
+        System.out.println("Usage: jot <init|build|run|test|add|remove|lock|clean> [options]");
+        System.out.println("       jot add <group:artifact:version> [--name <alias>] [--test]");
+        System.out.println("       jot remove <alias> [--test]");
         System.out.println("       jot init [name] [--template app|library] [--package java.package]");
         System.out.println("       jot <build|run|test|lock|clean> [--project <directory>] [--module <name>] [--offline]");
     }

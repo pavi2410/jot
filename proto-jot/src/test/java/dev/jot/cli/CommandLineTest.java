@@ -30,6 +30,20 @@ class CommandLineTest {
     }
 
     @Test
+    void parsesDependencyAddAndRemoveOptions() {
+        CommandLine add = CommandLine.parse(new String[] {
+                "add", "org.example:annotations:1.0", "--name", "annotations", "--test"
+        });
+        assertEquals("org.example:annotations:1.0", add.dependencyCoordinate());
+        assertEquals("annotations", add.dependencyName());
+        assertTrue(add.testDependency());
+
+        CommandLine remove = CommandLine.parse(new String[] {"remove", "annotations", "--test"});
+        assertEquals("annotations", remove.dependencyName());
+        assertTrue(remove.testDependency());
+    }
+
+    @Test
     void errorsWithoutMessagesStillShowTheirType() {
         assertEquals("java.lang.IllegalStateException",
                 Main.failureMessage(new IllegalStateException()));

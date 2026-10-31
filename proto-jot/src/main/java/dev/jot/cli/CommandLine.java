@@ -7,7 +7,8 @@ import java.util.List;
 /** Small, isolated command-line parser for the bootstrap implementation. */
 record CommandLine(String command, Path projectRoot, String module, List<String> runArguments,
                    boolean help, boolean version, boolean offline, String projectName,
-                   String template, String packageName) {
+                   String template, String packageName, String dependencyCoordinate,
+                   String dependencyName, boolean testDependency) {
     static CommandLine parse(String[] arguments) {
         if (arguments.length == 0) return helpCommand();
         int commandIndex = 0;
@@ -31,12 +32,12 @@ record CommandLine(String command, Path projectRoot, String module, List<String>
 
     private static CommandLine helpCommand() {
         return new CommandLine("", null, null, List.of(), true, false, false,
-                null, null, null);
+                null, null, null, null, null, false);
     }
 
     private static CommandLine versionCommand() {
         return new CommandLine("", null, null, List.of(), false, true, false,
-                null, null, null);
+                null, null, null, null, null, false);
     }
 
     private static final class Parser {
@@ -47,7 +48,10 @@ record CommandLine(String command, Path projectRoot, String module, List<String>
         private String projectName;
         private String template;
         private String packageName;
+        private String dependencyCoordinate;
+        private String dependencyName;
         private boolean offline;
+        private boolean testDependency;
         private boolean applicationArguments;
 
         private Parser(String command, boolean offline) {
@@ -66,8 +70,15 @@ record CommandLine(String command, Path projectRoot, String module, List<String>
                     i += parseOption(argument, arguments, i);
                 }
             }
+            if (command.equals("add") && dependencyCoordinate == null) {
+                throw new IllegalArgumentException("add needs a dependency coordinate");
+            }
+            if (command.equals("remove") && dependencyName == null) {
+                throw new IllegalArgumentException("remove needs a dependency name");
+            }
             return new CommandLine(command, projectRoot, module, List.copyOf(runArguments),
-                    false, false, offline, projectName, template, packageName);
+                    false, false, offline, projectName, template, packageName,
+                    dependencyCoordinate, dependencyName, testDependency);
         }
 
         /** Returns the number of consumed value arguments. */
@@ -85,6 +96,16 @@ record CommandLine(String command, Path projectRoot, String module, List<String>
                 case "--offline" -> {
                     offline = true;
                     yield 0;
+                }
+                case "--test" -> {
+                    requireDependencyCommand(argument);
+                    testDependency = true;
+                    yield 0;
+                }
+                case "--name" -> {
+                    if (!command.equals("add")) throw new IllegalArgumentException("unknown argument: " + argument);
+                    dependencyName = valueAfter(argument, arguments, index);
+                    yield 1;
                 }
                 case "--template" -> {
                     requireInitOption(argument);
@@ -104,6 +125,20 @@ record CommandLine(String command, Path projectRoot, String module, List<String>
                         projectName = argument;
                         yield 0;
                     }
+                    if (command.equals("add") && !argument.startsWith("-")) {
+                        if (dependencyCoordinate != null) {
+                            throw new IllegalArgumentException("add accepts one dependency coordinate");
+                        }
+                        dependencyCoordinate = argument;
+                        yield 0;
+                    }
+                    if (command.equals("remove") && !argument.startsWith("-")) {
+                        if (dependencyName != null) {
+                            throw new IllegalArgumentException("remove accepts one dependency name");
+                        }
+                        dependencyName = argument;
+                        yield 0;
+                    }
                     throw new IllegalArgumentException("unknown argument: " + argument);
                 }
             };
@@ -118,6 +153,12 @@ record CommandLine(String command, Path projectRoot, String module, List<String>
 
         private void requireInitOption(String option) {
             if (!command.equals("init")) {
+                throw new IllegalArgumentException("unknown argument: " + option);
+            }
+        }
+
+        private void requireDependencyCommand(String option) {
+            if (!command.equals("add") && !command.equals("remove")) {
                 throw new IllegalArgumentException("unknown argument: " + option);
             }
         }

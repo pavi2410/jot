@@ -28,8 +28,9 @@ java -jar target/bin/jot-java.jar build
 java -jar target/bin/jot-java.jar run -- --version
 ```
 
-The prototype supports `init`, `build`, `run`, `test`, `lock`, and `clean`, and accepts
-`--project`, `--module`, and `--offline`. `jot init [name]` creates a Jot-native
+The prototype supports `init`, `build`, `run`, `test`, `add`, `remove`, `lock`,
+and `clean`, and accepts `--project`, `--module`, and global `--offline`.
+`jot init [name]` creates a Jot-native
 Java app; `--template library` creates a library, and `--package` sets its Java
 package. Build source directories, resource
 directories, and the Java release are read from `jot.toml`. A Jot manifest may
@@ -56,6 +57,10 @@ dependency roots and artifact SHA-256 hashes. Builds and tests validate locked
 artifacts, while `--offline` restricts resolution to the local cache. It caches
 downloads under `~/.jot/java-maven-cache`. Version ranges, snapshots, and Kotlin
 are not implemented yet.
+
+`jot add group:artifact:version [--name alias] [--test]` and
+`jot remove alias [--test]` edit dependency tables while retaining other
+manifest content, then regenerate the lockfile.
 
 The Java CLI includes a `test` command that compiles configured test sources and
 runs JUnit Platform Console. The prototype's own tests run through that command:
