@@ -192,10 +192,11 @@ class CommandLineTest {
   void parsesDocumentationWorkspaceSelection() {
     CommandLine parsed =
         CommandLineParser.parse(
-            new String[] {"doc", "--project", "demo", "--module", "api", "--offline"});
+            new String[] {"doc", "--project", "demo", "--module", "api", "--open", "--offline"});
 
     CommandLine.Doc doc = assertInstanceOf(CommandLine.Doc.class, parsed.command());
     assertEquals("api", doc.module());
+    assertTrue(doc.open());
     assertTrue(parsed.projectRoot().endsWith("demo"));
     assertTrue(parsed.offline());
   }

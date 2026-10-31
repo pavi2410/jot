@@ -183,7 +183,7 @@ public final class Main {
       case CommandLine.Build build -> build(config, workspace, build.module(), resolver);
       case CommandLine.Run run -> run(config, workspace, run.module(), run.arguments(), resolver);
       case CommandLine.Test test -> test(config, workspace, test.module(), resolver);
-      case CommandLine.Doc doc -> doc(config, workspace, doc.module(), resolver);
+      case CommandLine.Doc doc -> doc(config, workspace, doc.module(), doc.open(), resolver);
       case CommandLine.Lint lint -> lint(config, workspace, lint.module(), resolver);
       case CommandLine.Fmt fmt -> fmt(config, workspace, fmt.module(), fmt.check(), resolver);
       case CommandLine.Deps deps ->
@@ -506,7 +506,11 @@ public final class Main {
   }
 
   private static void doc(
-      ProjectConfig config, ProjectWorkspace workspace, String module, MavenResolver resolver)
+      ProjectConfig config,
+      ProjectWorkspace workspace,
+      String module,
+      boolean open,
+      MavenResolver resolver)
       throws Exception {
     if (!config.isWorkspace() && module != null) {
       throw new IllegalArgumentException("--module requires a workspace");
@@ -524,6 +528,7 @@ public final class Main {
       }
       Path docs = BuildEngine.doc(project, resolver);
       System.out.println("doc: " + project.name() + " -> " + docs);
+      if (open) java.awt.Desktop.getDesktop().browse(docs.resolve("index.html").toUri());
     }
   }
 
@@ -600,7 +605,8 @@ public final class Main {
     System.out.println("       jot toolchain list");
     System.out.println("       jot toolchain install java@<version> [--force] [--offline]");
     System.out.println("       jot toolchain pin java@<version> [--workspace]");
-    System.out.println("       jot doc [--project <directory>] [--module <name>] [--offline]");
+    System.out.println(
+        "       jot doc [--project <directory>] [--module <name>] [--open] [--offline]");
     System.out.println(
         "       jot publish [--module <name>] [--repository <url-or-path>] [--dry-run]"
             + " [--allow-snapshot]");

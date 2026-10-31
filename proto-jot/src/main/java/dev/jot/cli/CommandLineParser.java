@@ -26,6 +26,7 @@ final class CommandLineParser {
   private static final java.util.Set<String> FLAG_OPTIONS =
       java.util.Set.of(
           "check",
+          "open",
           "deps",
           "fix",
           "ci",

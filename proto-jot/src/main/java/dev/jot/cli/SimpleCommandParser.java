@@ -22,9 +22,9 @@ final class SimpleCommandParser {
         yield new CommandLine.Test(args.value("module"));
       }
       case "doc" -> {
-        args.allow("module");
+        args.allow("module", "open");
         args.noPositionals(command);
-        yield new CommandLine.Doc(args.value("module"));
+        yield new CommandLine.Doc(args.value("module"), args.flag("open"));
       }
       case "lint" -> {
         args.allow("module");

@@ -33,7 +33,7 @@ record CommandLine(
 
   record Test(String module) implements Command {}
 
-  record Doc(String module) implements Command {}
+  record Doc(String module, boolean open) implements Command {}
 
   record Lint(String module) implements Command {}
 
