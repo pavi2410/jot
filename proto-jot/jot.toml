@@ -13,6 +13,7 @@ output-directory = "target/classes"
 
 [dependencies]
 jackson-core = "com.fasterxml.jackson.core:jackson-core:2.22.4"
+jackson-databind = "com.fasterxml.jackson.core:jackson-databind:2.22.4"
 tomlj = "org.tomlj:tomlj:1.1.1"
 
 [format]

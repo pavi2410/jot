@@ -240,6 +240,17 @@ class CommandLineTest {
   }
 
   @Test
+  void parsesAuditFixAndCiOptions() {
+    CommandLine.Audit audit =
+        assertInstanceOf(
+            CommandLine.Audit.class,
+            CommandLineParser.parse(new String[] {"audit", "--fix", "--ci"}).command());
+    assertTrue(audit.fix());
+    assertTrue(audit.ci());
+    assertEquals("unknown argument: --ci", parseError("build", "--ci"));
+  }
+
+  @Test
   void parsesDependencyAddAndRemoveOptions() {
     CommandLine.Add add =
         assertInstanceOf(

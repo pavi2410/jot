@@ -6,6 +6,11 @@ artifact = "jackson-core"
 version = "2.22.4"
 
 [[roots]]
+group = "com.fasterxml.jackson.core"
+artifact = "jackson-databind"
+version = "2.22.4"
+
+[[roots]]
 group = "com.google.googlejavaformat"
 artifact = "google-java-format"
 version = "1.37.0"
@@ -27,9 +32,21 @@ version = "1.1.1"
 
 [[package]]
 group = "com.fasterxml.jackson.core"
+artifact = "jackson-annotations"
+version = "2.22"
+sha256 = "21ddb598807d3a51a876704eb979d9296e1c6a6f47ab1826ff88c6d6a127a2d0"
+
+[[package]]
+group = "com.fasterxml.jackson.core"
 artifact = "jackson-core"
 version = "2.22.4"
 sha256 = "2d30c375cddea9657a1e1ef97547a2694b663b355facb4de53a097782b312d1a"
+
+[[package]]
+group = "com.fasterxml.jackson.core"
+artifact = "jackson-databind"
+version = "2.22.4"
+sha256 = "d4cbf8947087f305869826801913abdc50735a1fab2074a1993e7bc67ca974a3"
 
 [[package]]
 group = "com.google.auto.value"

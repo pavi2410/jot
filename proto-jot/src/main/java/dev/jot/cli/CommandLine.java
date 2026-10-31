@@ -23,6 +23,7 @@ record CommandLine(
           Tree,
           Resolve,
           Bench,
+          Audit,
           Toolchain {}
 
   record Build(String module) implements Command {}
@@ -57,6 +58,8 @@ record CommandLine(
 
   record Bench(String filter, String module, int forks, Integer warmup, Integer iterations)
       implements Command {}
+
+  record Audit(boolean fix, boolean ci) implements Command {}
 
   record Toolchain(ToolchainAction action) implements Command {}
 

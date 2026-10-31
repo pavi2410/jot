@@ -1,6 +1,7 @@
 package dev.jot.cli;
 
 import dev.jot.core.BuildEngine;
+import dev.jot.core.DependencyAuditor;
 import dev.jot.core.DependencyListing;
 import dev.jot.core.DependencyTree;
 import dev.jot.core.JavaToolchain;
@@ -181,6 +182,7 @@ public final class Main {
               DependencyListing.renderOutdated(
                   config, workspace, outdated.module(), projectRoot.resolve("jot.lock"), resolver));
       case CommandLine.Bench bench -> bench(config, workspace, bench, resolver);
+      case CommandLine.Audit audit -> audit(projectRoot, config, workspace, audit, resolver);
       case CommandLine.Add add -> addDependency(projectRoot, add, resolver);
       case CommandLine.Remove remove -> removeDependency(projectRoot, remove, resolver);
       case CommandLine.Lock ignored ->
@@ -264,6 +266,71 @@ public final class Main {
           options.forks(),
           options.warmup(),
           options.iterations());
+    }
+  }
+
+  private static void audit(
+      Path projectRoot,
+      ProjectConfig config,
+      ProjectWorkspace workspace,
+      CommandLine.Audit options,
+      MavenResolver resolver)
+      throws Exception {
+    DependencyAuditor.Report report =
+        new DependencyAuditor().audit(projectRoot, config, workspace, resolver, options.fix());
+    if (report.findings().isEmpty()) {
+      System.out.println(
+          "audit: no vulnerabilities found across " + report.packagesScanned() + " packages");
+      return;
+    }
+    long critical =
+        report.findings().stream()
+            .filter(finding -> finding.severity() == DependencyAuditor.AuditSeverity.CRITICAL)
+            .count();
+    long high =
+        report.findings().stream()
+            .filter(finding -> finding.severity() == DependencyAuditor.AuditSeverity.HIGH)
+            .count();
+    System.out.println(
+        "audit: packages="
+            + report.packagesScanned()
+            + " findings="
+            + report.findings().size()
+            + " critical="
+            + critical
+            + " high="
+            + high);
+    for (DependencyAuditor.Finding finding : report.findings()) {
+      System.out.println(
+          "\n"
+              + finding.severity()
+              + " "
+              + finding.id()
+              + " "
+              + finding.packageCoordinate().notation());
+      System.out.println("  summary: " + finding.summary());
+      if (finding.fixedVersion() != null) {
+        System.out.println("  fixed version: " + finding.fixedVersion());
+      }
+      if (!finding.members().isEmpty()) {
+        System.out.println("  affected members: " + String.join(", ", finding.members()));
+      }
+      for (int index = 0; index < finding.chains().size(); index++) {
+        System.out.println(
+            "  path "
+                + (index + 1)
+                + ": "
+                + String.join(
+                    " -> ",
+                    finding.chains().get(index).stream().map(MavenCoordinate::notation).toList()));
+      }
+    }
+    if (options.fix()) {
+      System.out.println("\nfix: updated " + report.fixedDependencies() + " direct dependencies");
+    }
+    if (options.ci()
+        && report.findings().stream().anyMatch(finding -> finding.severity().failsCi())) {
+      throw new IllegalStateException("audit failed CI severity threshold");
     }
   }
 
@@ -453,7 +520,7 @@ public final class Main {
     System.out.println("jot " + VERSION + " — a Java build tool");
     System.out.println(
         "Usage: jot"
-            + " <init|build|run|test|bench|doc|lint|fmt|add|remove|deps|outdated|resolve|tree|toolchain|lock|clean>"
+            + " <init|build|run|test|bench|audit|doc|lint|fmt|add|remove|deps|outdated|resolve|tree|toolchain|lock|clean>"
             + " [options]");
     System.out.println("       jot add <group:artifact:version> [--name <alias>] [--test]");
     System.out.println("       jot add --catalog <alias> [--name <dependency>] [--test]");
@@ -461,6 +528,7 @@ public final class Main {
     System.out.println(
         "       jot bench [filter] [--module <name>] [--forks <count>] [--warmup <count>]"
             + " [--iterations <count>]");
+    System.out.println("       jot audit [--fix] [--ci]");
     System.out.println("       jot deps [--module <name>]");
     System.out.println("       jot outdated [--module <name>] [--offline]");
     System.out.println("       jot tree <group:artifact:version> [--depth <levels>] [--offline]");
