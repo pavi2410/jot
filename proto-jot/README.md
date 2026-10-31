@@ -68,6 +68,7 @@ the nearest `libs.versions.toml` up the project path.
 `jot tree group:artifact:version [--depth levels]` displays Maven transitive
 dependencies, marking omitted scopes, optional dependencies, and cycles.
 `jot doc [--module name]` generates Java API documentation under `target/docs`.
+`jot lint [--module name]` runs `javac -Xlint:all` and reports Java compiler warnings.
 
 The Java CLI includes a `test` command that compiles configured test sources and
 runs JUnit Platform Console. The prototype's own tests run through that command:

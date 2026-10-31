@@ -98,6 +98,7 @@ public final class Main {
             case "run" -> run(config, workspace, commandLine.module(), commandLine.runArguments(), resolver);
             case "test" -> test(config, workspace, commandLine.module(), resolver);
             case "doc" -> doc(config, workspace, commandLine.module(), resolver);
+            case "lint" -> lint(config, workspace, commandLine.module(), resolver);
             case "deps" -> System.out.print(DependencyListing.render(config, workspace,
                     commandLine.module(), projectRoot.resolve("jot.lock")));
             case "outdated" -> System.out.print(DependencyListing.renderOutdated(config, workspace,
@@ -210,9 +211,31 @@ public final class Main {
         }
     }
 
+    private static void lint(ProjectConfig config, ProjectWorkspace workspace, String module,
+                             MavenResolver resolver) throws Exception {
+        if (!config.isWorkspace() && module != null) {
+            throw new IllegalArgumentException("--module requires a workspace");
+        }
+        List<WorkspaceProject> projects = module == null && config.isWorkspace()
+                ? workspace.ordered()
+                : List.of(workspace.find(module == null ? config.name() : module));
+        java.util.Set<Path> built = new java.util.HashSet<>();
+        for (WorkspaceProject project : projects) {
+            for (WorkspaceProject dependency : workspace.dependenciesFirst(project)) {
+                if (!dependency.root().equals(project.root()) && built.add(dependency.root())) {
+                    BuildEngine.build(dependency, resolver);
+                }
+            }
+            BuildEngine.LintResult result = BuildEngine.lint(project, resolver);
+            if (!result.diagnostics().isBlank()) System.err.print(result.diagnostics());
+            System.out.println(result.clean() ? "lint: " + project.name() + " is clean"
+                    : "lint: warnings in " + project.name());
+        }
+    }
+
     private static void help() {
         System.out.println("jot " + VERSION + " — a Java build tool");
-        System.out.println("Usage: jot <init|build|run|test|doc|add|remove|deps|outdated|tree|lock|clean> [options]");
+        System.out.println("Usage: jot <init|build|run|test|doc|lint|add|remove|deps|outdated|tree|lock|clean> [options]");
         System.out.println("       jot add <group:artifact:version> [--name <alias>] [--test]");
         System.out.println("       jot add --catalog <alias> [--name <dependency>] [--test]");
         System.out.println("       jot remove <alias> [--test]");
@@ -220,6 +243,7 @@ public final class Main {
         System.out.println("       jot outdated [--module <name>] [--offline]");
         System.out.println("       jot tree <group:artifact:version> [--depth <levels>] [--offline]");
         System.out.println("       jot doc [--project <directory>] [--module <name>] [--offline]");
+        System.out.println("       jot lint [--project <directory>] [--module <name>] [--offline]");
         System.out.println("       jot init [name] [--template app|library] [--package java.package]");
         System.out.println("       jot <build|run|test|lock|clean> [--project <directory>] [--module <name>] [--offline]");
     }

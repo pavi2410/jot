@@ -65,6 +65,14 @@ class CommandLineTest {
     }
 
     @Test
+    void parsesLintWorkspaceSelection() {
+        CommandLine parsed = CommandLine.parse(new String[] {"lint", "--module", "core"});
+
+        assertEquals("lint", parsed.command());
+        assertEquals("core", parsed.module());
+    }
+
+    @Test
     void parsesDependencyAddAndRemoveOptions() {
         CommandLine add = CommandLine.parse(new String[] {
                 "add", "org.example:annotations:1.0", "--name", "annotations", "--test"

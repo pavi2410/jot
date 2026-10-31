@@ -61,6 +61,43 @@ class BuildEngineTest {
     }
 
     @Test
+    void reportsJavacLintWarningsAndRemovesItsTemporaryClasses() throws Exception {
+        write("src/sample/LintSample.java", """
+                package sample;
+                import java.util.List;
+                public final class LintSample {
+                    public List values() { return List.of("jot"); }
+                }
+                """);
+        write("jot.toml", """
+                [project]
+                name = "lint-sample"
+                [toolchains]
+                java = "27"
+                """);
+        ProjectConfig config = ProjectConfig.read(temp.resolve("jot.toml"), null);
+        WorkspaceProject project = new WorkspaceProject(temp, config, List.of());
+        MavenResolver resolver = new MavenResolver(temp.resolve("cache"), MavenResolver.defaultRepository());
+
+        BuildEngine.LintResult warnings = BuildEngine.lint(project, resolver);
+
+        assertTrue(!warnings.clean());
+        assertTrue(warnings.diagnostics().contains("[rawtypes]"), warnings.diagnostics());
+        try (var files = Files.list(temp.resolve("target"))) {
+            assertTrue(files.noneMatch(path -> path.getFileName().toString().startsWith(".jot-lint-")));
+        }
+
+        write("src/sample/LintSample.java", """
+                package sample;
+                import java.util.List;
+                public final class LintSample {
+                    public List<String> values() { return List.of("jot"); }
+                }
+                """);
+        assertTrue(BuildEngine.lint(project, resolver).clean());
+    }
+
+    @Test
     void producesRepeatableJarAndRebuildsAfterSourceChanges() throws Exception {
         Files.createDirectories(temp.resolve("src/main/java/sample"));
         Path source = temp.resolve("src/main/java/sample/Main.java");

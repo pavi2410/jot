@@ -148,6 +148,41 @@ public final class BuildEngine {
         return docs;
     }
 
+    public static LintResult lint(WorkspaceProject project, MavenResolver resolver) throws Exception {
+        Path root = project.root();
+        ProjectConfig config = project.config();
+        JavaToolchain.requireCompatible(config.javaVersion());
+        List<Path> sources = collectSources(root, config.sourceDirectories());
+        if (sources.isEmpty()) {
+            throw new IllegalStateException("no Java sources in configured build.source-dirs: "
+                    + config.sourceDirectories());
+        }
+        List<MavenResolver.ResolvedArtifact> dependencies = resolveExternalArtifacts(project, resolver);
+        Path target = root.resolve("target");
+        Files.createDirectories(target);
+        Path lintClasses = Files.createTempDirectory(target, ".jot-lint-");
+        List<String> command = new ArrayList<>(List.of(jdkTool("javac"), "--release",
+                config.javaVersion(), "-Xlint:all", "-proc:none", "-d", lintClasses.toString()));
+        String classpath = classpath(project, dependencies);
+        if (!classpath.isBlank()) command.addAll(List.of("-classpath", classpath));
+        command.addAll(sources.stream().map(Path::toString).toList());
+        try {
+            Process process = new ProcessBuilder(command).directory(root.toFile())
+                    .redirectErrorStream(true).start();
+            String diagnostics = new String(process.getInputStream().readAllBytes());
+            int status = process.waitFor();
+            if (status != 0) {
+                throw new IllegalStateException("javac lint failed with exit code " + status
+                        + ":\n" + diagnostics);
+            }
+            return new LintResult(diagnostics.isBlank(), diagnostics);
+        } finally {
+            deleteTree(lintClasses);
+        }
+    }
+
+    public record LintResult(boolean clean, String diagnostics) {}
+
     public static void clean(WorkspaceProject project) throws IOException {
         deleteTree(project.root().resolve("target"));
         System.out.println("clean: " + project.config().name());
