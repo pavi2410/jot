@@ -21,6 +21,7 @@ record CommandLine(
     String dependencyCatalog,
     String toolchainAction,
     String toolchainSpec,
+    boolean toolchainForce,
     boolean resolveDependencies,
     boolean testDependency,
     int treeDepth,
@@ -66,7 +67,7 @@ record CommandLine(
   private static CommandLine specialCommand(boolean help, boolean version) {
     return new CommandLine(
         "", null, null, List.of(), help, version, false, null, null, null, null, null, null, null,
-        null, false, false, 0, false, false, false);
+        null, false, false, false, 0, false, false, false);
   }
 
   private static final class Options {
@@ -82,6 +83,7 @@ record CommandLine(
     private String dependencyCatalog;
     private String toolchainAction;
     private String toolchainSpec;
+    private boolean toolchainForce;
     private boolean offline;
     private boolean testDependency;
     private int treeDepth = 3;
@@ -124,6 +126,10 @@ record CommandLine(
           else workspacePin = true;
         }
         case "--offline" -> offline = true;
+        case "--force" -> {
+          require(command.equals("toolchain"), option);
+          toolchainForce = true;
+        }
         case "--test" -> {
           require(command.equals("add") || command.equals("remove"), option);
           testDependency = true;
@@ -222,8 +228,11 @@ record CommandLine(
         throw new IllegalArgumentException(
             "toolchain " + toolchainAction + " needs java@<version>");
       }
-      if (command.equals("toolchain") && toolchainAction.equals("list") && workspacePin) {
+      if (command.equals("toolchain") && workspacePin && !toolchainAction.equals("pin")) {
         throw new IllegalArgumentException("--workspace only applies to toolchain pin");
+      }
+      if (command.equals("toolchain") && toolchainForce && !toolchainAction.equals("install")) {
+        throw new IllegalArgumentException("--force only applies to toolchain install");
       }
     }
 
@@ -244,6 +253,7 @@ record CommandLine(
           dependencyCatalog,
           toolchainAction,
           toolchainSpec,
+          toolchainForce,
           resolveDependencies,
           testDependency,
           treeDepth,

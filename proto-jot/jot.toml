@@ -12,6 +12,7 @@ source-dirs = ["src/main/java"]
 output-directory = "target/classes"
 
 [dependencies]
+jackson-core = "com.fasterxml.jackson.core:jackson-core:2.22.4"
 tomlj = "org.tomlj:tomlj:1.1.1"
 
 [format]

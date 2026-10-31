@@ -28,9 +28,9 @@ java -jar target/bin/jot-java.jar build
 java -jar target/bin/jot-java.jar run -- --version
 ```
 
-The prototype supports `init`, `build`, `run`, `test`, `add`, `remove`, `deps`,
-`resolve`, `lock`, and `clean`, and accepts `--project`, `--module`, and global
-`--offline`.
+The prototype supports `init`, `build`, `run`, `test`, `fmt`, `lint`, `doc`,
+`add`, `remove`, `deps`, `outdated`, `resolve`, `tree`, `toolchain`, `lock`, and
+`clean`, and accepts `--project`, `--module`, and global `--offline`.
 `jot init [name]` creates a Jot-native
 Java app; `--template library` creates a library, and `--package` sets its Java
 package. Build source directories, resource
@@ -45,9 +45,10 @@ Jot selects an installed JDK under `~/.jot/jdks` when its release matches
 `toolchains.java`; otherwise it uses the running JDK when that JDK is newer than
 the requested release. `jot toolchain list` shows managed JDKs, and
 `jot toolchain pin java@21` updates the nearest project manifest
-(`--workspace` targets the workspace manifest). Java Jot can discover and use
-managed JDKs; toolchain installation is not implemented in the Java prototype
-yet.
+(`--workspace` targets the workspace manifest). `jot toolchain install java@21`
+installs an Adoptium JDK into the shared Jot toolchain directory; `--offline`
+only succeeds when that JDK is already installed. The Java prototype currently
+installs Adoptium distributions only.
 
 The build cache fingerprints compiler inputs separately from package inputs.
 Resource-only changes update the class output and JAR without recompiling Java

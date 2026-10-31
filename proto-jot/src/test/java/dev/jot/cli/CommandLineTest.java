@@ -74,6 +74,16 @@ class CommandLineTest {
     assertEquals("java@21", parsed.toolchainSpec());
     assertTrue(parsed.workspacePin());
     assertEquals("toolchain needs list, pin, or install", parseError("toolchain"));
+
+    CommandLine install =
+        CommandLine.parse(new String[] {"toolchain", "install", "java@21", "--force", "--offline"});
+    assertEquals("install", install.toolchainAction());
+    assertEquals("java@21", install.toolchainSpec());
+    assertTrue(install.toolchainForce());
+    assertTrue(install.offline());
+    assertEquals(
+        "--force only applies to toolchain install",
+        parseError("toolchain", "pin", "java@21", "--force"));
   }
 
   @Test
@@ -99,6 +109,31 @@ class CommandLineTest {
     assertEquals(0, process.waitFor(), output);
     assertTrue(Files.readString(temp.resolve("jot.toml")).contains("java = \"21\""));
     assertTrue(output.contains("pinned java@21"));
+  }
+
+  @Test
+  void offlineToolchainInstallFailsClearlyWhenTheJdkIsMissing() throws Exception {
+    Path home = temp.resolve("empty-home");
+    Files.createDirectories(home);
+    String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+    Process process =
+        new ProcessBuilder(
+                java,
+                "-Duser.home=" + home,
+                "-cp",
+                System.getProperty("java.class.path"),
+                "dev.jot.cli.Main",
+                "toolchain",
+                "install",
+                "java@21",
+                "--offline")
+            .directory(temp.toFile())
+            .redirectErrorStream(true)
+            .start();
+    String output = new String(process.getInputStream().readAllBytes());
+
+    assertEquals(1, process.waitFor(), output);
+    assertTrue(output.contains("offline mode: cannot install Java 21"));
   }
 
   @Test

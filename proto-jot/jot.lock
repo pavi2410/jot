@@ -1,6 +1,11 @@
 version = 1
 
 [[roots]]
+group = "com.fasterxml.jackson.core"
+artifact = "jackson-core"
+version = "2.22.4"
+
+[[roots]]
 group = "com.google.googlejavaformat"
 artifact = "google-java-format"
 version = "1.37.0"
@@ -19,6 +24,12 @@ version = "1.11.0"
 group = "org.tomlj"
 artifact = "tomlj"
 version = "1.1.1"
+
+[[package]]
+group = "com.fasterxml.jackson.core"
+artifact = "jackson-core"
+version = "2.22.4"
+sha256 = "2d30c375cddea9657a1e1ef97547a2694b663b355facb4de53a097782b312d1a"
 
 [[package]]
 group = "com.google.auto.value"

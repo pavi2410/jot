@@ -4,6 +4,7 @@ import dev.jot.core.BuildEngine;
 import dev.jot.core.DependencyListing;
 import dev.jot.core.DependencyTree;
 import dev.jot.core.JavaToolchain;
+import dev.jot.core.JavaToolchainManager;
 import dev.jot.core.ProjectConfig;
 import dev.jot.core.ProjectInitializer;
 import dev.jot.core.ProjectWorkspace;
@@ -253,8 +254,17 @@ public final class Main {
 
   private static void toolchain(CommandLine commandLine) throws Exception {
     if (commandLine.toolchainAction().equals("install")) {
-      throw new IllegalStateException(
-          "Java Jot can use installed JDKs but does not install toolchains yet");
+      String spec = commandLine.toolchainSpec();
+      if (!spec.startsWith("java@")) {
+        throw new IllegalArgumentException(
+            "Java Jot currently installs Adoptium JDKs; got " + spec);
+      }
+      String version = spec.substring("java@".length());
+      JavaToolchain.Installation installation =
+          new JavaToolchainManager()
+              .install(version, commandLine.toolchainForce(), commandLine.offline());
+      System.out.println("install: java " + installation.version() + " -> " + installation.home());
+      return;
     }
     if (commandLine.toolchainAction().equals("list")) {
       Path jdks = Path.of(System.getProperty("user.home"), ".jot", "jdks");
@@ -443,6 +453,7 @@ public final class Main {
         "       jot tree --workspace [--module <name>] [--depth <levels>] [--offline]");
     System.out.println("       jot resolve <group:artifact:version> [--deps] [--offline]");
     System.out.println("       jot toolchain list");
+    System.out.println("       jot toolchain install java@<version> [--force] [--offline]");
     System.out.println("       jot toolchain pin java@<version> [--workspace]");
     System.out.println("       jot doc [--project <directory>] [--module <name>] [--offline]");
     System.out.println("       jot lint [--project <directory>] [--module <name>] [--offline]");
