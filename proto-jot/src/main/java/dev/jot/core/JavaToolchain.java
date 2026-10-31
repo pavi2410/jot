@@ -78,7 +78,7 @@ public final class JavaToolchain {
       for (Path releaseFile :
           files
               .filter(path -> path.getFileName().toString().equals("release"))
-              .filter(path -> isJdkHome(path.getParent()))
+              .filter(path -> Platform.isJdkHome(path.getParent()))
               .toList()) {
         Path home = releaseFile.getParent();
         Properties release = new Properties();
@@ -176,15 +176,8 @@ public final class JavaToolchain {
     return "unknown";
   }
 
-  private static boolean isJdkHome(Path home) {
-    String suffix = System.getProperty("os.name").startsWith("Windows") ? ".exe" : "";
-    return Files.isRegularFile(home.resolve("bin/java" + suffix))
-        && Files.isRegularFile(home.resolve("bin/javac" + suffix));
-  }
-
   public static Path tool(Path javaHome, String name) {
-    String executable = System.getProperty("os.name").startsWith("Windows") ? name + ".exe" : name;
-    Path tool = javaHome.resolve("bin").resolve(executable);
+    Path tool = javaHome.resolve("bin").resolve(Platform.executableName(name));
     if (!Files.isExecutable(tool)) {
       throw new IllegalStateException("JDK tool is missing or not executable: " + tool);
     }

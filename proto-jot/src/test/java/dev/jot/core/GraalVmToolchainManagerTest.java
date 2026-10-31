@@ -21,7 +21,7 @@ class GraalVmToolchainManagerTest {
 
   @Test
   void installsChecksumVerifiedGraalvmAndReusesItOffline() throws Exception {
-    Assumptions.assumeFalse(System.getProperty("os.name").toLowerCase().contains("win"));
+    Assumptions.assumeFalse(Platform.isWindows(System.getProperty("os.name")));
     String platform = GraalVmToolchainManager.platform();
     Path archive = createArchive(platform);
     byte[] contents = Files.readAllBytes(archive);

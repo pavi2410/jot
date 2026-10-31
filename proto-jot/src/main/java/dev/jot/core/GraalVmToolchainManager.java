@@ -17,7 +17,6 @@ import java.time.Duration;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.Locale;
 import java.util.Properties;
 import java.util.stream.Stream;
 
@@ -178,24 +177,12 @@ public final class GraalVmToolchainManager {
   }
 
   static String platform() {
-    String os = System.getProperty("os.name").toLowerCase(Locale.ROOT);
-    String arch = System.getProperty("os.arch").toLowerCase(Locale.ROOT);
-    String architecture =
-        switch (arch) {
-          case "aarch64", "arm64" -> "aarch64";
-          case "x86_64", "amd64" -> "x64";
-          default -> throw new IllegalStateException("unsupported GraalVM architecture: " + arch);
-        };
-    if (os.contains("mac")) {
-      return "macos-" + architecture;
-    }
-    if (os.contains("win")) {
-      if (!architecture.equals("x64"))
+    Platform platform = Platform.current();
+    if (platform.os() == Platform.OperatingSystem.WINDOWS) {
+      if (platform.architecture() != Platform.Architecture.X64)
         throw new IllegalStateException("GraalVM Community Windows builds require x64");
-      return "windows-x64";
     }
-    if (os.contains("linux")) return "linux-" + architecture;
-    throw new IllegalStateException("unsupported GraalVM operating system: " + os);
+    return platform.id();
   }
 
   private static Path findGraalVmHome(Path root) throws IOException {
@@ -204,15 +191,15 @@ public final class GraalVmToolchainManager {
           .filter(path -> path.getFileName().toString().equals("release"))
           .map(Path::getParent)
           .filter(home -> Files.isRegularFile(nativeImageTool(home)))
-          .filter(home -> Files.isRegularFile(home.resolve("bin/java")))
-          .filter(home -> Files.isRegularFile(home.resolve("bin/javac")))
+          .filter(Platform::isJdkHome)
           .findFirst()
           .orElseThrow(() -> new IOException("GraalVM archive contains no complete JDK"));
     }
   }
 
   public static Path nativeImageTool(Path home) {
-    return home.resolve("bin").resolve(isWindows() ? "native-image.cmd" : "native-image");
+    return home.resolve("bin")
+        .resolve(Platform.current().isWindows() ? "native-image.cmd" : "native-image");
   }
 
   private static String readJavaVersion(Path home) throws IOException {
@@ -234,10 +221,6 @@ public final class GraalVmToolchainManager {
       while ((count = input.read(buffer)) >= 0) digest.update(buffer, 0, count);
     }
     return HexFormat.of().formatHex(digest.digest());
-  }
-
-  private static boolean isWindows() {
-    return System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win");
   }
 
   private static void deleteTree(Path root) throws IOException {

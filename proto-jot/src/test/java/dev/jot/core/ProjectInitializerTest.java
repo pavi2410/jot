@@ -155,7 +155,7 @@ class ProjectInitializerTest {
   }
 
   private String javaExecutable() {
-    String executable = System.getProperty("os.name").startsWith("Windows") ? "java.exe" : "java";
-    return Path.of(System.getProperty("java.home"), "bin", executable).toString();
+    return Path.of(System.getProperty("java.home"), "bin", Platform.executableName("java"))
+        .toString();
   }
 }

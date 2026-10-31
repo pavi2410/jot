@@ -22,7 +22,6 @@ import java.time.OffsetDateTime;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.Locale;
 import java.util.Properties;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
@@ -195,7 +194,7 @@ public final class JavaToolchainManager {
 
   private Asset resolveAsset(String version, String vendor) throws Exception {
     String os = adoptiumOs();
-    String architecture = adoptiumArchitecture();
+    String architecture = Platform.current().adoptiumArchitecture();
     URI uri =
         apiBase.resolve(
             "assets/latest/"
@@ -309,8 +308,7 @@ public final class JavaToolchainManager {
     try (Stream<Path> files = Files.walk(root, 8)) {
       return files
           .filter(path -> path.getFileName().toString().equals("release"))
-          .filter(path -> Files.isRegularFile(path.resolveSibling("bin/java")))
-          .filter(path -> Files.isRegularFile(path.resolveSibling("bin/javac")))
+          .filter(path -> Platform.isJdkHome(path.getParent()))
           .map(Path::getParent)
           .findFirst()
           .orElseThrow(
@@ -388,41 +386,19 @@ public final class JavaToolchainManager {
   }
 
   private static String platform() {
-    String operatingSystem = System.getProperty("os.name").toLowerCase(Locale.ROOT);
-    String os;
-    if (operatingSystem.contains("mac") || operatingSystem.contains("darwin")) os = "macos";
-    else if (operatingSystem.contains("win")) os = "windows";
-    else if (operatingSystem.contains("linux")) os = "linux";
-    else throw new IllegalStateException("unsupported JDK operating system: " + operatingSystem);
-    return os + "-" + (adoptiumArchitecture().equals("aarch64") ? "aarch64" : "x64");
+    return Platform.current().id();
   }
 
   private static String adoptiumOs() {
-    return platform().startsWith("macos")
-        ? "mac"
-        : platform().substring(0, platform().indexOf('-'));
-  }
-
-  private static String adoptiumArchitecture() {
-    return switch (System.getProperty("os.arch").toLowerCase(Locale.ROOT)) {
-      case "aarch64", "arm64" -> "aarch64";
-      case "x86_64", "amd64" -> "x64";
-      default ->
-          throw new IllegalStateException(
-              "unsupported JDK architecture: " + System.getProperty("os.arch"));
-    };
+    return Platform.current().adoptiumOs();
   }
 
   private static String rustOs() {
-    return switch (platform().substring(0, platform().indexOf('-'))) {
-      case "macos" -> "Mac";
-      case "windows" -> "Windows";
-      default -> "Linux";
-    };
+    return Platform.current().rustOs();
   }
 
   private static String rustArchitecture() {
-    return platform().endsWith("aarch64") ? "Aarch64" : "X64";
+    return Platform.current().rustArchitecture();
   }
 
   private record Package(String name, String link, String checksum) {}

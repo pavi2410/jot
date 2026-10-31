@@ -2,6 +2,7 @@ package dev.jot.core.packaging;
 
 import dev.jot.core.GraalVmToolchainManager;
 import dev.jot.core.JavaToolchain;
+import dev.jot.core.Platform;
 import dev.jot.core.WorkspaceProject;
 import java.io.IOException;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -110,22 +111,23 @@ public final class NativeImagePackager {
 
   static Path locateNativeImage(Path javaHome, String graalvmHome, String path, String osName)
       throws IOException {
-    boolean windows = osName.toLowerCase(java.util.Locale.ROOT).contains("win");
+    boolean windows = Platform.isWindows(osName);
     String toolName = windows ? "native-image.cmd" : "native-image";
+    String windowsToolName = Platform.executableName("native-image", osName);
     List<Path> candidates = new ArrayList<>();
     if (graalvmHome != null && !graalvmHome.isBlank()) {
       candidates.add(Path.of(graalvmHome).resolve("bin").resolve(toolName));
-      if (windows) candidates.add(Path.of(graalvmHome).resolve("bin/native-image.exe"));
+      if (windows) candidates.add(Path.of(graalvmHome).resolve("bin").resolve(windowsToolName));
     }
     if (javaHome != null) {
       candidates.add(javaHome.resolve("bin").resolve(toolName));
-      if (windows) candidates.add(javaHome.resolve("bin/native-image.exe"));
+      if (windows) candidates.add(javaHome.resolve("bin").resolve(windowsToolName));
     }
     if (path != null) {
       for (String entry : path.split(java.util.regex.Pattern.quote(java.io.File.pathSeparator))) {
         if (entry.isBlank()) continue;
         candidates.add(Path.of(entry).resolve(toolName));
-        if (windows) candidates.add(Path.of(entry).resolve("native-image.exe"));
+        if (windows) candidates.add(Path.of(entry).resolve(windowsToolName));
       }
     }
     for (Path candidate : candidates) {
@@ -191,8 +193,7 @@ public final class NativeImagePackager {
     }
     digest.update(mainClass.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     digest.update(nativeImageVersion.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-    digest.update(System.getProperty("os.name").getBytes(java.nio.charset.StandardCharsets.UTF_8));
-    digest.update(System.getProperty("os.arch").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    digest.update(Platform.current().id().getBytes(java.nio.charset.StandardCharsets.UTF_8));
     return HexFormat.of().formatHex(digest.digest());
   }
 
@@ -214,10 +215,7 @@ public final class NativeImagePackager {
   }
 
   private static String executableName(String projectName) {
-    return projectName
-        + (System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT).contains("win")
-            ? ".exe"
-            : "");
+    return Platform.executableName(projectName);
   }
 
   private static String displayPath(Path root, Path output) {

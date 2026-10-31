@@ -120,7 +120,7 @@ class JavaToolchainManagerTest {
 
   @Test
   void extractsUnixTarGzJdkArchives() throws Exception {
-    Assumptions.assumeFalse(System.getProperty("os.name").toLowerCase().contains("win"));
+    Assumptions.assumeFalse(Platform.isWindows(System.getProperty("os.name")));
     Path source = temp.resolve("source/jdk-21");
     Files.createDirectories(source.resolve("bin"));
     Files.writeString(source.resolve("bin/java"), "java");

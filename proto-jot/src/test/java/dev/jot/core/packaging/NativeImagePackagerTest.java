@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.jot.core.Platform;
 import dev.jot.core.ProjectConfig;
 import dev.jot.core.WorkspaceProject;
 import java.io.IOException;
@@ -120,9 +121,7 @@ class NativeImagePackagerTest {
   }
 
   private String executableSuffix() {
-    return System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT).contains("win")
-        ? ".exe"
-        : "";
+    return Platform.isWindows(System.getProperty("os.name")) ? ".exe" : "";
   }
 
   private Path toolchain(String name) throws IOException {
