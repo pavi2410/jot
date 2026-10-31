@@ -1,0 +1,8 @@
+[project]
+name = "proto-jot"
+version = "0.1.0"
+main-class = "dev.jot.proto.Jot"
+layout = "maven"
+
+[toolchains]
+java = "27"
