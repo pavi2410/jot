@@ -2,6 +2,7 @@ package dev.jot.core;
 
 import dev.jot.core.resolve.Lockfile;
 import dev.jot.core.resolve.MavenCoordinate;
+import dev.jot.core.resolve.MavenResolver;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -66,6 +67,48 @@ public final class DependencyListing {
             output.append('\n');
         }
         return output.toString();
+    }
+
+    public static String renderOutdated(ProjectConfig config, ProjectWorkspace workspace,
+                                        String module, Path lockPath, MavenResolver resolver)
+            throws Exception {
+        Lockfile lock = Lockfile.read(lockPath);
+        Set<String> included = null;
+        if (module != null) {
+            if (!config.isWorkspace()) throw new IllegalArgumentException("--module requires a workspace");
+            WorkspaceProject project = workspace.find(module);
+            included = new HashSet<>();
+            List<String> roots = new ArrayList<>(project.config().dependencies().values());
+            roots.addAll(project.config().testDependencies().values());
+            for (String root : roots) {
+                for (MavenResolver.TreeEntry entry : resolver.resolveDependencyTree(
+                        MavenCoordinate.parse(root), 8)) {
+                    if (entry.note() == null) included.add(entry.coordinate().notation());
+                }
+            }
+        }
+
+        Set<String> selectedCoordinates = included;
+        List<Lockfile.LockedPackage> packages = lock.packages().stream()
+                .filter(item -> selectedCoordinates == null
+                        || selectedCoordinates.contains(item.coordinate().notation()))
+                .toList();
+        if (packages.isEmpty()) return "No locked packages found.\n";
+
+        List<String> results = new ArrayList<>();
+        for (Lockfile.LockedPackage item : packages) {
+            MavenCoordinate coordinate = item.coordinate();
+            var latest = resolver.latestAvailableVersion(coordinate).orElse(null);
+            if (latest == null) {
+                results.add(coordinate.group() + ":" + coordinate.artifact() + " "
+                        + coordinate.version() + " -> <unknown>");
+            } else if (!latest.equals(coordinate.version())) {
+                results.add(coordinate.group() + ":" + coordinate.artifact() + " "
+                        + coordinate.version() + " -> " + latest);
+            }
+        }
+        if (results.isEmpty()) return "All locked packages are up to date.\n";
+        return String.join("\n", results) + "\n";
     }
 
     private record Entry(String module, String scope, String name, String coordinate, boolean locked) {}

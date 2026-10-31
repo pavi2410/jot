@@ -20,6 +20,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -89,6 +90,16 @@ public final class MavenResolver {
             }
         }
         return List.copyOf(selected.values());
+    }
+
+    public Optional<String> latestAvailableVersion(MavenCoordinate coordinate) throws Exception {
+        String metadataPath = coordinate.group().replace('.', '/') + "/" + coordinate.artifact()
+                + "/maven-metadata.xml";
+        byte[] metadata = fetch(repository.resolve(metadataPath), true);
+        Element versioning = child(parseXml(metadata).getDocumentElement(), "versioning");
+        String latest = text(versioning, "release");
+        if (latest == null) latest = text(versioning, "latest");
+        return Optional.ofNullable(latest);
     }
 
     public List<TreeEntry> resolveDependencyTree(MavenCoordinate root, int maxDepth) throws Exception {

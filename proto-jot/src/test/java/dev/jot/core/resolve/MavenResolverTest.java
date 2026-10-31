@@ -117,6 +117,27 @@ class MavenResolverTest {
     }
 
     @Test
+    void readsLatestReleaseMetadataAndUsesTheCacheOffline() throws Exception {
+        Path repository = temp.resolve("metadata-repository");
+        Path metadata = repository.resolve("sample/library/maven-metadata.xml");
+        Files.createDirectories(metadata.getParent());
+        Files.writeString(metadata, """
+                <metadata><groupId>sample</groupId><artifactId>library</artifactId>
+                  <versioning><latest>1.3.0-SNAPSHOT</latest><release>1.2.0</release>
+                    <versions><version>1.0.0</version><version>1.2.0</version></versions>
+                  </versioning>
+                </metadata>
+                """);
+        Path cache = temp.resolve("metadata-cache");
+        MavenCoordinate coordinate = MavenCoordinate.parse("sample:library:1.0.0");
+
+        assertEquals(java.util.Optional.of("1.2.0"),
+                new MavenResolver(cache, repository.toUri()).latestAvailableVersion(coordinate));
+        assertEquals(java.util.Optional.of("1.2.0"),
+                new MavenResolver(cache, repository.toUri(), true).latestAvailableVersion(coordinate));
+    }
+
+    @Test
     void rejectsAnArtifactWhenTheRepositoryChecksumDoesNotMatch() throws Exception {
         Path repository = temp.resolve("bad-checksum-repository");
         String coordinateText = "sample:tampered:1.0.0";

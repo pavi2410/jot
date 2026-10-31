@@ -44,6 +44,15 @@ class CommandLineTest {
     }
 
     @Test
+    void parsesOutdatedWorkspaceSelection() {
+        CommandLine parsed = CommandLine.parse(new String[] {"outdated", "--module", "app", "--offline"});
+
+        assertEquals("outdated", parsed.command());
+        assertEquals("app", parsed.module());
+        assertTrue(parsed.offline());
+    }
+
+    @Test
     void parsesDependencyAddAndRemoveOptions() {
         CommandLine add = CommandLine.parse(new String[] {
                 "add", "org.example:annotations:1.0", "--name", "annotations", "--test"

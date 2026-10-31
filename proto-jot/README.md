@@ -64,6 +64,7 @@ are not implemented yet.
 manifest content, then regenerate the lockfile. Catalog aliases resolve from
 the nearest `libs.versions.toml` up the project path.
 `jot deps [--module name]` lists each direct dependency, scope, and lock status.
+`jot outdated [--module name]` compares locked versions with Maven release metadata.
 `jot tree group:artifact:version [--depth levels]` displays Maven transitive
 dependencies, marking omitted scopes, optional dependencies, and cycles.
 
