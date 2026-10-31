@@ -1,12 +1,17 @@
 package dev.jot.proto;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.TreeMap;
 import java.util.stream.Stream;
 
@@ -67,7 +72,6 @@ public final class Jot {
                 run(projectRoot, config, runArgs);
             }
             case "clean" -> {
-                deleteTree(projectRoot.resolve(config.outputDirectory));
                 deleteTree(projectRoot.resolve("target"));
                 System.out.println("clean: " + config.name);
             }
@@ -106,23 +110,67 @@ public final class Jot {
         }
 
         Path classes = root.resolve(config.outputDirectory).normalize();
-        if (!classes.startsWith(root)) {
-            throw new IllegalArgumentException("build.output-directory escapes project");
+        Path target = root.resolve("target");
+        if (!classes.startsWith(target) || classes.equals(target)) {
+            throw new IllegalArgumentException("build.output-directory must be below target/");
         }
+        Path artifact = root.resolve("target/" + config.name + "-" + config.version + ".jar");
+        Path stateFile = root.resolve("target/.jot/build-state.properties");
+        String fingerprint = fingerprint(root, sources, config);
+        if (Files.isRegularFile(artifact) && fingerprint.equals(readFingerprint(stateFile))) {
+            System.out.println("build: " + config.name + " is up to date");
+            return;
+        }
+
+        deleteTree(classes);
         Files.createDirectories(classes);
         List<String> javac = new ArrayList<>(List.of(jdkTool("javac"), "--release",
                 config.javaVersion, "-d", classes.toString()));
         sources.forEach(path -> javac.add(path.toString()));
         runProcess(root, javac);
 
-        Path artifact = root.resolve("target/" + config.name + "-" + config.version + ".jar");
         Files.createDirectories(artifact.getParent());
         List<String> jar = new ArrayList<>(List.of(jdkTool("jar"), "--create", "--file",
-                artifact.toString()));
+                artifact.toString(), "--date=1980-01-01T00:00:02Z"));
         if (!config.mainClass.isBlank()) jar.addAll(List.of("--main-class", config.mainClass));
         jar.addAll(List.of("-C", classes.toString(), "."));
         runProcess(root, jar);
+        Properties state = new Properties();
+        state.setProperty("fingerprint", fingerprint);
+        Files.createDirectories(stateFile.getParent());
+        try (var output = Files.newOutputStream(stateFile)) {
+            state.store(output, "Jot content fingerprint. Generated file.");
+        }
         System.out.println("build: " + config.name + " " + config.version + " -> " + artifact);
+    }
+
+    private static String fingerprint(Path root, List<Path> sources, Config config)
+            throws IOException, NoSuchAlgorithmException {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        updateDigest(digest, config.javaVersion);
+        updateDigest(digest, config.mainClass);
+        updateDigest(digest, config.sourceDirectories.toString());
+        updateDigest(digest, config.outputDirectory);
+        updateDigest(digest, System.getProperty("java.version"));
+        for (Path source : sources) {
+            updateDigest(digest, root.relativize(source).toString());
+            digest.update(Files.readAllBytes(source));
+        }
+        return HexFormat.of().formatHex(digest.digest());
+    }
+
+    private static void updateDigest(MessageDigest digest, String value) {
+        digest.update(value.getBytes(StandardCharsets.UTF_8));
+        digest.update((byte) 0);
+    }
+
+    private static String readFingerprint(Path file) throws IOException {
+        if (!Files.isRegularFile(file)) return "";
+        Properties state = new Properties();
+        try (var input = Files.newInputStream(file)) {
+            state.load(input);
+        }
+        return state.getProperty("fingerprint", "");
     }
 
     private static void run(Path root, Config config, List<String> arguments)
