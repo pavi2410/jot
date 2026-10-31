@@ -1,6 +1,7 @@
 package dev.jot.cli;
 
 import dev.jot.core.BuildEngine;
+import dev.jot.core.DependencyListing;
 import dev.jot.core.ProjectConfig;
 import dev.jot.core.ProjectInitializer;
 import dev.jot.core.ProjectWorkspace;
@@ -85,6 +86,8 @@ public final class Main {
             case "build" -> build(config, workspace, commandLine.module(), resolver);
             case "run" -> run(config, workspace, commandLine.module(), commandLine.runArguments(), resolver);
             case "test" -> test(config, workspace, commandLine.module(), resolver);
+            case "deps" -> System.out.print(DependencyListing.render(config, workspace,
+                    commandLine.module(), projectRoot.resolve("jot.lock")));
             case "add" -> addDependency(projectRoot, commandLine, resolver);
             case "remove" -> removeDependency(projectRoot, commandLine, resolver);
             case "lock" -> BuildEngine.lock(workspace, projectRoot.resolve("jot.lock"), resolver);
@@ -175,10 +178,11 @@ public final class Main {
 
     private static void help() {
         System.out.println("jot " + VERSION + " — a Java build tool");
-        System.out.println("Usage: jot <init|build|run|test|add|remove|lock|clean> [options]");
+        System.out.println("Usage: jot <init|build|run|test|add|remove|deps|lock|clean> [options]");
         System.out.println("       jot add <group:artifact:version> [--name <alias>] [--test]");
         System.out.println("       jot add --catalog <alias> [--name <dependency>] [--test]");
         System.out.println("       jot remove <alias> [--test]");
+        System.out.println("       jot deps [--module <name>]");
         System.out.println("       jot init [name] [--template app|library] [--package java.package]");
         System.out.println("       jot <build|run|test|lock|clean> [--project <directory>] [--module <name>] [--offline]");
     }

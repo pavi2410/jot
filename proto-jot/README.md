@@ -28,8 +28,8 @@ java -jar target/bin/jot-java.jar build
 java -jar target/bin/jot-java.jar run -- --version
 ```
 
-The prototype supports `init`, `build`, `run`, `test`, `add`, `remove`, `lock`,
-and `clean`, and accepts `--project`, `--module`, and global `--offline`.
+The prototype supports `init`, `build`, `run`, `test`, `add`, `remove`, `deps`,
+`lock`, and `clean`, and accepts `--project`, `--module`, and global `--offline`.
 `jot init [name]` creates a Jot-native
 Java app; `--template library` creates a library, and `--package` sets its Java
 package. Build source directories, resource
@@ -63,6 +63,7 @@ are not implemented yet.
 `jot remove alias [--test]` edit dependency tables while retaining other
 manifest content, then regenerate the lockfile. Catalog aliases resolve from
 the nearest `libs.versions.toml` up the project path.
+`jot deps [--module name]` lists each direct dependency, scope, and lock status.
 
 The Java CLI includes a `test` command that compiles configured test sources and
 runs JUnit Platform Console. The prototype's own tests run through that command:
