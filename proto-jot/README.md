@@ -65,6 +65,10 @@ Resource-only changes update the class output and JAR without recompiling Java
 sources. Java source edits are compiled on their own when their class outputs
 and binary APIs remain stable; additions, deletions, binary API changes, or
 compiler and classpath changes trigger a full project compile.
+Runnable projects also produce `target/bin/<project>.jar`, an executable fat JAR
+that includes runtime Maven and workspace dependencies. The regular project JAR
+remains at `target/<project>-<version>.jar` for publishing and reuse; run the
+fat JAR with `java -jar target/bin/<project>.jar`.
 
 The Java CLI resolves pinned Maven coordinates and their compile/runtime
 transitive dependencies from POMs, checking repository SHA-256 sidecars when

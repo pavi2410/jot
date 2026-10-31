@@ -1,5 +1,6 @@
 package dev.jot.core;
 
+import dev.jot.core.packaging.FatJarPackager;
 import dev.jot.core.resolve.Lockfile;
 import dev.jot.core.resolve.MavenCoordinate;
 import dev.jot.core.resolve.MavenResolver;
@@ -116,6 +117,45 @@ public final class BuildEngine {
     state.setProperty("package-fingerprint", packageFingerprint);
     state.setProperty("output-tree-sha256", outputHash);
     state.setProperty("artifact-sha256", fileFingerprint(artifact));
+
+    Path previousFatJar = trackedFatJar(target, previousState);
+    Path fatJar = null;
+    boolean fatJarBuilt = false;
+    if (!config.mainClass().isBlank()) {
+      fatJar = target.resolve("bin").resolve(config.name() + ".jar");
+      String fatJarFingerprint =
+          fatJarFingerprint(config, outputHash, externalArtifacts, transitiveDependencies(project));
+      boolean fatJarIsIntact =
+          Files.isRegularFile(fatJar)
+              && fatJarFingerprint.equals(previousState.getProperty("fat-jar-fingerprint"))
+              && fatJar.toAbsolutePath().normalize().equals(previousFatJar);
+      if (!fatJarIsIntact) {
+        List<String> warnings =
+            FatJarPackager.packageJar(
+                root,
+                target,
+                fatJar,
+                Path.of(jdkTool(javaHome, "jar")),
+                config.mainClass(),
+                externalArtifacts.stream().map(MavenResolver.ResolvedArtifact::jar).toList(),
+                transitiveDependencies(project).stream()
+                    .map(
+                        dependency ->
+                            dependency.root().resolve(dependency.config().outputDirectory()))
+                    .toList(),
+                classes);
+        for (String warning : warnings) System.err.println("warn: " + warning);
+        fatJarBuilt = true;
+      }
+      if (previousFatJar != null && !previousFatJar.equals(fatJar)) deleteTree(previousFatJar);
+      state.setProperty("fat-jar-fingerprint", fatJarFingerprint);
+      state.setProperty("fat-jar-output", target.relativize(fatJar).toString());
+    } else {
+      if (previousFatJar != null) deleteTree(previousFatJar);
+      state.remove("fat-jar-fingerprint");
+      state.remove("fat-jar-output");
+    }
+
     Files.createDirectories(stateFile.getParent());
     try (var output = Files.newOutputStream(stateFile)) {
       state.store(output, "Jot content fingerprint. Generated file.");
@@ -129,6 +169,47 @@ public final class BuildEngine {
     } else {
       System.out.println("package: " + config.name() + " -> " + artifactSummary);
     }
+    if (fatJarBuilt) {
+      Path displayFatJar =
+          root.toAbsolutePath().normalize().relativize(fatJar.toAbsolutePath().normalize());
+      System.out.println(
+          "fat-jar: " + displayFatJar + " (" + formatFileSize(Files.size(fatJar)) + ")");
+    }
+  }
+
+  private static String fatJarFingerprint(
+      ProjectConfig config,
+      String classesHash,
+      List<MavenResolver.ResolvedArtifact> externalArtifacts,
+      List<WorkspaceProject> workspaceDependencies)
+      throws Exception {
+    MessageDigest digest = MessageDigest.getInstance("SHA-256");
+    updateDigest(digest, config.name());
+    updateDigest(digest, config.mainClass());
+    updateDigest(digest, classesHash);
+    for (MavenResolver.ResolvedArtifact artifact : externalArtifacts) {
+      updateDigest(digest, artifact.coordinate().notation());
+      updateDigest(digest, fileFingerprint(artifact.jar()));
+    }
+    for (WorkspaceProject dependency : workspaceDependencies) {
+      updateDigest(digest, dependency.name());
+      updateDigest(digest, dependency.config().version());
+      Path dependencyClasses =
+          dependency.root().resolve(dependency.config().outputDirectory()).normalize();
+      updateDigest(
+          digest,
+          Files.isDirectory(dependencyClasses)
+              ? directoryFingerprint(dependencyClasses)
+              : "missing-classes");
+    }
+    return HexFormat.of().formatHex(digest.digest());
+  }
+
+  private static Path trackedFatJar(Path target, Properties state) {
+    String output = state.getProperty("fat-jar-output");
+    if (output == null || output.isBlank()) return null;
+    Path path = target.resolve(output).normalize();
+    return path.startsWith(target) && !path.equals(target) ? path : null;
   }
 
   static String formatFileSize(long bytes) {

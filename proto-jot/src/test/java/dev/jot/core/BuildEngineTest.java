@@ -18,6 +18,7 @@ import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
 import java.util.jar.JarOutputStream;
 import java.util.zip.ZipFile;
 import javax.tools.ToolProvider;
@@ -387,23 +388,30 @@ class BuildEngineTest {
 
     BuildEngine.build(project);
     Path artifact = temp.resolve("target/sample-1.0.0.jar");
+    Path fatArtifact = temp.resolve("target/bin/sample.jar");
     byte[] firstBuild = Files.readAllBytes(artifact);
+    byte[] firstFatBuild = Files.readAllBytes(fatArtifact);
     BuildEngine.clean(project);
     BuildEngine.build(project);
     byte[] repeatBuild = Files.readAllBytes(artifact);
+    byte[] repeatFatBuild = Files.readAllBytes(fatArtifact);
     assertArrayEquals(
         firstBuild, repeatBuild, "unchanged inputs should produce identical JAR bytes");
+    assertArrayEquals(
+        firstFatBuild, repeatFatBuild, "unchanged inputs should produce identical fat-JAR bytes");
 
     Path mainClass = temp.resolve("target/classes/sample/Main.class");
     Files.delete(mainClass);
     BuildEngine.build(project);
     assertTrue(Files.isRegularFile(mainClass), "missing classes should be recompiled");
     assertArrayEquals(repeatBuild, Files.readAllBytes(artifact));
+    assertArrayEquals(repeatFatBuild, Files.readAllBytes(fatArtifact));
 
     Files.writeString(artifact, "damaged artifact");
     BuildEngine.build(project);
     assertArrayEquals(
         repeatBuild, Files.readAllBytes(artifact), "a damaged JAR should be repackaged");
+    assertArrayEquals(repeatFatBuild, Files.readAllBytes(fatArtifact));
 
     Files.writeString(
         source,
@@ -417,6 +425,9 @@ class BuildEngineTest {
                     .formatHex(
                         MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(artifact)))),
         "changed source should change the artifact");
+    assertTrue(
+        !java.util.Arrays.equals(repeatFatBuild, Files.readAllBytes(fatArtifact)),
+        "changed source should change the executable fat JAR");
   }
 
   @Test
@@ -549,6 +560,13 @@ class BuildEngineTest {
         Files.copy(file, jar);
         jar.closeEntry();
       }
+      jar.putNextEntry(new JarEntry("META-INF/services/sample.Service"));
+      jar.write(
+          "sample.external.ExternalProvider\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      jar.closeEntry();
+      jar.putNextEntry(new JarEntry("META-INF/versions/9/module-info.class"));
+      jar.write(new byte[] {0, 1, 2, 3});
+      jar.closeEntry();
     }
     Path dependencyPom = repository.resolve(external.pomPath());
     Files.createDirectories(dependencyPom.getParent());
@@ -571,6 +589,10 @@ class BuildEngineTest {
             public static void main(String[] args) { System.out.println(External.message()); }
         }
         """);
+    Files.createDirectories(temp.resolve("src/main/resources/META-INF/services"));
+    Files.writeString(
+        temp.resolve("src/main/resources/META-INF/services/sample.Service"),
+        "sample.project.ProjectProvider\n");
     Files.writeString(
         temp.resolve("jot.toml"),
         """
@@ -578,6 +600,7 @@ class BuildEngineTest {
         name = "with-external"
         version = "1.0.0"
         main-class = "sample.Main"
+        layout = "maven"
         [toolchains]
         java = "27"
         [dependencies]
@@ -591,6 +614,28 @@ class BuildEngineTest {
     BuildEngine.run(project, List.of(), resolver);
 
     assertTrue(Files.isRegularFile(temp.resolve("target/with-external-1.0.0.jar")));
+    Path fatJar = temp.resolve("target/bin/with-external.jar");
+    try (JarFile archive = new JarFile(fatJar.toFile())) {
+      assertEquals("sample.Main", archive.getManifest().getMainAttributes().getValue("Main-Class"));
+      assertTrue(archive.getEntry("sample/Main.class") != null);
+      assertTrue(archive.getEntry("sample/external/External.class") != null);
+      assertTrue(archive.getEntry("META-INF/versions/9/module-info.class") == null);
+      assertEquals(
+          "sample.external.ExternalProvider\nsample.project.ProjectProvider\n",
+          new String(
+              archive
+                  .getInputStream(archive.getEntry("META-INF/services/sample.Service"))
+                  .readAllBytes(),
+              java.nio.charset.StandardCharsets.UTF_8));
+    }
+    Path java = Path.of(System.getProperty("java.home"), "bin", "java");
+    Process process =
+        new ProcessBuilder(java.toString(), "-jar", fatJar.toString())
+            .redirectErrorStream(true)
+            .start();
+    String output = new String(process.getInputStream().readAllBytes());
+    assertEquals(0, process.waitFor(), output);
+    assertTrue(output.contains("maven-ok"));
   }
 
   @Test
