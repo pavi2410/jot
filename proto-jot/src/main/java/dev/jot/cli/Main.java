@@ -87,7 +87,8 @@ public final class Main {
       String name = init.name();
       if (name == null) name = inferredProjectName(destination);
       Path created =
-          ProjectInitializer.initialize(destination, name, init.template(), init.packageName());
+          ProjectInitializer.initialize(
+              destination, name, init.template(), init.group(), init.packageName());
       System.out.println(
           "init: created "
               + (init.template() == null ? "app" : init.template())

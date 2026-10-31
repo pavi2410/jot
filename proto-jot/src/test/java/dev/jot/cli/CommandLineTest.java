@@ -294,13 +294,22 @@ class CommandLineTest {
     CommandLine parsed =
         CommandLineParser.parse(
             new String[] {
-              "init", "sample-app", "--template", "library", "--package", "dev.sample"
+              "init",
+              "sample-app",
+              "--template",
+              "library",
+              "--group",
+              "org.sample",
+              "--package",
+              "dev.sample"
             });
 
     CommandLine.Init init = assertInstanceOf(CommandLine.Init.class, parsed.command());
     assertEquals("sample-app", init.name());
     assertEquals("library", init.template());
+    assertEquals("org.sample", init.group());
     assertEquals("dev.sample", init.packageName());
+    assertEquals("unknown argument: --group", parseError("build", "--group", "org.sample"));
   }
 
   @Test

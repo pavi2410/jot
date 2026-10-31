@@ -44,8 +44,24 @@ class ProjectInitializerTest {
     ProjectConfig config = ProjectConfig.read(root.resolve("jot.toml"), null);
 
     assertEquals("", config.mainClass());
-    assertTrue(Files.isRegularFile(root.resolve("src/app/greetings/Greeting.java")));
+    assertTrue(Files.isRegularFile(root.resolve("src/com/example/Greeting.java")));
     assertTrue(Files.readString(root.resolve("jot.toml")).contains("java = \"27\""));
+  }
+
+  @Test
+  void createsAJavaCliTemplateWithGroupPackageAndPicocli() throws Exception {
+    Path root =
+        ProjectInitializer.initialize(
+            temp.resolve("sample-cli"), "sample-cli", "java-cli", "org.example.tools", null);
+    String manifest = Files.readString(root.resolve("jot.toml"));
+    String source = Files.readString(root.resolve("src/org/example/tools/Main.java"));
+
+    assertTrue(manifest.contains("group = \"org.example.tools\""));
+    assertTrue(manifest.contains("picocli = \"info.picocli:picocli:4.7.6\""));
+    assertTrue(source.contains("import picocli.CommandLine;"));
+    assertTrue(source.contains("--name"));
+    ProjectConfig config = ProjectConfig.read(root.resolve("jot.toml"), null);
+    assertTrue(config.dependencies().containsKey("picocli"));
   }
 
   @Test

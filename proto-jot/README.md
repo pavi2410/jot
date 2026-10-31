@@ -32,9 +32,11 @@ The prototype supports `init`, `build`, `run`, `test`, `bench`, `fmt`, `lint`, `
 `add`, `remove`, `deps`, `outdated`, `resolve`, `tree`, `toolchain`, `lock`, `audit`, and
 `clean`, and accepts `--project`, `--module`, and global `--offline`. `jot clean --global`
 clears managed JDK downloads and Maven artifact caches while preserving other files in `~/.jot`.
-`jot init [name]` creates a Jot-native
-Java app; `--template library` creates a library, and `--package` sets its Java
-package. Build source directories, resource
+`jot init [name]` creates a Jot-native Java app; `--template java-lib` creates a
+library, and `--template java-cli` creates a Picocli command-line app. The `app`,
+`library`, `minimal`, and `cli` template names remain accepted as aliases. `--group`
+sets the project group and default Java package; `--package` overrides the package.
+Build source directories, resource
 directories, and the Java release are read from `jot.toml`. A Jot manifest may
 select `project.layout = "maven"` for familiar Java source, resource, and test
 paths; this only selects directory defaults and does not import a `pom.xml`.

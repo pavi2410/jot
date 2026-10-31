@@ -50,7 +50,7 @@ record CommandLine(
 
   record Clean(boolean global) implements Command {}
 
-  record Init(String name, String template, String packageName) implements Command {}
+  record Init(String name, String template, String group, String packageName) implements Command {}
 
   record Tree(String module, String coordinate, int depth, boolean workspace) implements Command {}
 

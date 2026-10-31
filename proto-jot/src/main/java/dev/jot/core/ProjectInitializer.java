@@ -17,18 +17,23 @@ public final class ProjectInitializer {
 
   public static Path initialize(Path destination, String name, String template, String packageName)
       throws IOException {
+    return initialize(destination, name, template, null, packageName);
+  }
+
+  public static Path initialize(
+      Path destination, String name, String template, String group, String packageName)
+      throws IOException {
     Path root = destination.toAbsolutePath().normalize();
-    String selectedTemplate = template == null ? "app" : template;
-    if (!selectedTemplate.equals("app") && !selectedTemplate.equals("library")) {
-      throw new IllegalArgumentException("template must be `app` or `library`");
-    }
+    String selectedTemplate = normalizeTemplate(template);
     validateProjectName(name);
-    String javaPackage = packageName == null ? defaultPackage(name) : packageName;
+    String javaGroup = group == null ? "com.example" : group;
+    validatePackage(javaGroup);
+    String javaPackage = packageName == null ? javaGroup : packageName;
     validatePackage(javaPackage);
 
     String packagePath = javaPackage.replace('.', '/');
-    String className = selectedTemplate.equals("app") ? "Main" : "Greeting";
-    String projectToml = projectManifest(name, selectedTemplate, javaPackage);
+    String className = selectedTemplate.equals("java-lib") ? "Greeting" : "Main";
+    String projectToml = projectManifest(name, selectedTemplate, javaGroup, javaPackage);
     String source = sourceFile(selectedTemplate, javaPackage, className);
     String test = testFile(javaPackage, className, selectedTemplate);
     List<FileContent> files =
@@ -55,7 +60,19 @@ public final class ProjectInitializer {
     return root;
   }
 
-  private static String projectManifest(String name, String template, String javaPackage) {
+  private static String normalizeTemplate(String template) {
+    return switch (template == null ? "java-minimal" : template) {
+      case "app", "minimal", "java-minimal" -> "java-minimal";
+      case "library", "lib", "java-lib" -> "java-lib";
+      case "cli", "java-cli" -> "java-cli";
+      default ->
+          throw new IllegalArgumentException(
+              "template must be `java-minimal`, `java-lib`, or `java-cli`");
+    };
+  }
+
+  private static String projectManifest(
+      String name, String template, String group, String javaPackage) {
     StringBuilder manifest =
         new StringBuilder(
             """
@@ -64,7 +81,8 @@ public final class ProjectInitializer {
             version = "0.1.0"
             """
                 .formatted(name));
-    if (template.equals("app")) {
+    manifest.append("group = \"").append(group).append("\"\n");
+    if (!template.equals("java-lib")) {
       manifest.append("main-class = \"").append(javaPackage).append(".Main\"\n");
     }
     manifest.append(
@@ -84,11 +102,43 @@ public final class ProjectInitializer {
         """
             .formatted(JUNIT));
     manifest.append("junit-console = \"").append(JUNIT_CONSOLE).append("\"\n");
+    if (template.equals("java-cli")) {
+      manifest.append("\n[dependencies]\npicocli = \"info.picocli:picocli:4.7.6\"\n");
+    }
     return manifest.toString();
   }
 
   private static String sourceFile(String template, String javaPackage, String className) {
-    if (template.equals("app")) {
+    if (template.equals("java-cli")) {
+      return """
+      package %s;
+
+      import picocli.CommandLine;
+      import picocli.CommandLine.Command;
+      import picocli.CommandLine.Option;
+
+      @Command(name = "%s", mixinStandardHelpOptions = true, version = "1.0")
+      public final class Main implements Runnable {
+          @Option(names = {"-n", "--name"}, description = "Name to greet", defaultValue = "world")
+          private String name;
+
+          public static String greeting(String value) {
+              return "Hello, " + value + "!";
+          }
+
+          @Override
+          public void run() {
+              System.out.println(greeting(name));
+          }
+
+          public static void main(String[] args) {
+              System.exit(new CommandLine(new Main()).execute(args));
+          }
+      }
+      """
+          .formatted(javaPackage, className.toLowerCase(Locale.ROOT));
+    }
+    if (!template.equals("java-lib")) {
       return """
       package %s;
 
@@ -122,7 +172,7 @@ public final class ProjectInitializer {
   }
 
   private static String testFile(String javaPackage, String className, String template) {
-    String method = template.equals("app") ? "greeting" : "message";
+    String method = template.equals("java-lib") ? "message" : "greeting";
     return """
     package %s;
 
@@ -152,7 +202,7 @@ public final class ProjectInitializer {
     %s
     ```
     """
-        .formatted(name, template, template.equals("app") ? "jot run -- Java" : "");
+        .formatted(name, template, template.equals("java-lib") ? "" : "jot run -- Java");
   }
 
   private static String defaultPackage(String name) {
