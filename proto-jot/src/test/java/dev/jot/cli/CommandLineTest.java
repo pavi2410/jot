@@ -2,6 +2,7 @@ package dev.jot.cli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
@@ -79,6 +80,15 @@ class CommandLineTest {
     assertEquals(4, lock.depth());
     assertEquals("build/custom.lock", lock.output());
     assertEquals("--depth needs a non-negative integer", parseError("lock", "--depth", "-1"));
+  }
+
+  @Test
+  void adHocLockDoesNotRequireAProjectManifest() {
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class, () -> Main.execute(new String[] {"lock", "bad"}));
+
+    assertTrue(error.getMessage().startsWith("expected group:artifact:version"));
   }
 
   @Test

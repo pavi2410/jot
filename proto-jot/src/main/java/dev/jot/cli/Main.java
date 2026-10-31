@@ -51,7 +51,7 @@ public final class Main {
     return name;
   }
 
-  private static void execute(String[] rawArguments) throws Exception {
+  static void execute(String[] rawArguments) throws Exception {
     CommandLine commandLine = CommandLineParser.parse(rawArguments);
     if (commandLine.help()) {
       help();
@@ -167,6 +167,15 @@ public final class Main {
       return;
     }
 
+    if (commandLine.command() instanceof CommandLine.Lock lock && !lock.dependencies().isEmpty()) {
+      Path outputRoot =
+          commandLine.projectRoot() == null
+              ? Path.of("").toAbsolutePath().normalize()
+              : commandLine.projectRoot();
+      lockCoordinates(outputRoot, lock, newResolver(commandLine.offline()));
+      return;
+    }
+
     Path projectRoot = commandLine.projectRoot();
     if (projectRoot == null) projectRoot = findProjectRoot(Path.of("").toAbsolutePath());
     ProjectConfig config = ProjectConfig.read(projectRoot.resolve("jot.toml"), null);
@@ -174,11 +183,7 @@ public final class Main {
         config.isWorkspace()
             ? ProjectWorkspace.load(projectRoot, config)
             : ProjectWorkspace.loadProject(projectRoot, config);
-    MavenResolver resolver =
-        new MavenResolver(
-            Path.of(System.getProperty("user.home"), ".jot", "java-maven-cache"),
-            MavenResolver.defaultRepository(),
-            commandLine.offline());
+    MavenResolver resolver = newResolver(commandLine.offline());
     switch (commandLine.command()) {
       case CommandLine.Build build -> build(config, workspace, build.module(), resolver);
       case CommandLine.Run run -> run(config, workspace, run.module(), run.arguments(), resolver);
@@ -218,6 +223,12 @@ public final class Main {
       BuildEngine.lock(workspace, output, resolver, command.depth());
       return;
     }
+    lockCoordinates(projectRoot, command, resolver);
+  }
+
+  private static void lockCoordinates(
+      Path projectRoot, CommandLine.Lock command, MavenResolver resolver) throws Exception {
+    Path output = projectRoot.resolve(command.output()).normalize();
     java.util.Map<String, String> roots = new java.util.LinkedHashMap<>();
     for (int index = 0; index < command.dependencies().size(); index++) {
       roots.put("dependency-" + index, command.dependencies().get(index));
@@ -225,6 +236,13 @@ public final class Main {
     List<MavenResolver.ResolvedArtifact> resolved = resolver.resolve(roots, command.depth());
     dev.jot.core.resolve.Lockfile.create(roots.values(), resolved).write(output);
     System.out.println("lock: wrote " + output);
+  }
+
+  private static MavenResolver newResolver(boolean offline) {
+    return new MavenResolver(
+        Path.of(System.getProperty("user.home"), ".jot", "java-maven-cache"),
+        MavenResolver.defaultRepository(),
+        offline);
   }
 
   private static void addDependency(
