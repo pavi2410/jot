@@ -1,6 +1,7 @@
 package dev.jot.cli;
 
 import dev.jot.core.BuildEngine;
+import dev.jot.core.DependencyTree;
 import dev.jot.core.DependencyListing;
 import dev.jot.core.ProjectConfig;
 import dev.jot.core.ProjectInitializer;
@@ -70,6 +71,16 @@ public final class Main {
             System.out.println("init: created "
                     + (commandLine.template() == null ? "app" : commandLine.template())
                     + " project at " + created);
+            return;
+        }
+
+        if (commandLine.command().equals("tree")) {
+            MavenResolver resolver = new MavenResolver(
+                    Path.of(System.getProperty("user.home"), ".jot", "java-maven-cache"),
+                    MavenResolver.defaultRepository(), commandLine.offline());
+            List<MavenResolver.TreeEntry> entries = resolver.resolveDependencyTree(
+                    MavenCoordinate.parse(commandLine.dependencyCoordinate()), commandLine.treeDepth());
+            System.out.print(DependencyTree.render(entries));
             return;
         }
 
@@ -178,11 +189,12 @@ public final class Main {
 
     private static void help() {
         System.out.println("jot " + VERSION + " — a Java build tool");
-        System.out.println("Usage: jot <init|build|run|test|add|remove|deps|lock|clean> [options]");
+        System.out.println("Usage: jot <init|build|run|test|add|remove|deps|tree|lock|clean> [options]");
         System.out.println("       jot add <group:artifact:version> [--name <alias>] [--test]");
         System.out.println("       jot add --catalog <alias> [--name <dependency>] [--test]");
         System.out.println("       jot remove <alias> [--test]");
         System.out.println("       jot deps [--module <name>]");
+        System.out.println("       jot tree <group:artifact:version> [--depth <levels>] [--offline]");
         System.out.println("       jot init [name] [--template app|library] [--package java.package]");
         System.out.println("       jot <build|run|test|lock|clean> [--project <directory>] [--module <name>] [--offline]");
     }

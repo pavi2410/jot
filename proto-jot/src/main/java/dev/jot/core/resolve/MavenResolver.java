@@ -81,7 +81,7 @@ public final class MavenResolver {
             selected.put(moduleKey, new ResolvedArtifact(coordinate, jar));
             PomModel model = model(coordinate, new LinkedHashSet<>());
             for (PomDependency dependency : model.dependencies) {
-                if (!dependency.isRuntimeVisible()) continue;
+                if (!dependency.isRuntimeVisible() || dependency.optional) continue;
                 if (request.exclusions.stream().anyMatch(exclusion -> exclusion.matches(dependency))) continue;
                 Set<Exclusion> exclusions = new LinkedHashSet<>(request.exclusions);
                 exclusions.addAll(dependency.exclusions);
@@ -90,6 +90,49 @@ public final class MavenResolver {
         }
         return List.copyOf(selected.values());
     }
+
+    public List<TreeEntry> resolveDependencyTree(MavenCoordinate root, int maxDepth) throws Exception {
+        if (maxDepth < 0) throw new IllegalArgumentException("tree depth cannot be negative");
+        List<TreeEntry> entries = new ArrayList<>();
+        entries.add(new TreeEntry(0, root, "", false, null));
+        Set<String> ancestors = new LinkedHashSet<>();
+        ancestors.add(root.notation());
+        appendTree(root, 1, maxDepth, Set.of(), ancestors, entries);
+        return List.copyOf(entries);
+    }
+
+    private void appendTree(MavenCoordinate parent, int depth, int maxDepth,
+                            Set<Exclusion> inheritedExclusions, Set<String> ancestors,
+                            List<TreeEntry> entries) throws Exception {
+        if (depth > maxDepth) return;
+        for (PomDependency dependency : model(parent, new LinkedHashSet<>()).dependencies) {
+            MavenCoordinate coordinate = dependency.coordinate;
+            String note = null;
+            if (!dependency.isRuntimeVisible()) note = "scope omitted";
+            else if (inheritedExclusions.stream().anyMatch(exclusion -> exclusion.matches(coordinate))) {
+                note = "excluded";
+            } else if (dependency.optional && depth > 1) {
+                note = "optional omitted";
+            } else if (ancestors.contains(coordinate.notation())) {
+                note = "cycle detected";
+            }
+
+            entries.add(new TreeEntry(depth, coordinate, dependency.scope, dependency.optional, note));
+            if (note == null) {
+                Set<Exclusion> exclusions = new LinkedHashSet<>(inheritedExclusions);
+                exclusions.addAll(dependency.exclusions);
+                ancestors.add(coordinate.notation());
+                try {
+                    appendTree(coordinate, depth + 1, maxDepth, Set.copyOf(exclusions), ancestors, entries);
+                } finally {
+                    ancestors.remove(coordinate.notation());
+                }
+            }
+        }
+    }
+
+    public record TreeEntry(int depth, MavenCoordinate coordinate, String scope,
+                            boolean optional, String note) {}
 
     private Path resolveJar(MavenCoordinate coordinate) throws Exception {
         URI uri = repository.resolve(coordinate.repositoryPath("jar"));
@@ -187,8 +230,8 @@ public final class MavenResolver {
             if (scope.equals("test") || scope.equals("provided") || scope.equals("system")) return null;
             throw new IOException("no resolved version for Maven dependency " + group + ":" + artifact);
         }
-        String optional = text(element, "optional");
-        if ("true".equalsIgnoreCase(optional) || !type.equals("jar")) return null;
+        boolean optional = "true".equalsIgnoreCase(text(element, "optional"));
+        if (!type.equals("jar")) return null;
         Set<Exclusion> exclusions = new LinkedHashSet<>();
         for (Element exclusion : children(child(element, "exclusions"), "exclusion")) {
             String excludedGroup = text(exclusion, "groupId");
@@ -199,7 +242,7 @@ public final class MavenResolver {
             }
         }
         return new PomDependency(new MavenCoordinate(group, artifact, version, classifier),
-                scope, type, Set.copyOf(exclusions));
+                scope, type, optional, Set.copyOf(exclusions));
     }
 
     private byte[] fetch(URI uri, boolean required) throws IOException, InterruptedException {
@@ -348,7 +391,7 @@ public final class MavenResolver {
         }
     }
     private record PomDependency(MavenCoordinate coordinate, String scope, String type,
-                                 Set<Exclusion> exclusions) {
+                                 boolean optional, Set<Exclusion> exclusions) {
         boolean isRuntimeVisible() {
             return scope.equals("compile") || scope.equals("runtime");
         }

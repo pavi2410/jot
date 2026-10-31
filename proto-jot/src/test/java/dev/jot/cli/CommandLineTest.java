@@ -30,6 +30,20 @@ class CommandLineTest {
     }
 
     @Test
+    void parsesTreeCoordinateAndDepth() {
+        CommandLine parsed = CommandLine.parse(new String[] {
+                "tree", "org.example:library:1.2", "--depth", "3", "--offline"
+        });
+
+        assertEquals("tree", parsed.command());
+        assertEquals("org.example:library:1.2", parsed.dependencyCoordinate());
+        assertEquals(3, parsed.treeDepth());
+        assertTrue(parsed.offline());
+        assertEquals("tree needs a dependency coordinate", parseError("tree"));
+        assertEquals("--depth needs a non-negative integer", parseError("tree", "x:y:1", "--depth", "deep"));
+    }
+
+    @Test
     void parsesDependencyAddAndRemoveOptions() {
         CommandLine add = CommandLine.parse(new String[] {
                 "add", "org.example:annotations:1.0", "--name", "annotations", "--test"

@@ -1,6 +1,7 @@
 package dev.jot.core.resolve;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -61,6 +62,58 @@ class MavenResolverTest {
                         "sample:util:1.2.0", "sample:common:3.0.0"),
                 resolved.stream().map(result -> result.coordinate().notation()).toList());
         assertTrue(resolved.stream().allMatch(result -> Files.isRegularFile(result.jar())));
+    }
+
+    @Test
+    void rendersDependencyTreeWithDepthScopesAndOptionalMarkers() throws Exception {
+        Path repository = temp.resolve("tree-repository");
+        addArtifact(repository, "sample:root:1.0", """
+                <project><groupId>sample</groupId><artifactId>root</artifactId><version>1.0</version>
+                  <dependencies>
+                    <dependency><groupId>sample</groupId><artifactId>library</artifactId><version>1.0</version>
+                      <exclusions><exclusion><groupId>sample</groupId><artifactId>blocked</artifactId></exclusion></exclusions>
+                    </dependency>
+                    <dependency><groupId>sample</groupId><artifactId>child</artifactId><version>1.0</version></dependency>
+                    <dependency><groupId>sample</groupId><artifactId>provided</artifactId><version>1.0</version><scope>provided</scope></dependency>
+                    <dependency><groupId>sample</groupId><artifactId>optional</artifactId><version>1.0</version><optional>true</optional></dependency>
+                  </dependencies>
+                </project>
+                """);
+        addArtifact(repository, "sample:library:1.0", """
+                <project><groupId>sample</groupId><artifactId>library</artifactId><version>1.0</version>
+                  <dependencies>
+                    <dependency><groupId>sample</groupId><artifactId>child</artifactId><version>1.0</version><scope>runtime</scope></dependency>
+                    <dependency><groupId>sample</groupId><artifactId>blocked</artifactId><version>1.0</version></dependency>
+                  </dependencies>
+                </project>
+                """);
+        addArtifact(repository, "sample:child:1.0", "<project/>");
+        addArtifact(repository, "sample:provided:1.0", "<project/>");
+        addArtifact(repository, "sample:optional:1.0", "<project/>");
+        MavenResolver resolver = new MavenResolver(temp.resolve("tree-cache"), repository.toUri());
+
+        List<MavenResolver.TreeEntry> entries = resolver.resolveDependencyTree(
+                MavenCoordinate.parse("sample:root:1.0"), 2);
+
+        assertEquals(List.of("sample:root:1.0", "sample:library:1.0", "sample:child:1.0",
+                        "sample:blocked:1.0", "sample:child:1.0", "sample:provided:1.0", "sample:optional:1.0"),
+                entries.stream().map(entry -> entry.coordinate().notation()).toList());
+        assertEquals("excluded", entries.get(3).note());
+        assertNull(entries.get(4).note());
+        assertEquals("scope omitted", entries.get(5).note());
+        assertTrue(entries.get(6).optional());
+        assertEquals(List.of("sample:root:1.0", "sample:library:1.0", "sample:child:1.0", "sample:provided:1.0",
+                        "sample:optional:1.0"),
+                resolver.resolveDependencyTree(MavenCoordinate.parse("sample:root:1.0"), 1)
+                        .stream().map(entry -> entry.coordinate().notation()).toList());
+        assertEquals("sample:root:1.0" + System.lineSeparator()
+                        + "├── sample:library:1.0 [compile]" + System.lineSeparator()
+                        + "│   ├── sample:child:1.0 [runtime]" + System.lineSeparator()
+                        + "│   └── sample:blocked:1.0 [compile] excluded" + System.lineSeparator()
+                        + "├── sample:child:1.0 [compile]" + System.lineSeparator()
+                        + "├── sample:provided:1.0 [provided] scope omitted" + System.lineSeparator()
+                        + "└── sample:optional:1.0 [compile optional]" + System.lineSeparator(),
+                dev.jot.core.DependencyTree.render(entries));
     }
 
     @Test

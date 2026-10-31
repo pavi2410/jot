@@ -64,6 +64,8 @@ are not implemented yet.
 manifest content, then regenerate the lockfile. Catalog aliases resolve from
 the nearest `libs.versions.toml` up the project path.
 `jot deps [--module name]` lists each direct dependency, scope, and lock status.
+`jot tree group:artifact:version [--depth levels]` displays Maven transitive
+dependencies, marking omitted scopes, optional dependencies, and cycles.
 
 The Java CLI includes a `test` command that compiles configured test sources and
 runs JUnit Platform Console. The prototype's own tests run through that command:

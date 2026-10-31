@@ -8,7 +8,8 @@ import java.util.List;
 record CommandLine(String command, Path projectRoot, String module, List<String> runArguments,
                    boolean help, boolean version, boolean offline, String projectName,
                    String template, String packageName, String dependencyCoordinate,
-                   String dependencyName, String dependencyCatalog, boolean testDependency) {
+                   String dependencyName, String dependencyCatalog, boolean testDependency,
+                   int treeDepth) {
     static CommandLine parse(String[] arguments) {
         Arguments input = new Arguments(arguments);
         if (!input.hasNext()) return helpCommand();
@@ -49,12 +50,12 @@ record CommandLine(String command, Path projectRoot, String module, List<String>
 
     private static CommandLine helpCommand() {
         return new CommandLine("", null, null, List.of(), true, false, false,
-                null, null, null, null, null, null, false);
+                null, null, null, null, null, null, false, 0);
     }
 
     private static CommandLine versionCommand() {
         return new CommandLine("", null, null, List.of(), false, true, false,
-                null, null, null, null, null, null, false);
+                null, null, null, null, null, null, false, 0);
     }
 
     private static final class Options {
@@ -70,6 +71,7 @@ record CommandLine(String command, Path projectRoot, String module, List<String>
         private String dependencyCatalog;
         private boolean offline;
         private boolean testDependency;
+        private int treeDepth = 8;
 
         private Options(String command, boolean offline) {
             this.command = command;
@@ -80,6 +82,15 @@ record CommandLine(String command, Path projectRoot, String module, List<String>
             switch (option) {
                 case "--project" -> projectRoot = Path.of(input.value(option)).toAbsolutePath().normalize();
                 case "--module" -> module = input.value(option);
+                case "--depth" -> {
+                    require(command.equals("tree"), option);
+                    try {
+                        treeDepth = Integer.parseInt(input.value(option));
+                    } catch (NumberFormatException error) {
+                        throw new IllegalArgumentException("--depth needs a non-negative integer");
+                    }
+                    if (treeDepth < 0) throw new IllegalArgumentException("--depth needs a non-negative integer");
+                }
                 case "--offline" -> offline = true;
                 case "--test" -> {
                     require(command.equals("add") || command.equals("remove"), option);
@@ -121,6 +132,12 @@ record CommandLine(String command, Path projectRoot, String module, List<String>
                     if (dependencyName != null) throw new IllegalArgumentException("remove accepts one dependency name");
                     dependencyName = value;
                 }
+                case "tree" -> {
+                    if (dependencyCoordinate != null) {
+                        throw new IllegalArgumentException("tree accepts one dependency coordinate");
+                    }
+                    dependencyCoordinate = value;
+                }
                 default -> throw new IllegalArgumentException("unknown argument: " + value);
             }
         }
@@ -135,12 +152,15 @@ record CommandLine(String command, Path projectRoot, String module, List<String>
             if (command.equals("remove") && dependencyName == null) {
                 throw new IllegalArgumentException("remove needs a dependency name");
             }
+            if (command.equals("tree") && dependencyCoordinate == null) {
+                throw new IllegalArgumentException("tree needs a dependency coordinate");
+            }
         }
 
         private CommandLine toCommandLine() {
             return new CommandLine(command, projectRoot, module, List.copyOf(runArguments),
                     false, false, offline, projectName, template, packageName,
-                    dependencyCoordinate, dependencyName, dependencyCatalog, testDependency);
+                    dependencyCoordinate, dependencyName, dependencyCatalog, testDependency, treeDepth);
         }
 
         private static void require(boolean condition, String option) {
