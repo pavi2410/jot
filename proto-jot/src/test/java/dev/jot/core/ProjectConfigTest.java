@@ -29,6 +29,31 @@ class ProjectConfigTest {
     assertEquals(List.of("src/main/java"), config.sourceDirectories());
     assertEquals(List.of("src/main/resources"), config.resourceDirectories());
     assertEquals(List.of("src/test/java"), config.testSourceDirectories());
+    assertEquals(List.of("src/bench/java"), config.benchmarks().sourceDirectories());
+    assertEquals("1.37", config.benchmarks().jmhVersion());
+  }
+
+  @Test
+  void readsConfiguredJmhVersionSourcesAndDependencies() throws Exception {
+    Path manifest = temp.resolve("jot.toml");
+    Files.writeString(
+        manifest,
+        """
+        [project]
+        name = "bench-config"
+        [toolchains]
+        java = "27"
+        [bench]
+        jmh-version = "1.38"
+        source-dirs = ["benchmarks/java"]
+        deps = ["org.example:fixture:1.0"]
+        """);
+
+    BenchmarkConfig bench = ProjectConfig.read(manifest, null).benchmarks();
+
+    assertEquals("1.38", bench.jmhVersion());
+    assertEquals(List.of("benchmarks/java"), bench.sourceDirectories());
+    assertEquals(List.of("org.example:fixture:1.0"), bench.dependencies());
   }
 
   @Test

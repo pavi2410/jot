@@ -293,6 +293,21 @@ public final class BuildEngine {
         declarations.putIfAbsent(
             "java-formatter-" + project.config().javaFormatter(), project.config().javaFormatter());
       }
+      if (!collectSources(project.root(), project.config().benchmarks().sourceDirectories())
+          .isEmpty()) {
+        String jmhVersion = project.config().benchmarks().jmhVersion();
+        declarations.put("jmh-core-" + project.name(), "org.openjdk.jmh:jmh-core:" + jmhVersion);
+        declarations.put(
+            "jmh-generator-annprocess-" + project.name(),
+            "org.openjdk.jmh:jmh-generator-annprocess:" + jmhVersion);
+        for (int benchIndex = 0;
+            benchIndex < project.config().benchmarks().dependencies().size();
+            benchIndex++) {
+          declarations.put(
+              "bench-" + project.name() + "-" + benchIndex,
+              project.config().benchmarks().dependencies().get(benchIndex));
+        }
+      }
     }
     List<MavenResolver.ResolvedArtifact> resolved = resolver.resolve(declarations);
     Lockfile.create(declarations.values(), resolved).write(lockPath);
@@ -367,6 +382,103 @@ public final class BuildEngine {
                 "--fail-if-no-tests",
                 "--disable-ansi-colors"));
     runProcess(root, runner);
+  }
+
+  public static boolean bench(
+      WorkspaceProject project,
+      MavenResolver resolver,
+      String filter,
+      int forks,
+      Integer warmup,
+      Integer iterations)
+      throws Exception {
+    build(project, resolver);
+    Path root = project.root();
+    ProjectConfig config = project.config();
+    List<Path> sources = collectSources(root, config.benchmarks().sourceDirectories());
+    if (sources.isEmpty()) {
+      System.out.println("bench: no benchmark sources found for " + config.name());
+      return false;
+    }
+
+    java.util.Map<String, String> benchmarkCoordinates = new java.util.LinkedHashMap<>();
+    java.util.Map<String, String> allCoordinates = new java.util.LinkedHashMap<>();
+    List<WorkspaceProject> dependencyProjects = new ArrayList<>(transitiveDependencies(project));
+    dependencyProjects.add(project);
+    int dependencyIndex = 0;
+    for (WorkspaceProject dependencyProject : dependencyProjects) {
+      for (String coordinate : dependencyProject.config().dependencies().values()) {
+        allCoordinates.put("dependency-" + dependencyIndex++, coordinate);
+      }
+    }
+    benchmarkCoordinates.put(
+        "jmh-core", "org.openjdk.jmh:jmh-core:" + config.benchmarks().jmhVersion());
+    benchmarkCoordinates.put(
+        "jmh-generator-annprocess",
+        "org.openjdk.jmh:jmh-generator-annprocess:" + config.benchmarks().jmhVersion());
+    for (int index = 0; index < config.benchmarks().dependencies().size(); index++) {
+      benchmarkCoordinates.put("benchmark-" + index, config.benchmarks().dependencies().get(index));
+    }
+    allCoordinates.putAll(benchmarkCoordinates);
+    List<MavenResolver.ResolvedArtifact> benchmarkDependencies = resolver.resolve(allCoordinates);
+    Path lockPath = findLockfile(root);
+    if (lockPath != null) {
+      Lockfile.read(lockPath).verify(allCoordinates.values(), benchmarkDependencies);
+    }
+    if (benchmarkDependencies.stream()
+        .noneMatch(
+            artifact -> artifact.coordinate().artifact().equals("jmh-generator-annprocess"))) {
+      throw new IllegalStateException("JMH annotation processor was not resolved");
+    }
+
+    Path target = root.resolve("target");
+    Path classes = target.resolve("bench-classes");
+    Path generated = target.resolve("generated-bench-sources");
+    deleteTree(classes);
+    deleteTree(generated);
+    Files.createDirectories(classes);
+    Files.createDirectories(generated);
+    List<String> classpathEntries = new ArrayList<>();
+    classpathEntries.add(root.resolve(config.outputDirectory()).toString());
+    String mainClasspath = classpath(project, benchmarkDependencies);
+    if (!mainClasspath.isBlank()) classpathEntries.add(mainClasspath);
+    String joinedClasspath = String.join(System.getProperty("path.separator"), classpathEntries);
+    Path javaHome = JavaToolchain.javaHome(config.javaVersion());
+    List<String> compile =
+        new ArrayList<>(
+            List.of(
+                jdkTool(javaHome, "javac"),
+                "--release",
+                config.javaVersion(),
+                "-classpath",
+                joinedClasspath,
+                "-processorpath",
+                String.join(
+                    System.getProperty("path.separator"),
+                    benchmarkDependencies.stream().map(item -> item.jar().toString()).toList()),
+                "-d",
+                classes.toString(),
+                "-s",
+                generated.toString()));
+    sources.forEach(source -> compile.add(source.toString()));
+    runProcess(root, compile);
+
+    List<String> runtimeClasspath = new ArrayList<>();
+    runtimeClasspath.add(classes.toString());
+    runtimeClasspath.addAll(classpathEntries);
+    List<String> run =
+        new ArrayList<>(
+            List.of(
+                jdkTool(javaHome, "java"),
+                "-cp",
+                String.join(System.getProperty("path.separator"), runtimeClasspath),
+                "org.openjdk.jmh.Main"));
+    if (filter != null) run.add(filter);
+    run.addAll(List.of("-f", Integer.toString(forks)));
+    if (warmup != null) run.addAll(List.of("-wi", warmup.toString()));
+    if (iterations != null) run.addAll(List.of("-i", iterations.toString()));
+    runProcess(root, run);
+    return true;
   }
 
   private static String compileFingerprint(

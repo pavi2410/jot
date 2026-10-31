@@ -28,7 +28,7 @@ java -jar target/bin/jot-java.jar build
 java -jar target/bin/jot-java.jar run -- --version
 ```
 
-The prototype supports `init`, `build`, `run`, `test`, `fmt`, `lint`, `doc`,
+The prototype supports `init`, `build`, `run`, `test`, `bench`, `fmt`, `lint`, `doc`,
 `add`, `remove`, `deps`, `outdated`, `resolve`, `tree`, `toolchain`, `lock`, and
 `clean`, and accepts `--project`, `--module`, and global `--offline`.
 `jot init [name]` creates a Jot-native
@@ -59,8 +59,9 @@ compiler and classpath changes trigger a full project compile.
 The Java CLI resolves pinned Maven coordinates and their compile/runtime
 transitive dependencies from POMs, checking repository SHA-256 sidecars when
 available. `jot lock` writes the shared version 1 `jot.lock` format with
-dependency roots and artifact SHA-256 hashes. Builds and tests validate locked
-artifacts, while `--offline` restricts resolution to the local cache. It caches
+dependency roots and artifact SHA-256 hashes. Builds, tests, and benchmarks
+validate their locked artifacts; projects with benchmark sources lock JMH
+artifacts too. `--offline` restricts resolution to the local cache. It caches
 downloads under `~/.jot/java-maven-cache`. Version ranges, snapshots, and Kotlin
 are not implemented yet.
 
@@ -79,6 +80,11 @@ selected module's external dependency tree.
 `--deps` lists its effective direct dependencies.
 `jot doc [--module name]` generates Java API documentation under `target/docs`.
 `jot lint [--module name]` runs `javac -Xlint:all` and reports Java compiler warnings.
+`jot bench [filter]` compiles the configured benchmark source set with JMH's annotation
+processor and runs it; Maven-layout projects default to `src/bench/java`, and other
+projects default to `bench`. Configure `bench.jmh-version`, `bench.source-dirs`, and
+`bench.deps` in `jot.toml`; `--forks`, `--warmup`, and `--iterations` tune a run.
+`examples/tiny-bench` is a runnable JMH example.
 Configure a pinned formatter with `[format] java = "group:artifact:version"` and
 `style = "google"` or `"aosp"`; `jot fmt` formats main and test sources, while
 `jot fmt --check` verifies them without writing changes. Formatter artifacts are

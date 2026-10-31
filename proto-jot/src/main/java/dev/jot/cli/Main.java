@@ -180,6 +180,7 @@ public final class Main {
           System.out.print(
               DependencyListing.renderOutdated(
                   config, workspace, outdated.module(), projectRoot.resolve("jot.lock"), resolver));
+      case CommandLine.Bench bench -> bench(config, workspace, bench, resolver);
       case CommandLine.Add add -> addDependency(projectRoot, add, resolver);
       case CommandLine.Remove remove -> removeDependency(projectRoot, remove, resolver);
       case CommandLine.Lock ignored ->
@@ -234,6 +235,36 @@ public final class Main {
             : ProjectWorkspace.loadProject(projectRoot, updatedConfig);
     BuildEngine.lock(updatedWorkspace, projectRoot.resolve("jot.lock"), resolver);
     System.out.println("remove: " + name + " from " + manifest);
+  }
+
+  private static void bench(
+      ProjectConfig config,
+      ProjectWorkspace workspace,
+      CommandLine.Bench options,
+      MavenResolver resolver)
+      throws Exception {
+    if (!config.isWorkspace() && options.module() != null) {
+      throw new IllegalArgumentException("--module requires a workspace");
+    }
+    List<WorkspaceProject> projects =
+        options.module() == null && config.isWorkspace()
+            ? workspace.ordered()
+            : List.of(workspace.find(options.module() == null ? config.name() : options.module()));
+    java.util.Set<Path> built = new java.util.HashSet<>();
+    for (WorkspaceProject project : projects) {
+      for (WorkspaceProject dependency : workspace.dependenciesFirst(project)) {
+        if (!dependency.root().equals(project.root()) && built.add(dependency.root())) {
+          BuildEngine.build(dependency, resolver);
+        }
+      }
+      BuildEngine.bench(
+          project,
+          resolver,
+          options.filter(),
+          options.forks(),
+          options.warmup(),
+          options.iterations());
+    }
   }
 
   private static void toolchain(CommandLine.Toolchain command, CommandLine globals)
@@ -422,11 +453,14 @@ public final class Main {
     System.out.println("jot " + VERSION + " — a Java build tool");
     System.out.println(
         "Usage: jot"
-            + " <init|build|run|test|doc|lint|fmt|add|remove|deps|outdated|resolve|tree|toolchain|lock|clean>"
+            + " <init|build|run|test|bench|doc|lint|fmt|add|remove|deps|outdated|resolve|tree|toolchain|lock|clean>"
             + " [options]");
     System.out.println("       jot add <group:artifact:version> [--name <alias>] [--test]");
     System.out.println("       jot add --catalog <alias> [--name <dependency>] [--test]");
     System.out.println("       jot remove <alias> [--test]");
+    System.out.println(
+        "       jot bench [filter] [--module <name>] [--forks <count>] [--warmup <count>]"
+            + " [--iterations <count>]");
     System.out.println("       jot deps [--module <name>]");
     System.out.println("       jot outdated [--module <name>] [--offline]");
     System.out.println("       jot tree <group:artifact:version> [--depth <levels>] [--offline]");

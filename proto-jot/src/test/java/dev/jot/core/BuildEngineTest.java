@@ -28,6 +28,29 @@ class BuildEngineTest {
   @TempDir Path temp;
 
   @Test
+  void skipsJmhResolutionWhenNoBenchmarkSourcesExist() throws Exception {
+    write(
+        "src/sample/App.java",
+        "package sample; public final class App { public static void main(String[] args) {} }\n");
+    write(
+        "jot.toml",
+        """
+        [project]
+        name = "no-benchmarks"
+        main-class = "sample.App"
+        [toolchains]
+        java = "27"
+        """);
+    ProjectConfig config = ProjectConfig.read(temp.resolve("jot.toml"), null);
+    WorkspaceProject project = new WorkspaceProject(temp, config, List.of());
+    MavenResolver resolver =
+        new MavenResolver(temp.resolve("cache"), MavenResolver.defaultRepository(), true);
+
+    assertFalse(BuildEngine.bench(project, resolver, null, 1, null, null));
+    assertTrue(Files.isRegularFile(temp.resolve("target/no-benchmarks-0.1.0.jar")));
+  }
+
+  @Test
   void generatesJavadocsForConfiguredSources() throws Exception {
     write(
         "src/sample/PublicApi.java",

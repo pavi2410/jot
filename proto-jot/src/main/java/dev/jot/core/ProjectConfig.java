@@ -24,7 +24,8 @@ public record ProjectConfig(
     Map<String, String> dependencies,
     Map<String, String> testDependencies,
     String javaFormatter,
-    String javaFormatterStyle) {
+    String javaFormatterStyle,
+    BenchmarkConfig benchmarks) {
   public boolean isWorkspace() {
     return !workspaceMembers.isEmpty();
   }
@@ -50,6 +51,8 @@ public record ProjectConfig(
         layout.equals("maven") ? java.util.List.of("src/test/java") : java.util.List.of("test");
     java.util.List<String> resourceDefaults =
         layout.equals("maven") ? java.util.List.of("src/main/resources") : java.util.List.of("res");
+    java.util.List<String> benchmarkDefaults =
+        layout.equals("maven") ? java.util.List.of("src/bench/java") : java.util.List.of("bench");
     Map<String, Object> catalog = loadVersionCatalog(file.toAbsolutePath().getParent());
     Map<String, String> pathDependencies = new TreeMap<>();
     Map<String, String> dependencies =
@@ -61,6 +64,11 @@ public record ProjectConfig(
     if (!formatterStyle.equals("google") && !formatterStyle.equals("aosp")) {
       throw new IllegalArgumentException("format.style must be `google` or `aosp` in " + file);
     }
+    BenchmarkConfig benchmarks =
+        new BenchmarkConfig(
+            document.string("bench.jmh-version", BenchmarkConfig.DEFAULT_JMH_VERSION),
+            document.stringList("bench.source-dirs", benchmarkDefaults),
+            document.stringList("bench.deps", java.util.List.of()));
     return new ProjectConfig(
         projectName,
         document.string("project.version", "0.1.0"),
@@ -76,7 +84,8 @@ public record ProjectConfig(
         Collections.unmodifiableMap(new TreeMap<>(dependencies)),
         Collections.unmodifiableMap(new TreeMap<>(testDependencies)),
         document.string("format.java", null),
-        formatterStyle);
+        formatterStyle,
+        benchmarks);
   }
 
   private static Map<String, String> parseDependencies(

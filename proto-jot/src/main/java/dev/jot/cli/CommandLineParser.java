@@ -102,6 +102,10 @@ final class CommandLineParser {
     private boolean workspacePin;
     private boolean resolveDependencies;
     private boolean formatCheck;
+    private String benchFilter;
+    private int benchForks = 1;
+    private Integer benchWarmup;
+    private Integer benchIterations;
 
     private Options(String command, boolean offline) {
       this.command = command;
@@ -114,6 +118,18 @@ final class CommandLineParser {
             projectRoot = Path.of(args.valueFor(option)).toAbsolutePath().normalize();
         case "--module" -> module = args.valueFor(option);
         case "--depth" -> parseDepth(args.valueFor(option));
+        case "--forks" -> {
+          require(command.equals("bench"), option);
+          benchForks = nonNegative(option, args.valueFor(option));
+        }
+        case "--warmup" -> {
+          require(command.equals("bench"), option);
+          benchWarmup = nonNegative(option, args.valueFor(option));
+        }
+        case "--iterations" -> {
+          require(command.equals("bench"), option);
+          benchIterations = nonNegative(option, args.valueFor(option));
+        }
         case "--check" -> {
           require(command.equals("fmt"), option);
           formatCheck = true;
@@ -166,6 +182,16 @@ final class CommandLineParser {
       if (treeDepth < 0) throw new IllegalArgumentException("--depth needs a non-negative integer");
     }
 
+    private static int nonNegative(String option, String value) {
+      try {
+        int parsed = Integer.parseInt(value);
+        if (parsed >= 0) return parsed;
+      } catch (NumberFormatException ignored) {
+        // Report the same actionable validation message for malformed and negative values.
+      }
+      throw new IllegalArgumentException(option + " needs a non-negative integer");
+    }
+
     private void parsePositional(String value) {
       switch (command) {
         case "init" -> projectName = once(projectName, value, "init accepts one project name");
@@ -178,6 +204,7 @@ final class CommandLineParser {
             dependencyCoordinate =
                 once(dependencyCoordinate, value, command + " accepts one dependency coordinate");
         case "toolchain" -> parseToolchainPositional(value);
+        case "bench" -> benchFilter = once(benchFilter, value, "bench accepts one filter");
         default -> throw new IllegalArgumentException("unknown argument: " + value);
       }
     }
@@ -218,6 +245,8 @@ final class CommandLineParser {
       }
       if (command.equals("resolve") && dependencyCoordinate == null)
         throw new IllegalArgumentException("resolve needs a dependency coordinate");
+      if (command.equals("bench") && benchFilter != null && benchFilter.isBlank())
+        throw new IllegalArgumentException("bench filter cannot be blank");
       if (!command.equals("toolchain")) return;
       if (toolchainAction == null)
         throw new IllegalArgumentException("toolchain needs list, pin, or install");
@@ -252,6 +281,9 @@ final class CommandLineParser {
             case "tree" ->
                 new CommandLine.Tree(module, dependencyCoordinate, treeDepth, treeWorkspace);
             case "resolve" -> new CommandLine.Resolve(dependencyCoordinate, resolveDependencies);
+            case "bench" ->
+                new CommandLine.Bench(
+                    benchFilter, module, benchForks, benchWarmup, benchIterations);
             case "toolchain" -> new CommandLine.Toolchain(toolchainAction());
             default -> throw new IllegalArgumentException("unknown command: " + command);
           };

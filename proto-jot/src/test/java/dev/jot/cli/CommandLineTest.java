@@ -214,6 +214,32 @@ class CommandLineTest {
   }
 
   @Test
+  void parsesBenchmarkFilterAndJmhOptions() {
+    CommandLine parsed =
+        CommandLineParser.parse(
+            new String[] {
+              "bench",
+              ".*Sort.*",
+              "--module",
+              "core",
+              "--forks",
+              "2",
+              "--warmup",
+              "3",
+              "--iterations",
+              "4"
+            });
+    CommandLine.Bench bench = assertInstanceOf(CommandLine.Bench.class, parsed.command());
+    assertEquals(".*Sort.*", bench.filter());
+    assertEquals("core", bench.module());
+    assertEquals(2, bench.forks());
+    assertEquals(3, bench.warmup());
+    assertEquals(4, bench.iterations());
+    assertEquals("--forks needs a non-negative integer", parseError("bench", "--forks", "-1"));
+    assertEquals("unknown argument: --forks", parseError("build", "--forks", "2"));
+  }
+
+  @Test
   void parsesDependencyAddAndRemoveOptions() {
     CommandLine.Add add =
         assertInstanceOf(

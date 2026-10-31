@@ -1,0 +1,35 @@
+version = 1
+
+[[roots]]
+group = "org.openjdk.jmh"
+artifact = "jmh-core"
+version = "1.37"
+
+[[roots]]
+group = "org.openjdk.jmh"
+artifact = "jmh-generator-annprocess"
+version = "1.37"
+
+[[package]]
+group = "net.sf.jopt-simple"
+artifact = "jopt-simple"
+version = "5.0.4"
+sha256 = "df26cc58f235f477db07f753ba5a3ab243ebe5789d9f89ecf68dd62ea9a66c28"
+
+[[package]]
+group = "org.apache.commons"
+artifact = "commons-math3"
+version = "3.6.1"
+sha256 = "1e56d7b058d28b65abd256b8458e3885b674c1d588fa43cd7d1cbb9c7ef2b308"
+
+[[package]]
+group = "org.openjdk.jmh"
+artifact = "jmh-core"
+version = "1.37"
+sha256 = "dc0eaf2bbf0036a70b60798c785d6e03a9daf06b68b8edb0f1ba9eb3421baeb3"
+
+[[package]]
+group = "org.openjdk.jmh"
+artifact = "jmh-generator-annprocess"
+version = "1.37"
+sha256 = "6a5604b5b804e0daca1145df1077609321687734a8b49387e49f10557c186c77"
