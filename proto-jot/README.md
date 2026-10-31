@@ -58,9 +58,11 @@ artifacts, while `--offline` restricts resolution to the local cache. It caches
 downloads under `~/.jot/java-maven-cache`. Version ranges, snapshots, and Kotlin
 are not implemented yet.
 
-`jot add group:artifact:version [--name alias] [--test]` and
+`jot add group:artifact:version [--name alias] [--test]` or
+`jot add --catalog alias [--name dependency] [--test]`, and
 `jot remove alias [--test]` edit dependency tables while retaining other
-manifest content, then regenerate the lockfile.
+manifest content, then regenerate the lockfile. Catalog aliases resolve from
+the nearest `libs.versions.toml` up the project path.
 
 The Java CLI includes a `test` command that compiles configured test sources and
 runs JUnit Platform Console. The prototype's own tests run through that command:

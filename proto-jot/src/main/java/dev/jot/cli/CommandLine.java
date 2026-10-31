@@ -8,7 +8,7 @@ import java.util.List;
 record CommandLine(String command, Path projectRoot, String module, List<String> runArguments,
                    boolean help, boolean version, boolean offline, String projectName,
                    String template, String packageName, String dependencyCoordinate,
-                   String dependencyName, boolean testDependency) {
+                   String dependencyName, String dependencyCatalog, boolean testDependency) {
     static CommandLine parse(String[] arguments) {
         if (arguments.length == 0) return helpCommand();
         int commandIndex = 0;
@@ -32,12 +32,12 @@ record CommandLine(String command, Path projectRoot, String module, List<String>
 
     private static CommandLine helpCommand() {
         return new CommandLine("", null, null, List.of(), true, false, false,
-                null, null, null, null, null, false);
+                null, null, null, null, null, null, false);
     }
 
     private static CommandLine versionCommand() {
         return new CommandLine("", null, null, List.of(), false, true, false,
-                null, null, null, null, null, false);
+                null, null, null, null, null, null, false);
     }
 
     private static final class Parser {
@@ -50,6 +50,7 @@ record CommandLine(String command, Path projectRoot, String module, List<String>
         private String packageName;
         private String dependencyCoordinate;
         private String dependencyName;
+        private String dependencyCatalog;
         private boolean offline;
         private boolean testDependency;
         private boolean applicationArguments;
@@ -70,15 +71,18 @@ record CommandLine(String command, Path projectRoot, String module, List<String>
                     i += parseOption(argument, arguments, i);
                 }
             }
-            if (command.equals("add") && dependencyCoordinate == null) {
-                throw new IllegalArgumentException("add needs a dependency coordinate");
+            if (command.equals("add") && dependencyCoordinate == null && dependencyCatalog == null) {
+                throw new IllegalArgumentException("add needs a coordinate or --catalog alias");
+            }
+            if (command.equals("add") && dependencyCoordinate != null && dependencyCatalog != null) {
+                throw new IllegalArgumentException("use either a dependency coordinate or --catalog");
             }
             if (command.equals("remove") && dependencyName == null) {
                 throw new IllegalArgumentException("remove needs a dependency name");
             }
             return new CommandLine(command, projectRoot, module, List.copyOf(runArguments),
                     false, false, offline, projectName, template, packageName,
-                    dependencyCoordinate, dependencyName, testDependency);
+                    dependencyCoordinate, dependencyName, dependencyCatalog, testDependency);
         }
 
         /** Returns the number of consumed value arguments. */
@@ -105,6 +109,11 @@ record CommandLine(String command, Path projectRoot, String module, List<String>
                 case "--name" -> {
                     if (!command.equals("add")) throw new IllegalArgumentException("unknown argument: " + argument);
                     dependencyName = valueAfter(argument, arguments, index);
+                    yield 1;
+                }
+                case "--catalog" -> {
+                    if (!command.equals("add")) throw new IllegalArgumentException("unknown argument: " + argument);
+                    dependencyCatalog = valueAfter(argument, arguments, index);
                     yield 1;
                 }
                 case "--template" -> {

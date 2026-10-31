@@ -65,6 +65,10 @@ public final class TomlDocument {
         return convertMap(value.toMap());
     }
 
+    public Map<String, Object> values() {
+        return convertMap(document.toMap());
+    }
+
     public List<Map<String, Object>> tableArray(String key) {
         TomlArray value = document.getArray(key);
         if (value == null) {

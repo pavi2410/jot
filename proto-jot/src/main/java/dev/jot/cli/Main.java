@@ -97,12 +97,18 @@ public final class Main {
 
     private static void addDependency(Path projectRoot, CommandLine commandLine,
                                       MavenResolver resolver) throws Exception {
-        MavenCoordinate coordinate = MavenCoordinate.parse(commandLine.dependencyCoordinate());
-        String name = commandLine.dependencyName() == null
-                ? coordinate.artifact() : commandLine.dependencyName();
+        MavenCoordinate coordinate = commandLine.dependencyCoordinate() == null ? null
+                : MavenCoordinate.parse(commandLine.dependencyCoordinate());
+        String name = commandLine.dependencyName() != null ? commandLine.dependencyName()
+                : coordinate == null ? commandLine.dependencyCatalog() : coordinate.artifact();
         Path manifest = projectRoot.resolve("jot.toml");
-        ManifestEditor.addDependency(manifest, name, coordinate.notation(),
-                commandLine.testDependency());
+        if (coordinate == null) {
+            ManifestEditor.addCatalogDependency(manifest, name, commandLine.dependencyCatalog(),
+                    commandLine.testDependency());
+        } else {
+            ManifestEditor.addDependency(manifest, name, coordinate.notation(),
+                    commandLine.testDependency());
+        }
         ProjectConfig updatedConfig = ProjectConfig.read(manifest, null);
         ProjectWorkspace updatedWorkspace = updatedConfig.isWorkspace()
                 ? ProjectWorkspace.load(projectRoot, updatedConfig)
@@ -171,6 +177,7 @@ public final class Main {
         System.out.println("jot " + VERSION + " — a Java build tool");
         System.out.println("Usage: jot <init|build|run|test|add|remove|lock|clean> [options]");
         System.out.println("       jot add <group:artifact:version> [--name <alias>] [--test]");
+        System.out.println("       jot add --catalog <alias> [--name <dependency>] [--test]");
         System.out.println("       jot remove <alias> [--test]");
         System.out.println("       jot init [name] [--template app|library] [--package java.package]");
         System.out.println("       jot <build|run|test|lock|clean> [--project <directory>] [--module <name>] [--offline]");

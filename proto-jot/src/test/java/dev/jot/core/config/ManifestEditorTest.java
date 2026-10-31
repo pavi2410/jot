@@ -57,4 +57,28 @@ class ManifestEditorTest {
         assertTrue(ManifestEditor.removeDependency(manifest, "local", false));
         assertTrue(ProjectConfig.read(manifest, null).pathDependencies().isEmpty());
     }
+
+    @Test
+    void writesCatalogReferencesAsTomlInlineTables() throws Exception {
+        Files.writeString(temp.resolve("libs.versions.toml"), """
+                [versions]
+                tomlj = "1.1.1"
+                [libraries]
+                tomlj = { module = "org.tomlj:tomlj", version.ref = "tomlj" }
+                """);
+        Path manifest = temp.resolve("jot.toml");
+        Files.writeString(manifest, """
+                [project]
+                name = "catalog-edit"
+                [toolchains]
+                java = "27"
+                """);
+
+        ManifestEditor.addCatalogDependency(manifest, "parser", "tomlj", true);
+
+        assertEquals("tomlj", ((java.util.Map<?, ?>) TomlDocument.read(manifest)
+                .table("test-dependencies").get("parser")).get("catalog"));
+        assertEquals("org.tomlj:tomlj:1.1.1",
+                ProjectConfig.read(manifest, null).testDependencies().get("parser"));
+    }
 }

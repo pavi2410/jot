@@ -41,6 +41,9 @@ class CommandLineTest {
         CommandLine remove = CommandLine.parse(new String[] {"remove", "annotations", "--test"});
         assertEquals("annotations", remove.dependencyName());
         assertTrue(remove.testDependency());
+
+        CommandLine catalog = CommandLine.parse(new String[] {"add", "--catalog", "junit"});
+        assertEquals("junit", catalog.dependencyCatalog());
     }
 
     @Test
@@ -65,6 +68,8 @@ class CommandLineTest {
     void rejectsMissingOptionValuesAndInitOptionsOnOtherCommands() {
         assertEquals("--project needs a value", parseError("build", "--project"));
         assertEquals("unknown argument: --template", parseError("build", "--template", "app"));
+        assertEquals("use either a dependency coordinate or --catalog",
+                parseError("add", "org.example:lib:1.0", "--catalog", "lib"));
     }
 
     private static String parseError(String... arguments) {

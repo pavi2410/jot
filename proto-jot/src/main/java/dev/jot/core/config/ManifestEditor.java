@@ -14,12 +14,22 @@ public final class ManifestEditor {
 
     public static void addDependency(Path manifest, String name, String coordinate, boolean test)
             throws IOException {
+        addDependencyValue(manifest, name, coordinate, test);
+    }
+
+    public static void addCatalogDependency(Path manifest, String name, String catalogAlias,
+                                            boolean test) throws IOException {
+        addDependencyValue(manifest, name, java.util.Map.of("catalog", catalogAlias), test);
+    }
+
+    private static void addDependencyValue(Path manifest, String name, Object value, boolean test)
+            throws IOException {
         if (name == null || name.isBlank()) throw new IllegalArgumentException("dependency name cannot be blank");
-        TomlDocument document = TomlDocument.read(manifest);
+        TomlDocument.read(manifest);
         String section = test ? "test-dependencies" : "dependencies";
         List<String> lines = new ArrayList<>(Files.readAllLines(manifest));
         removeEntry(lines, section, name);
-        insertEntry(lines, section, name, coordinate);
+        insertEntry(lines, section, name, value);
         writeValidated(manifest, String.join("\n", lines) + "\n");
     }
 
@@ -60,9 +70,8 @@ public final class ManifestEditor {
         return false;
     }
 
-    private static void insertEntry(List<String> lines, String section, String name,
-                                    String coordinate) {
-        String entry = TomlWriter.renderKey(name) + " = " + TomlWriter.renderValue(coordinate);
+    private static void insertEntry(List<String> lines, String section, String name, Object value) {
+        String entry = TomlWriter.renderKey(name) + " = " + TomlWriter.renderValue(value);
         int sectionStart = findSection(lines, section);
         if (sectionStart < 0) {
             while (!lines.isEmpty() && lines.getLast().isBlank()) lines.removeLast();

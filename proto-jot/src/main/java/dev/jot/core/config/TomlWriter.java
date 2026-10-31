@@ -44,6 +44,16 @@ public final class TomlWriter {
     public static String renderValue(Object value) {
         if (value instanceof String string) return "\"" + escape(string) + "\"";
         if (value instanceof Integer integer) return integer.toString();
+        if (value instanceof Map<?, ?> table) {
+            List<String> entries = new ArrayList<>();
+            for (Map.Entry<?, ?> entry : table.entrySet()) {
+                if (!(entry.getKey() instanceof String key)) {
+                    throw new IllegalArgumentException("TOML inline table keys must be strings");
+                }
+                entries.add(renderKey(key) + " = " + renderValue(entry.getValue()));
+            }
+            return "{ " + String.join(", ", entries) + " }";
+        }
         throw new IllegalArgumentException("unsupported TOML value type: " + value.getClass());
     }
 

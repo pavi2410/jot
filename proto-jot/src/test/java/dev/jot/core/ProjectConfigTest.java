@@ -48,4 +48,28 @@ class ProjectConfigTest {
         assertEquals("org.example:annotations:1.0", config.dependencies().get("annotations"));
         assertEquals("../local", config.pathDependencies().get("local"));
     }
+
+    @Test
+    void resolvesVersionCatalogAliasesFromWorkspaceRoot() throws Exception {
+        Files.writeString(temp.resolve("libs.versions.toml"), """
+                [versions]
+                logging = "2.0.16"
+                [libraries]
+                slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "logging" }
+                """);
+        Path manifest = temp.resolve("module/jot.toml");
+        Files.createDirectories(manifest.getParent());
+        Files.writeString(manifest, """
+                [project]
+                name = "catalog-consumer"
+                [toolchains]
+                java = "27"
+                [dependencies]
+                logging = { catalog = "slf4j-api" }
+                """);
+
+        ProjectConfig config = ProjectConfig.read(manifest, null);
+
+        assertEquals("org.slf4j:slf4j-api:2.0.16", config.dependencies().get("logging"));
+    }
 }
