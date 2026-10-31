@@ -30,22 +30,27 @@ java -jar target/bin/jot-java.jar build
 java -jar target/bin/jot-java.jar run -- --version
 ```
 
-The prototype supports `build`, `run`, and `clean`, and accepts `--project` and
-`--module`. Build source directories and the Java release are read from
+The prototype supports `build`, `run`, `test`, `lock`, and `clean`, and accepts
+`--project`, `--module`, and `--offline`. Build source directories and the Java release are read from
 `jot.toml`. Workspaces list their members explicitly and local dependencies use
 `{ path = "../module" }`. `examples/tiny-workspace` demonstrates a two-module
 build and run.
 
 The Java CLI resolves pinned Maven coordinates and their compile/runtime
 transitive dependencies from POMs, checking repository SHA-256 sidecars when
-available. It caches downloads under `~/.jot/java-maven-cache`. Version ranges,
+available. `jot lock` writes the shared version 1 `jot.lock` format with
+dependency roots and artifact SHA-256 hashes. Builds and tests validate locked
+artifacts, while `--offline` restricts resolution to the local cache. It caches
+downloads under `~/.jot/java-maven-cache`. Version ranges,
 snapshots, Kotlin, and the full TOML specification are not implemented yet.
 
 The Java CLI includes a `test` command that compiles configured test sources and
-runs JUnit Platform Console:
+runs JUnit Platform Console. The prototype's own tests run through that command:
 
 ```sh
 java -jar target/bin/jot-java.jar test
+java -jar target/bin/jot-java.jar lock
+java -jar target/bin/jot-java.jar test --offline
 ```
 
 The TOML reader currently handles the strings, string arrays, and path

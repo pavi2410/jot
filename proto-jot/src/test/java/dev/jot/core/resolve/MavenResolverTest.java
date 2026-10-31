@@ -79,6 +79,38 @@ class MavenResolverTest {
         assertTrue(error.getMessage().contains("SHA-256 mismatch"));
     }
 
+    @Test
+    void writesVerifiesAndUsesLockfileArtifactsOffline() throws Exception {
+        Path repository = temp.resolve("locked-repository");
+        Path cache = temp.resolve("locked-cache");
+        String notation = "sample:locked:1.0.0";
+        addArtifact(repository, notation, "<project/>");
+        MavenResolver online = new MavenResolver(cache, repository.toUri());
+        List<MavenResolver.ResolvedArtifact> resolved = online.resolve(Map.of("locked", notation));
+        Path lockPath = temp.resolve("jot.lock");
+        Lockfile.create(List.of(notation), resolved).write(lockPath);
+
+        Lockfile lock = Lockfile.read(lockPath);
+        lock.verify(List.of(notation), resolved);
+        assertEquals("sample:locked:1.0.0", lock.roots().getFirst().notation());
+        assertTrue(Files.readString(lockPath).contains("sha256 = \""));
+        IOException stale = assertThrows(IOException.class,
+                () -> lock.verify(List.of("sample:other:1.0.0"), resolved));
+        assertTrue(stale.getMessage().contains("out of date"));
+
+        MavenResolver offline = new MavenResolver(cache, repository.toUri(), true);
+        List<MavenResolver.ResolvedArtifact> cached = offline.resolve(Map.of("locked", notation));
+        lock.verify(List.of(notation), cached);
+
+        IOException missing = assertThrows(IOException.class,
+                () -> offline.resolve(Map.of("missing", "sample:missing:1.0.0")));
+        assertTrue(missing.getMessage().contains("offline mode"));
+        Files.writeString(cached.getFirst().jar(), "tampered");
+        IOException mismatch = assertThrows(IOException.class,
+                () -> lock.verify(List.of(notation), cached));
+        assertTrue(mismatch.getMessage().contains("checksum mismatch"));
+    }
+
     private void addArtifact(Path repository, String notation, String pomContents) throws Exception {
         MavenCoordinate coordinate = MavenCoordinate.parse(notation);
         Path pom = repository.resolve(coordinate.pomPath());

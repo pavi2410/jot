@@ -6,15 +6,15 @@ import java.util.List;
 
 /** Isolated bootstrap CLI parser. It can be replaced with a library without changing commands. */
 record CommandLine(String command, Path projectRoot, String module, List<String> runArguments,
-                   boolean help, boolean version) {
+                   boolean help, boolean version, boolean offline) {
     static CommandLine parse(String[] rawArguments) {
         List<String> arguments = new ArrayList<>(List.of(rawArguments));
         if (arguments.isEmpty() || arguments.getFirst().equals("--help")
                 || arguments.getFirst().equals("-h")) {
-            return new CommandLine("", null, null, List.of(), true, false);
+            return new CommandLine("", null, null, List.of(), true, false, false);
         }
         if (arguments.getFirst().equals("--version") || arguments.getFirst().equals("-V")) {
-            return new CommandLine("", null, null, List.of(), false, true);
+            return new CommandLine("", null, null, List.of(), false, true, false);
         }
 
         String command = arguments.removeFirst();
@@ -22,6 +22,7 @@ record CommandLine(String command, Path projectRoot, String module, List<String>
         String module = null;
         List<String> runArguments = new ArrayList<>();
         boolean programArguments = false;
+        boolean offline = false;
         for (int i = 0; i < arguments.size(); i++) {
             String argument = arguments.get(i);
             if (programArguments) {
@@ -34,10 +35,13 @@ record CommandLine(String command, Path projectRoot, String module, List<String>
             } else if (argument.equals("--module")) {
                 if (++i == arguments.size()) throw new IllegalArgumentException("--module needs a name");
                 module = arguments.get(i);
+            } else if (argument.equals("--offline")) {
+                offline = true;
             } else {
                 throw new IllegalArgumentException("unknown argument: " + argument);
             }
         }
-        return new CommandLine(command, projectRoot, module, List.copyOf(runArguments), false, false);
+        return new CommandLine(command, projectRoot, module, List.copyOf(runArguments), false,
+                false, offline);
     }
 }

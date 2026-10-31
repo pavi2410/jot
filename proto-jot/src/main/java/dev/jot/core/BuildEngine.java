@@ -1,6 +1,7 @@
 package dev.jot.core;
 
 import dev.jot.core.resolve.MavenResolver;
+import dev.jot.core.resolve.Lockfile;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -108,6 +109,23 @@ public final class BuildEngine {
         System.out.println("clean: " + project.config().name());
     }
 
+    public static void lock(ProjectWorkspace workspace, Path lockPath, MavenResolver resolver)
+            throws Exception {
+        java.util.Map<String, String> declarations = new java.util.LinkedHashMap<>();
+        int index = 0;
+        for (WorkspaceProject project : workspace.ordered()) {
+            for (String coordinate : project.config().dependencies().values()) {
+                declarations.put("dependency-" + index++, coordinate);
+            }
+            for (String coordinate : project.config().testDependencies().values()) {
+                declarations.put("test-dependency-" + index++, coordinate);
+            }
+        }
+        List<MavenResolver.ResolvedArtifact> resolved = resolver.resolve(declarations);
+        Lockfile.create(declarations.values(), resolved).write(lockPath);
+        System.out.println("lock: wrote " + lockPath);
+    }
+
     public static void test(WorkspaceProject project, MavenResolver resolver) throws Exception {
         build(project, resolver);
         Path root = project.root();
@@ -127,6 +145,8 @@ public final class BuildEngine {
 
         List<MavenResolver.ResolvedArtifact> mainArtifacts = resolveExternalArtifacts(project, resolver);
         List<MavenResolver.ResolvedArtifact> testArtifacts = resolver.resolve(config.testDependencies());
+        Path lockPath = findLockfile(root);
+        if (lockPath != null) Lockfile.read(lockPath).verify(config.testDependencies().values(), testArtifacts);
         List<String> classpathEntries = new ArrayList<>();
         classpathEntries.add(root.resolve(config.outputDirectory()).toString());
         for (WorkspaceProject dependency : transitiveDependencies(project)) {
@@ -241,7 +261,18 @@ public final class BuildEngine {
                 declarations.put("dependency-" + index++, coordinate);
             }
         }
-        return resolver.resolve(declarations);
+        List<MavenResolver.ResolvedArtifact> resolved = resolver.resolve(declarations);
+        Path lockPath = findLockfile(project.root());
+        if (lockPath != null) Lockfile.read(lockPath).verify(declarations.values(), resolved);
+        return resolved;
+    }
+
+    private static Path findLockfile(Path projectRoot) {
+        for (Path current = projectRoot; current != null; current = current.getParent()) {
+            Path candidate = current.resolve("jot.lock");
+            if (Files.isRegularFile(candidate)) return candidate;
+        }
+        return null;
     }
 
     private static List<WorkspaceProject> transitiveDependencies(WorkspaceProject project) {

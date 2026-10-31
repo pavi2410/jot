@@ -46,10 +46,14 @@ public final class Main {
         ProjectWorkspace workspace = config.isWorkspace()
                 ? ProjectWorkspace.load(projectRoot, config)
                 : ProjectWorkspace.loadProject(projectRoot, config);
+        MavenResolver resolver = new MavenResolver(
+                Path.of(System.getProperty("user.home"), ".jot", "java-maven-cache"),
+                MavenResolver.defaultRepository(), commandLine.offline());
         switch (commandLine.command()) {
-            case "build" -> build(config, workspace, commandLine.module());
-            case "run" -> run(config, workspace, commandLine.module(), commandLine.runArguments());
-            case "test" -> test(config, workspace, commandLine.module());
+            case "build" -> build(config, workspace, commandLine.module(), resolver);
+            case "run" -> run(config, workspace, commandLine.module(), commandLine.runArguments(), resolver);
+            case "test" -> test(config, workspace, commandLine.module(), resolver);
+            case "lock" -> BuildEngine.lock(workspace, projectRoot.resolve("jot.lock"), resolver);
             case "clean" -> {
                 for (WorkspaceProject project : workspace.ordered()) BuildEngine.clean(project);
             }
@@ -57,7 +61,8 @@ public final class Main {
         }
     }
 
-    private static void build(ProjectConfig config, ProjectWorkspace workspace, String module)
+    private static void build(ProjectConfig config, ProjectWorkspace workspace, String module,
+                              MavenResolver resolver)
             throws Exception {
         if (!config.isWorkspace() && module != null) {
             throw new IllegalArgumentException("--module requires a workspace");
@@ -65,11 +70,11 @@ public final class Main {
         List<WorkspaceProject> projects = module == null && config.isWorkspace()
                 ? workspace.ordered()
                 : workspace.dependenciesFirst(workspace.find(module == null ? config.name() : module));
-        for (WorkspaceProject project : projects) BuildEngine.build(project);
+        for (WorkspaceProject project : projects) BuildEngine.build(project, resolver);
     }
 
     private static void run(ProjectConfig config, ProjectWorkspace workspace, String module,
-                            List<String> runArguments) throws Exception {
+                            List<String> runArguments, MavenResolver resolver) throws Exception {
         if (!config.isWorkspace() && module != null) {
             throw new IllegalArgumentException("--module requires a workspace");
         }
@@ -79,12 +84,13 @@ public final class Main {
             throw new IllegalArgumentException("project.main-class is required for `jot run`");
         }
         for (WorkspaceProject dependency : workspace.dependenciesFirst(project)) {
-            BuildEngine.build(dependency);
+            BuildEngine.build(dependency, resolver);
         }
-        BuildEngine.run(project, runArguments);
+        BuildEngine.run(project, runArguments, resolver);
     }
 
-    private static void test(ProjectConfig config, ProjectWorkspace workspace, String module)
+    private static void test(ProjectConfig config, ProjectWorkspace workspace, String module,
+                             MavenResolver resolver)
             throws Exception {
         if (!config.isWorkspace() && module != null) {
             throw new IllegalArgumentException("--module requires a workspace");
@@ -92,13 +98,12 @@ public final class Main {
         List<WorkspaceProject> projects = module == null && config.isWorkspace()
                 ? workspace.ordered()
                 : workspace.dependenciesFirst(workspace.find(module == null ? config.name() : module));
-        MavenResolver resolver = new MavenResolver();
         for (WorkspaceProject project : projects) BuildEngine.test(project, resolver);
     }
 
     private static void help() {
         System.out.println("jot " + VERSION + " — a Java build tool");
-        System.out.println("Usage: jot <build|run|test|clean> [--project <directory>] [--module <name>] [-- <args...>]");
+        System.out.println("Usage: jot <build|run|test|lock|clean> [--project <directory>] [--module <name>] [--offline] [-- <args...>]");
     }
 
     private static Path findProjectRoot(Path start) {

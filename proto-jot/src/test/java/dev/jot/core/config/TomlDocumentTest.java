@@ -1,6 +1,7 @@
 package dev.jot.core.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -33,5 +34,16 @@ class TomlDocumentTest {
                 document.stringList("workspace.members", java.util.List.of()));
         assertEquals("../core,shared", ((java.util.Map<?, ?>)
                 document.values().get("dependencies.core")).get("path"));
+    }
+
+    @Test
+    void writesTomlStringsWithEscapingAndArrayTables() {
+        String output = new TomlWriter().put("version", 1)
+                .appendTable("roots", java.util.Map.of("artifact", "a\"b", "group", "sample"))
+                .render();
+
+        assertTrue(output.startsWith("version = 1\n\n[[roots]]\n"));
+        assertTrue(output.contains("artifact = \"a\\\"b\""));
+        assertTrue(output.endsWith("group = \"sample\"\n"));
     }
 }

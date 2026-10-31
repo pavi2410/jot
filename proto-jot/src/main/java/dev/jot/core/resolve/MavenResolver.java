@@ -33,25 +33,35 @@ public final class MavenResolver {
     private static final URI CENTRAL = URI.create("https://repo.maven.apache.org/maven2/");
     private final Path cacheRoot;
     private final URI repository;
+    private final boolean offline;
     private final HttpClient client;
     private final Map<String, PomModel> pomModels = new LinkedHashMap<>();
 
     public MavenResolver() {
         this(Path.of(System.getProperty("user.home"), ".jot", "java-maven-cache"),
-                repositoryFromEnvironment());
+                repositoryFromEnvironment(), Boolean.getBoolean("jot.offline"));
     }
 
     public MavenResolver(Path cacheRoot, URI repository) {
+        this(cacheRoot, repository, false);
+    }
+
+    public MavenResolver(Path cacheRoot, URI repository, boolean offline) {
         this.cacheRoot = cacheRoot.toAbsolutePath().normalize();
         String base = repository.toString().endsWith("/") ? repository.toString()
                 : repository + "/";
         this.repository = URI.create(base);
+        this.offline = offline;
         this.client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build();
     }
 
     private static URI repositoryFromEnvironment() {
         String configured = System.getenv("JOT_MAVEN_REPOSITORY");
         return configured == null || configured.isBlank() ? CENTRAL : URI.create(configured);
+    }
+
+    public static URI defaultRepository() {
+        return repositoryFromEnvironment();
     }
 
     public List<ResolvedArtifact> resolve(Map<String, String> declaredDependencies) throws Exception {
@@ -106,6 +116,7 @@ public final class MavenResolver {
         URI pomUri = repository.resolve(coordinate.pomPath());
         byte[] pomBytes = fetch(pomUri, false);
         if (pomBytes == null) {
+            if (offline) throw new IOException("offline mode: POM is not cached: " + pomUri);
             PomModel empty = PomModel.empty();
             pomModels.put(key, empty);
             visiting.remove(key);
@@ -194,6 +205,10 @@ public final class MavenResolver {
     private byte[] fetch(URI uri, boolean required) throws IOException, InterruptedException {
         Path cached = cachePath(uri);
         if (Files.isRegularFile(cached)) return Files.readAllBytes(cached);
+        if (offline) {
+            if (required) throw new IOException("offline mode: artifact is not cached: " + uri);
+            return null;
+        }
         byte[] data;
         if (uri.getScheme().equals("file")) {
             Path file = Path.of(uri);
