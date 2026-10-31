@@ -24,6 +24,7 @@ record CommandLine(
           Resolve,
           Bench,
           Audit,
+          Publish,
           Toolchain {}
 
   record Build(String module) implements Command {}
@@ -60,6 +61,16 @@ record CommandLine(
       implements Command {}
 
   record Audit(boolean fix, boolean ci) implements Command {}
+
+  record Publish(
+      String module,
+      String repository,
+      String username,
+      String password,
+      String signingKey,
+      boolean dryRun,
+      boolean allowSnapshot)
+      implements Command {}
 
   record Toolchain(ToolchainAction action) implements Command {}
 

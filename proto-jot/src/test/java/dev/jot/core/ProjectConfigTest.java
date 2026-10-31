@@ -100,6 +100,35 @@ class ProjectConfigTest {
   }
 
   @Test
+  void readsMavenPublicationMetadataAndProjectGroup() throws Exception {
+    Path manifest = temp.resolve("jot.toml");
+    Files.writeString(
+        manifest,
+        """
+        [project]
+        name = "published"
+        group = "org.example"
+        [toolchains]
+        java = "27"
+        [publish]
+        license = "Apache-2.0"
+        description = "An example library"
+        url = "https://example.org/project"
+        scm = "https://example.org/project.git"
+        [publish.developer]
+        name = "Jot Team"
+        email = "jot@example.org"
+        """);
+
+    ProjectConfig config = ProjectConfig.read(manifest, null);
+
+    assertEquals("org.example", config.group());
+    assertEquals("Apache-2.0", config.publish().license());
+    assertEquals("Jot Team", config.publish().developer().name());
+    assertEquals("jot@example.org", config.publish().developer().email());
+  }
+
+  @Test
   void readsExplicitJavaFormatterConfiguration() throws Exception {
     Path manifest = temp.resolve("jot.toml");
     Files.writeString(

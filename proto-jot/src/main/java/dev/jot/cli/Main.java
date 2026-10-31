@@ -7,6 +7,7 @@ import dev.jot.core.DependencyTree;
 import dev.jot.core.GlobalCache;
 import dev.jot.core.JavaToolchain;
 import dev.jot.core.JavaToolchainManager;
+import dev.jot.core.MavenPublisher;
 import dev.jot.core.ProjectConfig;
 import dev.jot.core.ProjectInitializer;
 import dev.jot.core.ProjectWorkspace;
@@ -195,6 +196,7 @@ public final class Main {
                   config, workspace, outdated.module(), projectRoot.resolve("jot.lock"), resolver));
       case CommandLine.Bench bench -> bench(config, workspace, bench, resolver);
       case CommandLine.Audit audit -> audit(projectRoot, config, workspace, audit, resolver);
+      case CommandLine.Publish publish -> publish(config, workspace, publish, resolver);
       case CommandLine.Add add -> addDependency(projectRoot, add, resolver);
       case CommandLine.Remove remove -> removeDependency(projectRoot, remove, resolver);
       case CommandLine.Lock ignored ->
@@ -343,6 +345,54 @@ public final class Main {
     if (options.ci()
         && report.findings().stream().anyMatch(finding -> finding.severity().failsCi())) {
       throw new IllegalStateException("audit failed CI severity threshold");
+    }
+  }
+
+  private static void publish(
+      ProjectConfig config,
+      ProjectWorkspace workspace,
+      CommandLine.Publish options,
+      MavenResolver resolver)
+      throws Exception {
+    if (!config.isWorkspace() && options.module() != null)
+      throw new IllegalArgumentException("--module can only be used from inside a workspace");
+    List<WorkspaceProject> targets =
+        config.isWorkspace()
+            ? options.module() == null
+                ? workspace.ordered()
+                : List.of(workspace.find(options.module()))
+            : List.of(workspace.find(config.name()));
+    java.util.Set<Path> built = new java.util.LinkedHashSet<>();
+    for (WorkspaceProject target : targets) {
+      for (WorkspaceProject dependency : workspace.dependenciesFirst(target)) {
+        if (built.add(dependency.root())) BuildEngine.build(dependency, resolver);
+      }
+    }
+    String repository =
+        options.repository() == null || options.repository().isBlank()
+            ? System.getenv("JOT_PUBLISH_REPOSITORY")
+            : options.repository();
+    String username =
+        options.username() == null ? System.getenv("JOT_PUBLISH_USERNAME") : options.username();
+    String password =
+        options.password() == null ? System.getenv("JOT_PUBLISH_PASSWORD") : options.password();
+    MavenPublisher.ArtifactSigner signer = MavenPublisher.gpgSigner(options.signingKey());
+    for (WorkspaceProject project : targets) {
+      MavenPublisher.Result result =
+          MavenPublisher.publish(
+              project,
+              resolver,
+              repository,
+              username,
+              password,
+              options.allowSnapshot(),
+              options.dryRun(),
+              signer);
+      System.out.println(
+          (options.dryRun() ? "dry-run: staged " : "publish: ")
+              + result.coordinate().notation()
+              + " -> "
+              + result.stagingDirectory());
     }
   }
 
@@ -551,6 +601,9 @@ public final class Main {
     System.out.println("       jot toolchain install java@<version> [--force] [--offline]");
     System.out.println("       jot toolchain pin java@<version> [--workspace]");
     System.out.println("       jot doc [--project <directory>] [--module <name>] [--offline]");
+    System.out.println(
+        "       jot publish [--module <name>] [--repository <url-or-path>] [--dry-run]"
+            + " [--allow-snapshot]");
     System.out.println("       jot lint [--project <directory>] [--module <name>] [--offline]");
     System.out.println(
         "       jot fmt [--project <directory>] [--module <name>] [--check] [--offline]");

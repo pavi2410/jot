@@ -29,7 +29,7 @@ java -jar target/bin/jot-java.jar run -- --version
 ```
 
 The prototype supports `init`, `build`, `run`, `test`, `bench`, `fmt`, `lint`, `doc`,
-`add`, `remove`, `deps`, `outdated`, `resolve`, `tree`, `toolchain`, `lock`, `audit`, and
+`publish`, `add`, `remove`, `deps`, `outdated`, `resolve`, `tree`, `toolchain`, `lock`, `audit`, and
 `clean`, and accepts `--project`, `--module`, and global `--offline`. `jot clean --global`
 clears managed JDK downloads and Maven artifact caches while preserving other files in `~/.jot`.
 `jot init [name]` creates a Jot-native Java app; `--template java-lib` creates a
@@ -83,6 +83,10 @@ selected module's external dependency tree.
 `jot resolve group:artifact:version` verifies a pinned coordinate's POM, while
 `--deps` lists its effective direct dependencies.
 `jot doc [--module name]` generates Java API documentation under `target/docs`.
+`jot publish` builds a Maven publication with the project JAR, sources, Javadocs,
+POM, GPG signatures, and SHA-256 sidecars. Configure `[publish]` metadata and pass
+`--repository` (or set `JOT_PUBLISH_REPOSITORY`); repositories may be local paths,
+`file://` URLs, or HTTP(S) endpoints. Snapshots require `--allow-snapshot`.
 `jot lint [--module name]` runs `javac -Xlint:all` and reports Java compiler warnings.
 `jot bench [filter]` compiles the configured benchmark source set with JMH's annotation
 processor and runs it; Maven-layout projects default to `src/bench/java`, and other

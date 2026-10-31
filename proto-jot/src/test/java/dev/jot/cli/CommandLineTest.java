@@ -256,6 +256,38 @@ class CommandLineTest {
   }
 
   @Test
+  void parsesMavenPublicationOptions() {
+    CommandLine.Publish publish =
+        assertInstanceOf(
+            CommandLine.Publish.class,
+            CommandLineParser.parse(
+                    new String[] {
+                      "publish",
+                      "--module",
+                      "api",
+                      "--repository",
+                      "file:///tmp/maven-repo",
+                      "--username",
+                      "publisher",
+                      "--password",
+                      "secret",
+                      "--signing-key",
+                      "ABCD",
+                      "--dry-run",
+                      "--allow-snapshot"
+                    })
+                .command());
+    assertEquals("api", publish.module());
+    assertEquals("file:///tmp/maven-repo", publish.repository());
+    assertEquals("publisher", publish.username());
+    assertEquals("secret", publish.password());
+    assertEquals("ABCD", publish.signingKey());
+    assertTrue(publish.dryRun());
+    assertTrue(publish.allowSnapshot());
+    assertEquals("unknown argument: --repository", parseError("build", "--repository", "x"));
+  }
+
+  @Test
   void parsesDependencyAddAndRemoveOptions() {
     CommandLine.Add add =
         assertInstanceOf(

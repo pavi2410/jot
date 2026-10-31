@@ -18,9 +18,23 @@ final class CommandLineParser {
           "catalog",
           "template",
           "group",
+          "repository",
+          "username",
+          "password",
+          "signing-key",
           "package");
   private static final java.util.Set<String> FLAG_OPTIONS =
-      java.util.Set.of("check", "deps", "fix", "ci", "workspace", "force", "test", "global");
+      java.util.Set.of(
+          "check",
+          "deps",
+          "fix",
+          "ci",
+          "workspace",
+          "force",
+          "test",
+          "global",
+          "dry-run",
+          "allow-snapshot");
 
   private CommandLineParser() {}
 
@@ -81,6 +95,7 @@ final class CommandLineParser {
           case "resolve" -> ResolveCommandParser.parse(args);
           case "bench" -> BenchCommandParser.parse(args);
           case "audit" -> AuditCommandParser.parse(args);
+          case "publish" -> PublishCommandParser.parse(args);
           case "toolchain" -> ToolchainCommandParser.parse(args);
           case "build", "run", "test", "doc", "lint", "fmt", "deps", "outdated", "lock", "clean" ->
               SimpleCommandParser.parse(command, args);

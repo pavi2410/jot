@@ -16,7 +16,13 @@ public record ProjectWorkspace(List<WorkspaceProject> ordered) {
     Map<Path, WorkspaceProject> byPath = new TreeMap<>();
     List<Path> visiting = new ArrayList<>();
     for (String member : rootConfig.workspaceMembers()) {
-      visit(root.resolve(member), rootConfig.javaVersion(), visiting, byPath, ordered);
+      visit(
+          root.resolve(member),
+          rootConfig.javaVersion(),
+          rootConfig.group(),
+          visiting,
+          byPath,
+          ordered);
     }
     return new ProjectWorkspace(List.copyOf(ordered));
   }
@@ -50,7 +56,8 @@ public record ProjectWorkspace(List<WorkspaceProject> ordered) {
       if (!Files.isRegularFile(manifest)) {
         throw new IllegalArgumentException("missing project manifest: " + manifest);
       }
-      ProjectConfig dependencyConfig = ProjectConfig.read(manifest, config.javaVersion());
+      ProjectConfig dependencyConfig =
+          ProjectConfig.read(manifest, config.javaVersion(), config.group());
       dependencies.add(visitProject(dependencyRoot, dependencyConfig, visiting, byPath, ordered));
     }
     visiting.removeLast();
@@ -64,6 +71,7 @@ public record ProjectWorkspace(List<WorkspaceProject> ordered) {
   private static WorkspaceProject visit(
       Path projectRoot,
       String inheritedJava,
+      String inheritedGroup,
       List<Path> visiting,
       Map<Path, WorkspaceProject> byPath,
       List<WorkspaceProject> ordered)
@@ -82,7 +90,7 @@ public record ProjectWorkspace(List<WorkspaceProject> ordered) {
     if (!Files.isRegularFile(manifest)) {
       throw new IllegalArgumentException("missing project manifest: " + manifest);
     }
-    ProjectConfig config = ProjectConfig.read(manifest, inheritedJava);
+    ProjectConfig config = ProjectConfig.read(manifest, inheritedJava, inheritedGroup);
     visiting.add(normalizedRoot);
     List<WorkspaceProject> dependencies = new ArrayList<>();
     for (String dependencyPath : config.pathDependencies().values()) {
@@ -90,6 +98,7 @@ public record ProjectWorkspace(List<WorkspaceProject> ordered) {
           visit(
               normalizedRoot.resolve(dependencyPath),
               config.javaVersion(),
+              config.group(),
               visiting,
               byPath,
               ordered));

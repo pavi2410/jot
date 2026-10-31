@@ -12,6 +12,7 @@ import java.util.TreeMap;
 public record ProjectConfig(
     String name,
     String version,
+    String group,
     String mainClass,
     String javaVersion,
     java.util.List<String> sourceDirectories,
@@ -25,6 +26,7 @@ public record ProjectConfig(
     Map<String, String> testDependencies,
     Map<String, String> processors,
     Map<String, String> processorOptions,
+    PublishMetadata publish,
     String javaFormatter,
     String javaFormatterStyle,
     BenchmarkConfig benchmarks) {
@@ -33,6 +35,11 @@ public record ProjectConfig(
   }
 
   public static ProjectConfig read(Path file, String inheritedJava) throws IOException {
+    return read(file, inheritedJava, null);
+  }
+
+  public static ProjectConfig read(Path file, String inheritedJava, String inheritedGroup)
+      throws IOException {
     TomlDocument document = TomlDocument.read(file);
     String projectName = document.string("project.name", "");
     if (projectName.isBlank()) {
@@ -65,6 +72,9 @@ public record ProjectConfig(
     Map<String, String> processors = new TreeMap<>();
     Map<String, String> processorOptions = new TreeMap<>();
     parseProcessors(document.table("processors"), catalog, file, processors, processorOptions);
+    PublishMetadata publish = parsePublish(document.table("publish"), file);
+    String group =
+        document.string("project.group", document.string("workspace.group", inheritedGroup));
     String formatterStyle = document.string("format.style", "google");
     if (!formatterStyle.equals("google") && !formatterStyle.equals("aosp")) {
       throw new IllegalArgumentException("format.style must be `google` or `aosp` in " + file);
@@ -77,6 +87,7 @@ public record ProjectConfig(
     return new ProjectConfig(
         projectName,
         document.string("project.version", "0.1.0"),
+        group,
         document.string("project.main-class", ""),
         javaVersion,
         document.stringList("build.source-dirs", sourceDefaults),
@@ -90,9 +101,42 @@ public record ProjectConfig(
         Collections.unmodifiableMap(new TreeMap<>(testDependencies)),
         Collections.unmodifiableMap(processors),
         Collections.unmodifiableMap(processorOptions),
+        publish,
         document.string("format.java", null),
         formatterStyle,
         benchmarks);
+  }
+
+  private static PublishMetadata parsePublish(Map<String, Object> values, Path manifest) {
+    if (values.isEmpty()) return null;
+    Object rawDeveloper = values.get("developer");
+    PublishMetadata.Developer developer = null;
+    if (rawDeveloper instanceof Map<?, ?> details) {
+      Object name = details.get("name");
+      Object email = details.get("email");
+      if (name != null && !(name instanceof String) || email != null && !(email instanceof String))
+        throw new IllegalArgumentException(
+            "publish.developer fields must be strings in " + manifest);
+      developer =
+          name instanceof String string
+              ? new PublishMetadata.Developer(string, (String) email)
+              : null;
+    } else if (rawDeveloper != null) {
+      throw new IllegalArgumentException("publish.developer must be a table in " + manifest);
+    }
+    return new PublishMetadata(
+        optionalString(values, "license", manifest),
+        optionalString(values, "description", manifest),
+        optionalString(values, "url", manifest),
+        optionalString(values, "scm", manifest),
+        developer);
+  }
+
+  private static String optionalString(Map<String, Object> values, String key, Path manifest) {
+    Object value = values.get(key);
+    if (value == null) return null;
+    if (value instanceof String string) return string;
+    throw new IllegalArgumentException("publish." + key + " must be a string in " + manifest);
   }
 
   private static void parseProcessors(
