@@ -36,10 +36,13 @@ The prototype supports `build`, `run`, and `clean`, and accepts `--project` and
 `{ path = "../module" }`. `examples/tiny-workspace` demonstrates a two-module
 build and run.
 
-External Maven dependencies, tests, Kotlin, and the full TOML specification are
-not implemented in the Java CLI yet. The Java sources have JUnit 5 tests; while
-the Java `test` command is pending, run them with the current Rust Jot from this
-directory:
+The Java CLI resolves pinned Maven coordinates and their compile/runtime
+transitive dependencies from POMs, checking repository SHA-256 sidecars when
+available. It caches downloads under `~/.jot/java-maven-cache`. Version ranges,
+snapshots, Kotlin, and the full TOML specification are not implemented yet.
+
+The Java sources have JUnit 5 tests; while the Java `test` command is pending,
+run them with the current Rust Jot from this directory:
 
 ```sh
 cargo run --manifest-path ../Cargo.toml -p jot -- test

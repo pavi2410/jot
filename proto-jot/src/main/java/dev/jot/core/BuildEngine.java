@@ -1,5 +1,6 @@
 package dev.jot.core;
 
+import dev.jot.core.resolve.MavenResolver;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -18,8 +19,14 @@ public final class BuildEngine {
     private BuildEngine() {}
 
     public static void build(WorkspaceProject project) throws Exception {
+        build(project, new MavenResolver());
+    }
+
+    public static void build(WorkspaceProject project, MavenResolver resolver) throws Exception {
         Path root = project.root();
         ProjectConfig config = project.config();
+        List<MavenResolver.ResolvedArtifact> externalArtifacts = resolveExternalArtifacts(project,
+                resolver);
         List<Path> sources = new ArrayList<>();
         for (String sourceDirectory : config.sourceDirectories()) {
             Path sourceRoot = root.resolve(sourceDirectory).normalize();
@@ -44,7 +51,7 @@ public final class BuildEngine {
         }
         Path artifact = target.resolve(config.name() + "-" + config.version() + ".jar");
         Path stateFile = target.resolve(".jot/build-state.properties");
-        String fingerprint = fingerprint(project, sources);
+        String fingerprint = fingerprint(project, sources, externalArtifacts);
         if (Files.isRegularFile(artifact) && fingerprint.equals(readFingerprint(stateFile))) {
             System.out.println("build: " + config.name() + " is up to date");
             return;
@@ -54,7 +61,7 @@ public final class BuildEngine {
         Files.createDirectories(classes);
         List<String> javac = new ArrayList<>(List.of(jdkTool("javac"), "--release",
                 config.javaVersion(), "-d", classes.toString()));
-        String classpath = classpath(transitiveDependencies(project));
+        String classpath = classpath(project, externalArtifacts);
         if (!classpath.isBlank()) javac.addAll(List.of("-classpath", classpath));
         sources.forEach(path -> javac.add(path.toString()));
         runProcess(root, javac);
@@ -75,11 +82,19 @@ public final class BuildEngine {
     }
 
     public static void run(WorkspaceProject project, List<String> arguments)
-            throws IOException, InterruptedException {
+            throws Exception {
+        run(project, arguments, new MavenResolver());
+    }
+
+    public static void run(WorkspaceProject project, List<String> arguments,
+                           MavenResolver resolver) throws Exception {
         List<String> classpathEntries = new ArrayList<>();
         classpathEntries.add(project.root().resolve(project.config().outputDirectory()).toString());
         for (WorkspaceProject dependency : transitiveDependencies(project)) {
             classpathEntries.add(dependency.root().resolve(dependency.config().outputDirectory()).toString());
+        }
+        for (MavenResolver.ResolvedArtifact artifact : resolveExternalArtifacts(project, resolver)) {
+            classpathEntries.add(artifact.jar().toString());
         }
         List<String> command = new ArrayList<>(List.of(jdkTool("java"), "-cp",
                 String.join(System.getProperty("path.separator"), classpathEntries),
@@ -93,7 +108,8 @@ public final class BuildEngine {
         System.out.println("clean: " + project.config().name());
     }
 
-    private static String fingerprint(WorkspaceProject project, List<Path> sources)
+    private static String fingerprint(WorkspaceProject project, List<Path> sources,
+                                      List<MavenResolver.ResolvedArtifact> externalArtifacts)
             throws IOException, NoSuchAlgorithmException {
         Path root = project.root();
         ProjectConfig config = project.config();
@@ -119,6 +135,10 @@ public final class BuildEngine {
                 }
             }
         }
+        for (MavenResolver.ResolvedArtifact artifact : externalArtifacts) {
+            updateDigest(digest, artifact.coordinate().notation());
+            digest.update(Files.readAllBytes(artifact.jar()));
+        }
         return HexFormat.of().formatHex(digest.digest());
     }
 
@@ -136,10 +156,29 @@ public final class BuildEngine {
         return state.getProperty("fingerprint", "");
     }
 
-    private static String classpath(List<WorkspaceProject> dependencies) {
-        return String.join(System.getProperty("path.separator"), dependencies.stream()
-                .map(project -> project.root().resolve(project.config().outputDirectory()).toString())
+    private static String classpath(WorkspaceProject project,
+                                    List<MavenResolver.ResolvedArtifact> externalArtifacts) {
+        List<String> entries = new ArrayList<>(transitiveDependencies(project).stream()
+                .map(dependency -> dependency.root()
+                        .resolve(dependency.config().outputDirectory()).toString())
                 .toList());
+        externalArtifacts.stream().map(artifact -> artifact.jar().toString()).forEach(entries::add);
+        return String.join(System.getProperty("path.separator"), entries);
+    }
+
+    private static List<MavenResolver.ResolvedArtifact> resolveExternalArtifacts(
+            WorkspaceProject project, MavenResolver resolver) throws Exception {
+        List<WorkspaceProject> dependencyProjects = new ArrayList<>();
+        dependencyProjects.add(project);
+        dependencyProjects.addAll(transitiveDependencies(project));
+        java.util.Map<String, String> declarations = new java.util.LinkedHashMap<>();
+        int index = 0;
+        for (WorkspaceProject dependencyProject : dependencyProjects) {
+            for (String coordinate : dependencyProject.config().dependencies().values()) {
+                declarations.put("dependency-" + index++, coordinate);
+            }
+        }
+        return resolver.resolve(declarations);
     }
 
     private static List<WorkspaceProject> transitiveDependencies(WorkspaceProject project) {

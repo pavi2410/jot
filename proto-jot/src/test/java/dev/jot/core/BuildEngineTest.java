@@ -1,6 +1,9 @@
 package dev.jot.core;
 
+import dev.jot.core.resolve.MavenCoordinate;
+import dev.jot.core.resolve.MavenResolver;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
@@ -8,6 +11,9 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.jar.JarEntry;
+import java.util.jar.JarOutputStream;
+import javax.tools.ToolProvider;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -105,6 +111,72 @@ class BuildEngineTest {
 
         BuildEngine.run(workspace.selectRunnable("app"), List.of());
         assertTrue(Files.isRegularFile(temp.resolve("app/target/app-0.1.0.jar")));
+    }
+
+    @Test
+    void compilesAndRunsWithAResolvedMavenArtifact() throws Exception {
+        Path repository = temp.resolve("repository");
+        MavenCoordinate external = MavenCoordinate.parse("sample:external-api:1.0.0");
+        Path dependencySource = temp.resolve("dependency-src/sample/external/External.java");
+        Files.createDirectories(dependencySource.getParent());
+        Files.writeString(dependencySource, """
+                package sample.external;
+                public final class External {
+                    public static String message() { return "maven-ok"; }
+                }
+                """);
+        Path dependencyClasses = temp.resolve("dependency-classes");
+        Files.createDirectories(dependencyClasses);
+        int compileStatus = ToolProvider.getSystemJavaCompiler().run(null, null, null,
+                "--release", "27", "-d", dependencyClasses.toString(), dependencySource.toString());
+        assertEquals(0, compileStatus);
+        Path dependencyJar = repository.resolve(external.repositoryPath("jar"));
+        Files.createDirectories(dependencyJar.getParent());
+        try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(dependencyJar));
+             var classes = Files.walk(dependencyClasses)) {
+            for (Path file : classes.filter(Files::isRegularFile).toList()) {
+                String entryName = dependencyClasses.relativize(file).toString()
+                        .replace(java.io.File.separatorChar, '/');
+                jar.putNextEntry(new JarEntry(entryName));
+                Files.copy(file, jar);
+                jar.closeEntry();
+            }
+        }
+        Path dependencyPom = repository.resolve(external.pomPath());
+        Files.createDirectories(dependencyPom.getParent());
+        Files.writeString(dependencyPom, """
+                <project xmlns="http://maven.apache.org/POM/4.0.0">
+                  <modelVersion>4.0.0</modelVersion>
+                  <groupId>sample</groupId><artifactId>external-api</artifactId><version>1.0.0</version>
+                </project>
+                """);
+
+        Files.createDirectories(temp.resolve("src/main/java/sample"));
+        Files.writeString(temp.resolve("src/main/java/sample/Main.java"), """
+                package sample;
+                import sample.external.External;
+                public final class Main {
+                    public static void main(String[] args) { System.out.println(External.message()); }
+                }
+                """);
+        Files.writeString(temp.resolve("jot.toml"), """
+                [project]
+                name = "with-external"
+                version = "1.0.0"
+                main-class = "sample.Main"
+                [toolchains]
+                java = "27"
+                [dependencies]
+                external = "sample:external-api:1.0.0"
+                """);
+        ProjectConfig config = ProjectConfig.read(temp.resolve("jot.toml"), null);
+        WorkspaceProject project = new WorkspaceProject(temp, config, List.of());
+        MavenResolver resolver = new MavenResolver(temp.resolve("cache"), repository.toUri());
+
+        BuildEngine.build(project, resolver);
+        BuildEngine.run(project, List.of(), resolver);
+
+        assertTrue(Files.isRegularFile(temp.resolve("target/with-external-1.0.0.jar")));
     }
 
     private void write(String relativePath, String contents) throws Exception {
