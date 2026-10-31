@@ -33,6 +33,7 @@ final class IncrementalJavaCompiler {
       Path projectRoot,
       Path classes,
       String javaVersion,
+      Path javaHome,
       String classpath,
       String compileFingerprint,
       List<Path> sources,
@@ -62,13 +63,14 @@ final class IncrementalJavaCompiler {
     boolean fullRebuild = !reusable || previousHashes.isEmpty() || removedSource;
     boolean compiled = fullRebuild || !dirty.isEmpty();
     if (fullRebuild) {
-      compileAll(projectRoot, classes, javaVersion, classpath, sources);
+      compileAll(projectRoot, classes, javaVersion, javaHome, classpath, sources);
     } else if (!dirty.isEmpty()) {
       boolean applied =
-          compileIncrementally(projectRoot, classes, javaVersion, classpath, sources, dirty);
+          compileIncrementally(
+              projectRoot, classes, javaVersion, javaHome, classpath, sources, dirty);
       if (!applied) {
         fullRebuild = true;
-        compileAll(projectRoot, classes, javaVersion, classpath, sources);
+        compileAll(projectRoot, classes, javaVersion, javaHome, classpath, sources);
       }
     }
 
@@ -89,6 +91,7 @@ final class IncrementalJavaCompiler {
       Path projectRoot,
       Path classes,
       String javaVersion,
+      Path javaHome,
       String classpath,
       List<Path> allSources,
       List<Path> dirtySources)
@@ -104,7 +107,7 @@ final class IncrementalJavaCompiler {
     Path staging = Files.createTempDirectory(classes.getParent(), ".jot-compile-");
     try {
       String incrementalClasspath = joinClasspath(classes.toString(), classpath);
-      compileTo(projectRoot, staging, javaVersion, incrementalClasspath, dirtySources);
+      compileTo(projectRoot, staging, javaVersion, javaHome, incrementalClasspath, dirtySources);
       Map<String, List<Path>> previousOutputs = ownedClassFiles(classes, identities.values());
       Map<String, List<Path>> newOutputs = ownedClassFiles(staging, identities.values());
 
@@ -116,7 +119,7 @@ final class IncrementalJavaCompiler {
         }
         for (Path oldFile : oldFiles) {
           Path newFile = staging.resolve(classes.relativize(oldFile));
-          if (!publicApi(oldFile).equals(publicApi(newFile))) return false;
+          if (!publicApi(javaHome, oldFile).equals(publicApi(javaHome, newFile))) return false;
         }
       }
 
@@ -190,9 +193,10 @@ final class IncrementalJavaCompiler {
     return relative;
   }
 
-  private static String publicApi(Path classFile) throws Exception {
+  private static String publicApi(Path javaHome, Path classFile) throws Exception {
     Process process =
-        new ProcessBuilder(jdkTool("javap"), "-p", "-s", "-constants", classFile.toString())
+        new ProcessBuilder(
+                jdkTool(javaHome, "javap"), "-p", "-s", "-constants", classFile.toString())
             .redirectErrorStream(true)
             .start();
     byte[] output = process.getInputStream().readAllBytes();
@@ -204,19 +208,29 @@ final class IncrementalJavaCompiler {
   }
 
   private static void compileAll(
-      Path projectRoot, Path classes, String javaVersion, String classpath, List<Path> sources)
+      Path projectRoot,
+      Path classes,
+      String javaVersion,
+      Path javaHome,
+      String classpath,
+      List<Path> sources)
       throws Exception {
     deleteTree(classes);
     Files.createDirectories(classes);
-    compileTo(projectRoot, classes, javaVersion, classpath, sources);
+    compileTo(projectRoot, classes, javaVersion, javaHome, classpath, sources);
   }
 
   private static void compileTo(
-      Path projectRoot, Path output, String javaVersion, String classpath, List<Path> sources)
+      Path projectRoot,
+      Path output,
+      String javaVersion,
+      Path javaHome,
+      String classpath,
+      List<Path> sources)
       throws Exception {
     List<String> command =
         new ArrayList<>(
-            List.of(jdkTool("javac"), "--release", javaVersion, "-d", output.toString()));
+            List.of(jdkTool(javaHome, "javac"), "--release", javaVersion, "-d", output.toString()));
     if (!classpath.isBlank()) command.addAll(List.of("-classpath", classpath));
     sources.forEach(path -> command.add(path.toString()));
     int status =
@@ -285,9 +299,8 @@ final class IncrementalJavaCompiler {
     return HexFormat.of().formatHex(digest.digest());
   }
 
-  private static String jdkTool(String name) {
-    String executable = System.getProperty("os.name").startsWith("Windows") ? name + ".exe" : name;
-    return Path.of(System.getProperty("java.home"), "bin", executable).toString();
+  private static String jdkTool(Path javaHome, String name) {
+    return JavaToolchain.tool(javaHome, name).toString();
   }
 
   private static void deleteTree(Path root) throws IOException {

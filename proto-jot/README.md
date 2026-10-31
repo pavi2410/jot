@@ -41,9 +41,13 @@ Explicit source and resource directories override those defaults. Workspaces lis
 `{ path = "../module" }`. `examples/tiny-workspace` demonstrates a two-module
 build and run.
 
-Jot currently uses the JDK it is running on. That JDK must be at least as new
-as the Java release requested by the project; Jot reports a direct error when
-it is too old.
+Jot selects an installed JDK under `~/.jot/jdks` when its release matches
+`toolchains.java`; otherwise it uses the running JDK when that JDK is newer than
+the requested release. `jot toolchain list` shows managed JDKs, and
+`jot toolchain pin java@21` updates the nearest project manifest
+(`--workspace` targets the workspace manifest). Java Jot can discover and use
+managed JDKs; toolchain installation is not implemented in the Java prototype
+yet.
 
 The build cache fingerprints compiler inputs separately from package inputs.
 Resource-only changes update the class output and JAR without recompiling Java

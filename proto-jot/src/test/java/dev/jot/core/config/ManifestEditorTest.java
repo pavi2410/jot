@@ -92,4 +92,29 @@ class ManifestEditorTest {
         "org.tomlj:tomlj:1.1.1",
         ProjectConfig.read(manifest, null).testDependencies().get("parser"));
   }
+
+  @Test
+  void pinsJavaToolchainWithoutDroppingUnrelatedManifestContent() throws Exception {
+    Path manifest = temp.resolve("jot.toml");
+    Files.writeString(
+        manifest,
+        """
+        [project]
+        name = "demo"
+
+        [toolchains]
+        java = "17"
+
+        [dependencies]
+        annotations = "org.example:annotations:1.0"
+        """);
+
+    ManifestEditor.pinJavaToolchain(manifest, "21");
+
+    ProjectConfig parsed = ProjectConfig.read(manifest, null);
+    assertEquals("21", parsed.javaVersion());
+    String contents = Files.readString(manifest);
+    assertTrue(contents.contains("name = \"demo\""));
+    assertTrue(contents.contains("annotations = \"org.example:annotations:1.0\""));
+  }
 }

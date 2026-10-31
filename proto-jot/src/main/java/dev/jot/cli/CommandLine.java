@@ -19,10 +19,13 @@ record CommandLine(
     String dependencyCoordinate,
     String dependencyName,
     String dependencyCatalog,
+    String toolchainAction,
+    String toolchainSpec,
     boolean resolveDependencies,
     boolean testDependency,
     int treeDepth,
     boolean treeWorkspace,
+    boolean workspacePin,
     boolean formatCheck) {
 
   static CommandLine parse(String[] args) {
@@ -62,8 +65,8 @@ record CommandLine(
 
   private static CommandLine specialCommand(boolean help, boolean version) {
     return new CommandLine(
-        "", null, null, List.of(), help, version, false, null, null, null, null, null, null, false,
-        false, 0, false, false);
+        "", null, null, List.of(), help, version, false, null, null, null, null, null, null, null,
+        null, false, false, 0, false, false, false);
   }
 
   private static final class Options {
@@ -77,10 +80,13 @@ record CommandLine(
     private String dependencyCoordinate;
     private String dependencyName;
     private String dependencyCatalog;
+    private String toolchainAction;
+    private String toolchainSpec;
     private boolean offline;
     private boolean testDependency;
     private int treeDepth = 3;
     private boolean treeWorkspace;
+    private boolean workspacePin;
     private boolean resolveDependencies;
     private boolean formatCheck;
 
@@ -113,8 +119,9 @@ record CommandLine(
           resolveDependencies = true;
         }
         case "--workspace" -> {
-          require(command.equals("tree"), option);
-          treeWorkspace = true;
+          require(command.equals("tree") || command.equals("toolchain"), option);
+          if (command.equals("tree")) treeWorkspace = true;
+          else workspacePin = true;
         }
         case "--offline" -> offline = true;
         case "--test" -> {
@@ -169,6 +176,19 @@ record CommandLine(
             throw new IllegalArgumentException("resolve accepts one dependency coordinate");
           dependencyCoordinate = value;
         }
+        case "toolchain" -> {
+          if (toolchainAction == null) {
+            if (!value.equals("list") && !value.equals("pin") && !value.equals("install")) {
+              throw new IllegalArgumentException("unknown toolchain command: " + value);
+            }
+            toolchainAction = value;
+          } else if ((toolchainAction.equals("pin") || toolchainAction.equals("install"))
+              && toolchainSpec == null) {
+            toolchainSpec = value;
+          } else {
+            throw new IllegalArgumentException("unexpected toolchain argument: " + value);
+          }
+        }
         default -> throw new IllegalArgumentException("unknown argument: " + value);
       }
     }
@@ -193,6 +213,18 @@ record CommandLine(
       if (command.equals("resolve") && dependencyCoordinate == null) {
         throw new IllegalArgumentException("resolve needs a dependency coordinate");
       }
+      if (command.equals("toolchain") && toolchainAction == null) {
+        throw new IllegalArgumentException("toolchain needs list, pin, or install");
+      }
+      if (command.equals("toolchain")
+          && (toolchainAction.equals("pin") || toolchainAction.equals("install"))
+          && toolchainSpec == null) {
+        throw new IllegalArgumentException(
+            "toolchain " + toolchainAction + " needs java@<version>");
+      }
+      if (command.equals("toolchain") && toolchainAction.equals("list") && workspacePin) {
+        throw new IllegalArgumentException("--workspace only applies to toolchain pin");
+      }
     }
 
     private CommandLine result() {
@@ -210,10 +242,13 @@ record CommandLine(
           dependencyCoordinate,
           dependencyName,
           dependencyCatalog,
+          toolchainAction,
+          toolchainSpec,
           resolveDependencies,
           testDependency,
           treeDepth,
           treeWorkspace,
+          workspacePin,
           formatCheck);
     }
 

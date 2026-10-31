@@ -3,11 +3,15 @@ package dev.jot.cli;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class CommandLineTest {
+  @TempDir Path temp;
+
   @Test
   void separatesJotOptionsFromApplicationArguments() {
     CommandLine parsed =
@@ -58,6 +62,43 @@ class CommandLineTest {
     assertEquals(
         "tree dependency cannot be combined with --workspace",
         parseError("tree", "org.example:library:1.0", "--workspace"));
+  }
+
+  @Test
+  void parsesJavaToolchainCommands() {
+    CommandLine parsed =
+        CommandLine.parse(new String[] {"toolchain", "pin", "java@21", "--workspace"});
+
+    assertEquals("toolchain", parsed.command());
+    assertEquals("pin", parsed.toolchainAction());
+    assertEquals("java@21", parsed.toolchainSpec());
+    assertTrue(parsed.workspacePin());
+    assertEquals("toolchain needs list, pin, or install", parseError("toolchain"));
+  }
+
+  @Test
+  void pinsJavaToolchainFromTheCli() throws Exception {
+    Files.writeString(temp.resolve("jot.toml"), "[project]\nname = \"toolchain-cli\"\n");
+    String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+    Process process =
+        new ProcessBuilder(
+                java,
+                "-cp",
+                System.getProperty("java.class.path"),
+                "dev.jot.cli.Main",
+                "toolchain",
+                "pin",
+                "java@21",
+                "--project",
+                temp.toString())
+            .directory(temp.toFile())
+            .redirectErrorStream(true)
+            .start();
+    String output = new String(process.getInputStream().readAllBytes());
+
+    assertEquals(0, process.waitFor(), output);
+    assertTrue(Files.readString(temp.resolve("jot.toml")).contains("java = \"21\""));
+    assertTrue(output.contains("pinned java@21"));
   }
 
   @Test

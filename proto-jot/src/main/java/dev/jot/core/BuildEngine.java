@@ -27,7 +27,7 @@ public final class BuildEngine {
   public static void build(WorkspaceProject project, MavenResolver resolver) throws Exception {
     Path root = project.root();
     ProjectConfig config = project.config();
-    JavaToolchain.requireCompatible(config.javaVersion());
+    Path javaHome = JavaToolchain.javaHome(config.javaVersion());
     List<MavenResolver.ResolvedArtifact> externalArtifacts =
         resolveExternalArtifacts(project, resolver);
     List<Path> sources = new ArrayList<>();
@@ -55,13 +55,14 @@ public final class BuildEngine {
     }
     Path artifact = target.resolve(config.name() + "-" + config.version() + ".jar");
     Path stateFile = target.resolve(".jot/build-state.properties");
-    String compileFingerprint = compileFingerprint(project, externalArtifacts);
+    String compileFingerprint = compileFingerprint(project, externalArtifacts, javaHome);
     Properties previousState = readState(stateFile);
     IncrementalJavaCompiler.Result compilation =
         IncrementalJavaCompiler.compile(
             root,
             classes,
             config.javaVersion(),
+            javaHome,
             classpath(project, externalArtifacts),
             compileFingerprint,
             sources,
@@ -82,7 +83,7 @@ public final class BuildEngine {
       List<String> jar =
           new ArrayList<>(
               List.of(
-                  jdkTool("jar"),
+                  jdkTool(javaHome, "jar"),
                   "--create",
                   "--file",
                   artifact.toString(),
@@ -123,7 +124,7 @@ public final class BuildEngine {
 
   public static void run(WorkspaceProject project, List<String> arguments, MavenResolver resolver)
       throws Exception {
-    JavaToolchain.requireCompatible(project.config().javaVersion());
+    Path javaHome = JavaToolchain.javaHome(project.config().javaVersion());
     List<String> classpathEntries = new ArrayList<>();
     classpathEntries.add(project.root().resolve(project.config().outputDirectory()).toString());
     for (WorkspaceProject dependency : transitiveDependencies(project)) {
@@ -136,7 +137,7 @@ public final class BuildEngine {
     List<String> command =
         new ArrayList<>(
             List.of(
-                jdkTool("java"),
+                jdkTool(javaHome, "java"),
                 "-cp",
                 String.join(System.getProperty("path.separator"), classpathEntries),
                 project.config().mainClass()));
@@ -147,7 +148,7 @@ public final class BuildEngine {
   public static Path doc(WorkspaceProject project, MavenResolver resolver) throws Exception {
     Path root = project.root();
     ProjectConfig config = project.config();
-    JavaToolchain.requireCompatible(config.javaVersion());
+    Path javaHome = JavaToolchain.javaHome(config.javaVersion());
     List<Path> sources = collectSources(root, config.sourceDirectories());
     if (sources.isEmpty()) {
       throw new IllegalStateException(
@@ -160,7 +161,7 @@ public final class BuildEngine {
     List<String> command =
         new ArrayList<>(
             List.of(
-                jdkTool("javadoc"),
+                jdkTool(javaHome, "javadoc"),
                 "--release",
                 config.javaVersion(),
                 "-quiet",
@@ -177,7 +178,7 @@ public final class BuildEngine {
   public static LintResult lint(WorkspaceProject project, MavenResolver resolver) throws Exception {
     Path root = project.root();
     ProjectConfig config = project.config();
-    JavaToolchain.requireCompatible(config.javaVersion());
+    Path javaHome = JavaToolchain.javaHome(config.javaVersion());
     List<Path> sources = collectSources(root, config.sourceDirectories());
     if (sources.isEmpty()) {
       throw new IllegalStateException(
@@ -190,7 +191,7 @@ public final class BuildEngine {
     List<String> command =
         new ArrayList<>(
             List.of(
-                jdkTool("javac"),
+                jdkTool(javaHome, "javac"),
                 "--release",
                 config.javaVersion(),
                 "-Xlint:all",
@@ -221,7 +222,7 @@ public final class BuildEngine {
       throws Exception {
     Path root = project.root();
     ProjectConfig config = project.config();
-    JavaToolchain.requireCompatible(config.javaVersion());
+    Path javaHome = JavaToolchain.javaHome(config.javaVersion());
     if (config.javaFormatter() == null || config.javaFormatter().isBlank()) {
       throw new IllegalArgumentException(
           "missing [format].java in jot.toml; set it to a pinned formatter coordinate");
@@ -240,7 +241,7 @@ public final class BuildEngine {
     List<String> command =
         new ArrayList<>(
             List.of(
-                jdkTool("java"),
+                jdkTool(javaHome, "java"),
                 "--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED",
                 "--add-exports=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED",
                 "--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED",
@@ -302,6 +303,7 @@ public final class BuildEngine {
     build(project, resolver);
     Path root = project.root();
     ProjectConfig config = project.config();
+    Path javaHome = JavaToolchain.javaHome(config.javaVersion());
     List<Path> testSources = collectSources(root, config.testSourceDirectories());
     if (testSources.isEmpty()) {
       System.out.println("test: no test sources in " + config.name());
@@ -339,7 +341,7 @@ public final class BuildEngine {
     List<String> javac =
         new ArrayList<>(
             List.of(
-                jdkTool("javac"),
+                jdkTool(javaHome, "javac"),
                 "--release",
                 config.javaVersion(),
                 "-classpath",
@@ -355,7 +357,7 @@ public final class BuildEngine {
     List<String> runner =
         new ArrayList<>(
             List.of(
-                jdkTool("java"),
+                jdkTool(javaHome, "java"),
                 "-cp",
                 String.join(System.getProperty("path.separator"), runtimeClasspath),
                 "--enable-final-field-mutation=ALL-UNNAMED",
@@ -368,7 +370,9 @@ public final class BuildEngine {
   }
 
   private static String compileFingerprint(
-      WorkspaceProject project, List<MavenResolver.ResolvedArtifact> externalArtifacts)
+      WorkspaceProject project,
+      List<MavenResolver.ResolvedArtifact> externalArtifacts,
+      Path javaHome)
       throws IOException, NoSuchAlgorithmException {
     Path root = project.root();
     ProjectConfig config = project.config();
@@ -376,7 +380,7 @@ public final class BuildEngine {
     updateDigest(digest, config.javaVersion());
     updateDigest(digest, config.sourceDirectories().toString());
     updateDigest(digest, config.outputDirectory());
-    updateDigest(digest, System.getProperty("java.version"));
+    updateDigest(digest, javaHome.toString());
     for (WorkspaceProject dependency : transitiveDependencies(project)) {
       updateDigest(digest, dependency.root().toString());
       Path dependencyClasses = dependency.root().resolve(dependency.config().outputDirectory());
@@ -612,9 +616,8 @@ public final class BuildEngine {
     }
   }
 
-  private static String jdkTool(String name) {
-    String executable = System.getProperty("os.name").startsWith("Windows") ? name + ".exe" : name;
-    return Path.of(System.getProperty("java.home"), "bin", executable).toString();
+  private static String jdkTool(Path javaHome, String name) {
+    return JavaToolchain.tool(javaHome, name).toString();
   }
 
   private static void deleteTree(Path root) throws IOException {

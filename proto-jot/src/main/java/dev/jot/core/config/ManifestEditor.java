@@ -22,6 +22,14 @@ public final class ManifestEditor {
     addDependencyValue(manifest, name, java.util.Map.of("catalog", catalogAlias), test);
   }
 
+  public static void pinJavaToolchain(Path manifest, String version) throws IOException {
+    TomlDocument.read(manifest);
+    List<String> lines = new ArrayList<>(Files.readAllLines(manifest));
+    removeEntry(lines, "toolchains", "java");
+    insertEntry(lines, "toolchains", "java", version);
+    writeValidated(manifest, String.join("\n", lines) + "\n");
+  }
+
   private static void addDependencyValue(Path manifest, String name, Object value, boolean test)
       throws IOException {
     if (name == null || name.isBlank())

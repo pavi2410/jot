@@ -3,6 +3,7 @@ package dev.jot.cli;
 import dev.jot.core.BuildEngine;
 import dev.jot.core.DependencyListing;
 import dev.jot.core.DependencyTree;
+import dev.jot.core.JavaToolchain;
 import dev.jot.core.ProjectConfig;
 import dev.jot.core.ProjectInitializer;
 import dev.jot.core.ProjectWorkspace;
@@ -54,6 +55,10 @@ public final class Main {
     }
     if (commandLine.version()) {
       System.out.println("jot " + VERSION);
+      return;
+    }
+    if (commandLine.command().equals("toolchain")) {
+      toolchain(commandLine);
       return;
     }
 
@@ -246,6 +251,62 @@ public final class Main {
     System.out.println("remove: " + name + " from " + manifest);
   }
 
+  private static void toolchain(CommandLine commandLine) throws Exception {
+    if (commandLine.toolchainAction().equals("install")) {
+      throw new IllegalStateException(
+          "Java Jot can use installed JDKs but does not install toolchains yet");
+    }
+    if (commandLine.toolchainAction().equals("list")) {
+      Path jdks = Path.of(System.getProperty("user.home"), ".jot", "jdks");
+      List<JavaToolchain.Installation> installed = JavaToolchain.installedJdks(jdks);
+      if (installed.isEmpty()) {
+        System.out.println("toolchain: no managed JDKs installed");
+        return;
+      }
+      for (JavaToolchain.Installation installation : installed) {
+        System.out.println(
+            "java@"
+                + installation.feature()
+                + " ("
+                + installation.version()
+                + ") -> "
+                + installation.home());
+      }
+      return;
+    }
+
+    String spec = commandLine.toolchainSpec();
+    if (!spec.startsWith("java@")) {
+      throw new IllegalArgumentException("expected java@<version>, got " + spec);
+    }
+    String version = spec.substring("java@".length());
+    JavaToolchain.parseRelease(version);
+    Path start =
+        commandLine.projectRoot() == null
+            ? Path.of("").toAbsolutePath()
+            : commandLine.projectRoot();
+    Path manifest =
+        commandLine.workspacePin()
+            ? findWorkspaceManifest(start)
+            : findProjectRoot(start).resolve("jot.toml");
+    ManifestEditor.pinJavaToolchain(manifest, version);
+    System.out.println("toolchain: pinned java@" + version + " in " + manifest);
+  }
+
+  private static Path findWorkspaceManifest(Path start) {
+    Path project = findProjectRoot(start);
+    for (Path current = project; current != null; current = current.getParent()) {
+      Path manifest = current.resolve("jot.toml");
+      if (!Files.isRegularFile(manifest)) continue;
+      try {
+        if (ProjectConfig.read(manifest, null).isWorkspace()) return manifest;
+      } catch (Exception error) {
+        throw new IllegalArgumentException("cannot read workspace manifest " + manifest, error);
+      }
+    }
+    throw new IllegalArgumentException("--workspace requires a workspace jot.toml");
+  }
+
   private static void build(
       ProjectConfig config, ProjectWorkspace workspace, String module, MavenResolver resolver)
       throws Exception {
@@ -370,7 +431,7 @@ public final class Main {
     System.out.println("jot " + VERSION + " — a Java build tool");
     System.out.println(
         "Usage: jot"
-            + " <init|build|run|test|doc|lint|fmt|add|remove|deps|outdated|resolve|tree|lock|clean>"
+            + " <init|build|run|test|doc|lint|fmt|add|remove|deps|outdated|resolve|tree|toolchain|lock|clean>"
             + " [options]");
     System.out.println("       jot add <group:artifact:version> [--name <alias>] [--test]");
     System.out.println("       jot add --catalog <alias> [--name <dependency>] [--test]");
@@ -381,6 +442,8 @@ public final class Main {
     System.out.println(
         "       jot tree --workspace [--module <name>] [--depth <levels>] [--offline]");
     System.out.println("       jot resolve <group:artifact:version> [--deps] [--offline]");
+    System.out.println("       jot toolchain list");
+    System.out.println("       jot toolchain pin java@<version> [--workspace]");
     System.out.println("       jot doc [--project <directory>] [--module <name>] [--offline]");
     System.out.println("       jot lint [--project <directory>] [--module <name>] [--offline]");
     System.out.println(
