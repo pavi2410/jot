@@ -532,6 +532,7 @@ public final class Main {
   private static void build(
       ProjectConfig config, ProjectWorkspace workspace, String module, MavenResolver resolver)
       throws Exception {
+    long started = System.nanoTime();
     if (!config.isWorkspace() && module != null) {
       throw new IllegalArgumentException("--module requires a workspace");
     }
@@ -540,6 +541,8 @@ public final class Main {
             ? workspace.ordered()
             : workspace.dependenciesFirst(workspace.find(module == null ? config.name() : module));
     for (WorkspaceProject project : projects) BuildEngine.build(project, resolver);
+    double seconds = (System.nanoTime() - started) / 1_000_000_000.0;
+    System.out.printf(java.util.Locale.ROOT, "build: finished in %.3f s%n", seconds);
   }
 
   private static void run(

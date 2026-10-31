@@ -5,6 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.jot.core.ProjectInitializer;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -168,6 +171,22 @@ class CommandLineTest {
             CommandLineParser.parse(new String[] {"self", "uninstall", "--yes"}).command());
     assertTrue(assertInstanceOf(CommandLine.SelfUninstall.class, uninstall.action()).yes());
     assertEquals("self needs update or uninstall", parseError("self"));
+  }
+
+  @Test
+  void buildCommandPrintsElapsedBuildTime() throws Exception {
+    Path project = temp.resolve("timed-build");
+    ProjectInitializer.initialize(project, "timed-build", null, null, null);
+    PrintStream originalOut = System.out;
+    ByteArrayOutputStream output = new ByteArrayOutputStream();
+    try (PrintStream captured = new PrintStream(output)) {
+      System.setOut(captured);
+      Main.execute(new String[] {"build", "--project", project.toString(), "--offline"});
+    } finally {
+      System.setOut(originalOut);
+    }
+
+    assertTrue(output.toString().matches("(?s).*build: finished in \\d+\\.\\d{3} s\\R?$"));
   }
 
   @Test
