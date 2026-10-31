@@ -1,6 +1,7 @@
 package dev.jot.cli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
@@ -20,9 +21,9 @@ class CommandLineTest {
               "run", "--project", "demo", "--module", "app", "--offline", "--", "--port", "8080"
             });
 
-    assertEquals("run", parsed.command());
-    assertEquals("app", parsed.module());
-    assertEquals(List.of("--port", "8080"), parsed.runArguments());
+    CommandLine.Run run = assertInstanceOf(CommandLine.Run.class, parsed.command());
+    assertEquals("app", run.module());
+    assertEquals(List.of("--port", "8080"), run.arguments());
     assertTrue(parsed.projectRoot().endsWith("demo"));
     assertTrue(parsed.offline());
   }
@@ -31,8 +32,25 @@ class CommandLineTest {
   void acceptsOfflineAsAGlobalOptionBeforeTheCommand() {
     CommandLine parsed = CommandLineParser.parse(new String[] {"--offline", "--offline", "build"});
 
-    assertEquals("build", parsed.command());
+    assertInstanceOf(CommandLine.Build.class, parsed.command());
     assertTrue(parsed.offline());
+  }
+
+  @Test
+  void representsSimpleCommandsAsTheirOwnRecords() {
+    CommandLine.Build build =
+        assertInstanceOf(
+            CommandLine.Build.class,
+            CommandLineParser.parse(new String[] {"build", "--module", "core"}).command());
+    assertEquals("core", build.module());
+    assertInstanceOf(
+        CommandLine.Test.class, CommandLineParser.parse(new String[] {"test"}).command());
+    assertInstanceOf(
+        CommandLine.Deps.class, CommandLineParser.parse(new String[] {"deps"}).command());
+    assertInstanceOf(
+        CommandLine.Lock.class, CommandLineParser.parse(new String[] {"lock"}).command());
+    assertInstanceOf(
+        CommandLine.Clean.class, CommandLineParser.parse(new String[] {"clean"}).command());
   }
 
   @Test
@@ -41,9 +59,9 @@ class CommandLineTest {
         CommandLineParser.parse(
             new String[] {"tree", "org.example:library:1.2", "--depth", "3", "--offline"});
 
-    assertEquals("tree", parsed.command());
-    assertEquals("org.example:library:1.2", parsed.dependencyCoordinate());
-    assertEquals(3, parsed.treeDepth());
+    CommandLine.Tree tree = assertInstanceOf(CommandLine.Tree.class, parsed.command());
+    assertEquals("org.example:library:1.2", tree.coordinate());
+    assertEquals(3, tree.depth());
     assertTrue(parsed.offline());
     assertEquals("tree needs a dependency coordinate or --workspace", parseError("tree"));
     assertEquals(
@@ -56,10 +74,10 @@ class CommandLineTest {
         CommandLineParser.parse(
             new String[] {"tree", "--workspace", "--module", "app", "--depth", "2"});
 
-    assertEquals("tree", parsed.command());
-    assertTrue(parsed.treeWorkspace());
-    assertEquals("app", parsed.module());
-    assertEquals(2, parsed.treeDepth());
+    CommandLine.Tree tree = assertInstanceOf(CommandLine.Tree.class, parsed.command());
+    assertTrue(tree.workspace());
+    assertEquals("app", tree.module());
+    assertEquals(2, tree.depth());
     assertEquals(
         "tree dependency cannot be combined with --workspace",
         parseError("tree", "org.example:library:1.0", "--workspace"));
@@ -70,18 +88,23 @@ class CommandLineTest {
     CommandLine parsed =
         CommandLineParser.parse(new String[] {"toolchain", "pin", "java@21", "--workspace"});
 
-    assertEquals("toolchain", parsed.command());
-    assertEquals("pin", parsed.toolchainAction());
-    assertEquals("java@21", parsed.toolchainSpec());
-    assertTrue(parsed.workspacePin());
+    CommandLine.Toolchain toolchain =
+        assertInstanceOf(CommandLine.Toolchain.class, parsed.command());
+    CommandLine.PinToolchain pin =
+        assertInstanceOf(CommandLine.PinToolchain.class, toolchain.action());
+    assertEquals("java@21", pin.specification());
+    assertTrue(pin.workspace());
     assertEquals("toolchain needs list, pin, or install", parseError("toolchain"));
 
     CommandLine install =
         CommandLineParser.parse(
             new String[] {"toolchain", "install", "java@21", "--force", "--offline"});
-    assertEquals("install", install.toolchainAction());
-    assertEquals("java@21", install.toolchainSpec());
-    assertTrue(install.toolchainForce());
+    CommandLine.Toolchain installCommand =
+        assertInstanceOf(CommandLine.Toolchain.class, install.command());
+    CommandLine.InstallToolchain installAction =
+        assertInstanceOf(CommandLine.InstallToolchain.class, installCommand.action());
+    assertEquals("java@21", installAction.specification());
+    assertTrue(installAction.force());
     assertTrue(install.offline());
     assertEquals(
         "--force only applies to toolchain install",
@@ -143,9 +166,9 @@ class CommandLineTest {
     CommandLine parsed =
         CommandLineParser.parse(new String[] {"resolve", "org.example:library:1.2", "--deps"});
 
-    assertEquals("resolve", parsed.command());
-    assertEquals("org.example:library:1.2", parsed.dependencyCoordinate());
-    assertTrue(parsed.resolveDependencies());
+    CommandLine.Resolve resolve = assertInstanceOf(CommandLine.Resolve.class, parsed.command());
+    assertEquals("org.example:library:1.2", resolve.coordinate());
+    assertTrue(resolve.dependencies());
     assertEquals("resolve needs a dependency coordinate", parseError("resolve"));
     assertEquals("unknown argument: --deps", parseError("build", "--deps"));
   }
@@ -155,8 +178,8 @@ class CommandLineTest {
     CommandLine parsed =
         CommandLineParser.parse(new String[] {"outdated", "--module", "app", "--offline"});
 
-    assertEquals("outdated", parsed.command());
-    assertEquals("app", parsed.module());
+    CommandLine.Outdated outdated = assertInstanceOf(CommandLine.Outdated.class, parsed.command());
+    assertEquals("app", outdated.module());
     assertTrue(parsed.offline());
   }
 
@@ -166,8 +189,8 @@ class CommandLineTest {
         CommandLineParser.parse(
             new String[] {"doc", "--project", "demo", "--module", "api", "--offline"});
 
-    assertEquals("doc", parsed.command());
-    assertEquals("api", parsed.module());
+    CommandLine.Doc doc = assertInstanceOf(CommandLine.Doc.class, parsed.command());
+    assertEquals("api", doc.module());
     assertTrue(parsed.projectRoot().endsWith("demo"));
     assertTrue(parsed.offline());
   }
@@ -176,35 +199,46 @@ class CommandLineTest {
   void parsesLintWorkspaceSelection() {
     CommandLine parsed = CommandLineParser.parse(new String[] {"lint", "--module", "core"});
 
-    assertEquals("lint", parsed.command());
-    assertEquals("core", parsed.module());
+    CommandLine.Lint lint = assertInstanceOf(CommandLine.Lint.class, parsed.command());
+    assertEquals("core", lint.module());
   }
 
   @Test
   void parsesFormatterCheckMode() {
     CommandLine parsed = CommandLineParser.parse(new String[] {"fmt", "--check", "--offline"});
 
-    assertEquals("fmt", parsed.command());
-    assertTrue(parsed.formatCheck());
+    CommandLine.Fmt fmt = assertInstanceOf(CommandLine.Fmt.class, parsed.command());
+    assertTrue(fmt.check());
     assertTrue(parsed.offline());
     assertEquals("unknown argument: --check", parseError("build", "--check"));
   }
 
   @Test
   void parsesDependencyAddAndRemoveOptions() {
-    CommandLine add =
-        CommandLineParser.parse(
-            new String[] {"add", "org.example:annotations:1.0", "--name", "annotations", "--test"});
-    assertEquals("org.example:annotations:1.0", add.dependencyCoordinate());
-    assertEquals("annotations", add.dependencyName());
-    assertTrue(add.testDependency());
+    CommandLine.Add add =
+        assertInstanceOf(
+            CommandLine.Add.class,
+            CommandLineParser.parse(
+                    new String[] {
+                      "add", "org.example:annotations:1.0", "--name", "annotations", "--test"
+                    })
+                .command());
+    assertEquals("org.example:annotations:1.0", add.coordinate());
+    assertEquals("annotations", add.name());
+    assertTrue(add.test());
 
-    CommandLine remove = CommandLineParser.parse(new String[] {"remove", "annotations", "--test"});
-    assertEquals("annotations", remove.dependencyName());
-    assertTrue(remove.testDependency());
+    CommandLine.Remove remove =
+        assertInstanceOf(
+            CommandLine.Remove.class,
+            CommandLineParser.parse(new String[] {"remove", "annotations", "--test"}).command());
+    assertEquals("annotations", remove.name());
+    assertTrue(remove.test());
 
-    CommandLine catalog = CommandLineParser.parse(new String[] {"add", "--catalog", "junit"});
-    assertEquals("junit", catalog.dependencyCatalog());
+    CommandLine.Add catalog =
+        assertInstanceOf(
+            CommandLine.Add.class,
+            CommandLineParser.parse(new String[] {"add", "--catalog", "junit"}).command());
+    assertEquals("junit", catalog.catalog());
   }
 
   @Test
@@ -221,10 +255,10 @@ class CommandLineTest {
               "init", "sample-app", "--template", "library", "--package", "dev.sample"
             });
 
-    assertEquals("init", parsed.command());
-    assertEquals("sample-app", parsed.projectName());
-    assertEquals("library", parsed.template());
-    assertEquals("dev.sample", parsed.packageName());
+    CommandLine.Init init = assertInstanceOf(CommandLine.Init.class, parsed.command());
+    assertEquals("sample-app", init.name());
+    assertEquals("library", init.template());
+    assertEquals("dev.sample", init.packageName());
   }
 
   @Test

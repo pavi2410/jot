@@ -58,43 +58,39 @@ public final class Main {
       System.out.println("jot " + VERSION);
       return;
     }
-    if (commandLine.command().equals("toolchain")) {
-      toolchain(commandLine);
+    if (commandLine.command() instanceof CommandLine.Toolchain toolchain) {
+      toolchain(toolchain, commandLine);
       return;
     }
 
-    if (commandLine.command().equals("init")) {
-      if (commandLine.projectRoot() != null && commandLine.projectName() != null) {
+    if (commandLine.command() instanceof CommandLine.Init init) {
+      if (commandLine.projectRoot() != null && init.name() != null) {
         throw new IllegalArgumentException("use either the init name or --project, not both");
       }
       Path destination = commandLine.projectRoot();
       if (destination == null) {
         Path current = Path.of("").toAbsolutePath();
-        destination =
-            commandLine.projectName() == null
-                ? current
-                : current.resolve(commandLine.projectName());
+        destination = init.name() == null ? current : current.resolve(init.name());
       }
-      String name = commandLine.projectName();
+      String name = init.name();
       if (name == null) name = inferredProjectName(destination);
       Path created =
-          ProjectInitializer.initialize(
-              destination, name, commandLine.template(), commandLine.packageName());
+          ProjectInitializer.initialize(destination, name, init.template(), init.packageName());
       System.out.println(
           "init: created "
-              + (commandLine.template() == null ? "app" : commandLine.template())
+              + (init.template() == null ? "app" : init.template())
               + " project at "
               + created);
       return;
     }
 
-    if (commandLine.command().equals("tree")) {
+    if (commandLine.command() instanceof CommandLine.Tree tree) {
       MavenResolver resolver =
           new MavenResolver(
               Path.of(System.getProperty("user.home"), ".jot", "java-maven-cache"),
               MavenResolver.defaultRepository(),
               commandLine.offline());
-      if (commandLine.treeWorkspace()) {
+      if (tree.workspace()) {
         Path root =
             commandLine.projectRoot() == null
                 ? findProjectRoot(Path.of("").toAbsolutePath())
@@ -105,16 +101,13 @@ public final class Main {
         }
         ProjectWorkspace workspace = ProjectWorkspace.load(root, config);
         List<WorkspaceProject> projects =
-            commandLine.module() == null
-                ? workspace.ordered()
-                : List.of(workspace.find(commandLine.module()));
+            tree.module() == null ? workspace.ordered() : List.of(workspace.find(tree.module()));
         List<DependencyTree.WorkspaceModule> modules = new java.util.ArrayList<>();
         for (WorkspaceProject project : projects) {
           List<List<MavenResolver.TreeEntry>> externalTrees = new java.util.ArrayList<>();
           for (String coordinate : project.config().dependencies().values()) {
             externalTrees.add(
-                resolver.resolveDependencyTree(
-                    MavenCoordinate.parse(coordinate), commandLine.treeDepth()));
+                resolver.resolveDependencyTree(MavenCoordinate.parse(coordinate), tree.depth()));
           }
           modules.add(
               new DependencyTree.WorkspaceModule(
@@ -126,21 +119,20 @@ public final class Main {
         return;
       }
       List<MavenResolver.TreeEntry> entries =
-          resolver.resolveDependencyTree(
-              MavenCoordinate.parse(commandLine.dependencyCoordinate()), commandLine.treeDepth());
+          resolver.resolveDependencyTree(MavenCoordinate.parse(tree.coordinate()), tree.depth());
       System.out.print(DependencyTree.render(entries));
       return;
     }
 
-    if (commandLine.command().equals("resolve")) {
+    if (commandLine.command() instanceof CommandLine.Resolve resolve) {
       MavenResolver resolver =
           new MavenResolver(
               Path.of(System.getProperty("user.home"), ".jot", "java-maven-cache"),
               MavenResolver.defaultRepository(),
               commandLine.offline());
-      MavenCoordinate coordinate = resolver.resolveCoordinate(commandLine.dependencyCoordinate());
+      MavenCoordinate coordinate = resolver.resolveCoordinate(resolve.coordinate());
       System.out.println("resolve: " + coordinate.notation());
-      if (commandLine.resolveDependencies()) {
+      if (resolve.dependencies()) {
         List<MavenResolver.DirectDependency> dependencies =
             resolver.resolveDirectDependencies(coordinate);
         if (dependencies.isEmpty()) {
@@ -174,53 +166,45 @@ public final class Main {
             MavenResolver.defaultRepository(),
             commandLine.offline());
     switch (commandLine.command()) {
-      case "build" -> build(config, workspace, commandLine.module(), resolver);
-      case "run" ->
-          run(config, workspace, commandLine.module(), commandLine.runArguments(), resolver);
-      case "test" -> test(config, workspace, commandLine.module(), resolver);
-      case "doc" -> doc(config, workspace, commandLine.module(), resolver);
-      case "lint" -> lint(config, workspace, commandLine.module(), resolver);
-      case "fmt" ->
-          fmt(config, workspace, commandLine.module(), commandLine.formatCheck(), resolver);
-      case "deps" ->
+      case CommandLine.Build build -> build(config, workspace, build.module(), resolver);
+      case CommandLine.Run run -> run(config, workspace, run.module(), run.arguments(), resolver);
+      case CommandLine.Test test -> test(config, workspace, test.module(), resolver);
+      case CommandLine.Doc doc -> doc(config, workspace, doc.module(), resolver);
+      case CommandLine.Lint lint -> lint(config, workspace, lint.module(), resolver);
+      case CommandLine.Fmt fmt -> fmt(config, workspace, fmt.module(), fmt.check(), resolver);
+      case CommandLine.Deps deps ->
           System.out.print(
               DependencyListing.render(
-                  config, workspace, commandLine.module(), projectRoot.resolve("jot.lock")));
-      case "outdated" ->
+                  config, workspace, deps.module(), projectRoot.resolve("jot.lock")));
+      case CommandLine.Outdated outdated ->
           System.out.print(
               DependencyListing.renderOutdated(
-                  config,
-                  workspace,
-                  commandLine.module(),
-                  projectRoot.resolve("jot.lock"),
-                  resolver));
-      case "add" -> addDependency(projectRoot, commandLine, resolver);
-      case "remove" -> removeDependency(projectRoot, commandLine, resolver);
-      case "lock" -> BuildEngine.lock(workspace, projectRoot.resolve("jot.lock"), resolver);
-      case "clean" -> {
+                  config, workspace, outdated.module(), projectRoot.resolve("jot.lock"), resolver));
+      case CommandLine.Add add -> addDependency(projectRoot, add, resolver);
+      case CommandLine.Remove remove -> removeDependency(projectRoot, remove, resolver);
+      case CommandLine.Lock ignored ->
+          BuildEngine.lock(workspace, projectRoot.resolve("jot.lock"), resolver);
+      case CommandLine.Clean ignored -> {
         for (WorkspaceProject project : workspace.ordered()) BuildEngine.clean(project);
       }
-      default -> throw new IllegalArgumentException("unknown command: " + commandLine.command());
+      default -> throw new IllegalStateException("command handled before project loading");
     }
   }
 
   private static void addDependency(
-      Path projectRoot, CommandLine commandLine, MavenResolver resolver) throws Exception {
+      Path projectRoot, CommandLine.Add commandLine, MavenResolver resolver) throws Exception {
     MavenCoordinate coordinate =
-        commandLine.dependencyCoordinate() == null
-            ? null
-            : MavenCoordinate.parse(commandLine.dependencyCoordinate());
+        commandLine.coordinate() == null ? null : MavenCoordinate.parse(commandLine.coordinate());
     String name =
-        commandLine.dependencyName() != null
-            ? commandLine.dependencyName()
-            : coordinate == null ? commandLine.dependencyCatalog() : coordinate.artifact();
+        commandLine.name() != null
+            ? commandLine.name()
+            : coordinate == null ? commandLine.catalog() : coordinate.artifact();
     Path manifest = projectRoot.resolve("jot.toml");
     if (coordinate == null) {
       ManifestEditor.addCatalogDependency(
-          manifest, name, commandLine.dependencyCatalog(), commandLine.testDependency());
+          manifest, name, commandLine.catalog(), commandLine.test());
     } else {
-      ManifestEditor.addDependency(
-          manifest, name, coordinate.notation(), commandLine.testDependency());
+      ManifestEditor.addDependency(manifest, name, coordinate.notation(), commandLine.test());
     }
     ProjectConfig updatedConfig = ProjectConfig.read(manifest, null);
     ProjectWorkspace updatedWorkspace =
@@ -232,15 +216,15 @@ public final class Main {
   }
 
   private static void removeDependency(
-      Path projectRoot, CommandLine commandLine, MavenResolver resolver) throws Exception {
-    String name = commandLine.dependencyName();
+      Path projectRoot, CommandLine.Remove commandLine, MavenResolver resolver) throws Exception {
+    String name = commandLine.name();
     Path manifest = projectRoot.resolve("jot.toml");
-    if (!ManifestEditor.removeDependency(manifest, name, commandLine.testDependency())) {
+    if (!ManifestEditor.removeDependency(manifest, name, commandLine.test())) {
       throw new IllegalArgumentException(
           "dependency `"
               + name
               + "` was not found in ["
-              + (commandLine.testDependency() ? "test-dependencies" : "dependencies")
+              + (commandLine.test() ? "test-dependencies" : "dependencies")
               + "]");
     }
     ProjectConfig updatedConfig = ProjectConfig.read(manifest, null);
@@ -252,21 +236,21 @@ public final class Main {
     System.out.println("remove: " + name + " from " + manifest);
   }
 
-  private static void toolchain(CommandLine commandLine) throws Exception {
-    if (commandLine.toolchainAction().equals("install")) {
-      String spec = commandLine.toolchainSpec();
+  private static void toolchain(CommandLine.Toolchain command, CommandLine globals)
+      throws Exception {
+    if (command.action() instanceof CommandLine.InstallToolchain install) {
+      String spec = install.specification();
       if (!spec.startsWith("java@")) {
         throw new IllegalArgumentException(
             "Java Jot currently installs Adoptium JDKs; got " + spec);
       }
       String version = spec.substring("java@".length());
       JavaToolchain.Installation installation =
-          new JavaToolchainManager()
-              .install(version, commandLine.toolchainForce(), commandLine.offline());
+          new JavaToolchainManager().install(version, install.force(), globals.offline());
       System.out.println("install: java " + installation.version() + " -> " + installation.home());
       return;
     }
-    if (commandLine.toolchainAction().equals("list")) {
+    if (command.action() instanceof CommandLine.ListToolchains) {
       Path jdks = Path.of(System.getProperty("user.home"), ".jot", "jdks");
       List<JavaToolchain.Installation> installed = JavaToolchain.installedJdks(jdks);
       if (installed.isEmpty()) {
@@ -285,20 +269,17 @@ public final class Main {
       return;
     }
 
-    String spec = commandLine.toolchainSpec();
+    CommandLine.PinToolchain pin = (CommandLine.PinToolchain) command.action();
+    String spec = pin.specification();
     if (!spec.startsWith("java@")) {
       throw new IllegalArgumentException("expected java@<version>, got " + spec);
     }
     String version = spec.substring("java@".length());
     JavaToolchain.parseRelease(version);
     Path start =
-        commandLine.projectRoot() == null
-            ? Path.of("").toAbsolutePath()
-            : commandLine.projectRoot();
+        globals.projectRoot() == null ? Path.of("").toAbsolutePath() : globals.projectRoot();
     Path manifest =
-        commandLine.workspacePin()
-            ? findWorkspaceManifest(start)
-            : findProjectRoot(start).resolve("jot.toml");
+        pin.workspace() ? findWorkspaceManifest(start) : findProjectRoot(start).resolve("jot.toml");
     ManifestEditor.pinJavaToolchain(manifest, version);
     System.out.println("toolchain: pinned java@" + version + " in " + manifest);
   }

@@ -38,9 +38,7 @@ final class CommandLineParser {
   }
 
   private static CommandLine special(boolean help, boolean version) {
-    return new CommandLine(
-        "", null, null, List.of(), help, version, false, null, null, null, null, null, null, null,
-        null, false, false, false, 0, false, false, false);
+    return new CommandLine(help, version, false, null, null);
   }
 
   private static final class Arguments {
@@ -234,29 +232,40 @@ final class CommandLineParser {
     }
 
     private CommandLine toCommandLine() {
-      return new CommandLine(
-          command,
-          projectRoot,
-          module,
-          List.copyOf(runArguments),
-          false,
-          false,
-          offline,
-          projectName,
-          template,
-          packageName,
-          dependencyCoordinate,
-          dependencyName,
-          dependencyCatalog,
-          toolchainAction,
-          toolchainSpec,
-          toolchainForce,
-          resolveDependencies,
-          testDependency,
-          treeDepth,
-          treeWorkspace,
-          workspacePin,
-          formatCheck);
+      CommandLine.Command parsed =
+          switch (command) {
+            case "build" -> new CommandLine.Build(module);
+            case "run" -> new CommandLine.Run(module, List.copyOf(runArguments));
+            case "test" -> new CommandLine.Test(module);
+            case "doc" -> new CommandLine.Doc(module);
+            case "lint" -> new CommandLine.Lint(module);
+            case "fmt" -> new CommandLine.Fmt(module, formatCheck);
+            case "deps" -> new CommandLine.Deps(module);
+            case "outdated" -> new CommandLine.Outdated(module);
+            case "add" ->
+                new CommandLine.Add(
+                    dependencyCoordinate, dependencyName, dependencyCatalog, testDependency);
+            case "remove" -> new CommandLine.Remove(dependencyName, testDependency);
+            case "lock" -> new CommandLine.Lock();
+            case "clean" -> new CommandLine.Clean();
+            case "init" -> new CommandLine.Init(projectName, template, packageName);
+            case "tree" ->
+                new CommandLine.Tree(module, dependencyCoordinate, treeDepth, treeWorkspace);
+            case "resolve" -> new CommandLine.Resolve(dependencyCoordinate, resolveDependencies);
+            case "toolchain" -> new CommandLine.Toolchain(toolchainAction());
+            default -> throw new IllegalArgumentException("unknown command: " + command);
+          };
+      return new CommandLine(false, false, offline, projectRoot, parsed);
+    }
+
+    private CommandLine.ToolchainAction toolchainAction() {
+      return switch (toolchainAction) {
+        case "list" -> new CommandLine.ListToolchains();
+        case "pin" -> new CommandLine.PinToolchain(toolchainSpec, workspacePin);
+        case "install" -> new CommandLine.InstallToolchain(toolchainSpec, toolchainForce);
+        default ->
+            throw new IllegalArgumentException("unknown toolchain command: " + toolchainAction);
+      };
     }
 
     private static void require(boolean condition, String option) {
