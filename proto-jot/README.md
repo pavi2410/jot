@@ -33,8 +33,9 @@ The prototype supports `init`, `build`, `run`, `test`, `bench`, `fmt`, `lint`, `
 `clean`, and accepts `--project`, `--module`, and global `--offline`. `jot clean --global`
 clears managed JDK downloads and Maven artifact caches while preserving other files in `~/.jot`.
 `jot init [name]` creates a Jot-native Java app; `--template java-lib` creates a
-library, and `--template java-cli` creates a Picocli command-line app. The `app`,
-`library`, `minimal`, and `cli` template names remain accepted as aliases. `--group`
+library, `java-cli` a Picocli command-line app, `java-server` a JDK HTTP server,
+and `java-workspace` a three-module workspace. The `app`, `library`, `minimal`,
+`cli`, `server`, and `workspace` template names remain accepted as aliases. `--group`
 sets the project group and default Java package; `--package` overrides the package.
 Build source directories, resource
 directories, and the Java release are read from `jot.toml`. A Jot manifest may

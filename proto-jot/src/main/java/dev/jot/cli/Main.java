@@ -554,7 +554,10 @@ public final class Main {
     System.out.println("       jot lint [--project <directory>] [--module <name>] [--offline]");
     System.out.println(
         "       jot fmt [--project <directory>] [--module <name>] [--check] [--offline]");
-    System.out.println("       jot init [name] [--template app|library] [--package java.package]");
+    System.out.println(
+        "       jot init [name] [--template"
+            + " java-minimal|java-lib|java-cli|java-server|java-workspace] [--group id] [--package"
+            + " java.package]");
     System.out.println(
         "       jot <build|run|test|lock|clean> [--project <directory>] [--module <name>]"
             + " [--offline]");
