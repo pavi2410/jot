@@ -17,6 +17,7 @@ import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.jar.JarOutputStream;
@@ -808,6 +809,219 @@ class BuildEngineTest {
         sentinel,
         Files.getLastModifiedTime(mainClass),
         "deleting a source should remove stale classes in a full rebuild");
+  }
+
+  @Test
+  void incrementallyCompilesTestSourcesAndRemovesOutputsForDeletedSources() throws Exception {
+    Path repository = temp.resolve("test-repository");
+    MavenCoordinate junit = MavenCoordinate.parse("sample:junit-console:1.0");
+    addMavenArtifact(
+        repository,
+        junit,
+        Map.of(
+            "org/junit/platform/console/ConsoleLauncher.java",
+            "package org.junit.platform.console; public final class ConsoleLauncher { "
+                + "public static void main(String[] args) {} }"),
+        null,
+        null);
+    write("src/main/java/sample/App.java", "package sample; public final class App {}\n");
+    write(
+        "src/test/java/sample/FirstTest.java",
+        "package sample; public final class FirstTest { public String value() { return \"one\"; }"
+            + " }\n");
+    write(
+        "src/test/java/sample/SecondTest.java",
+        "package sample; public final class SecondTest { public String value() { return \"two\"; }"
+            + " }\n");
+    write(
+        "jot.toml",
+        """
+        [project]
+        name = "incremental-tests"
+        layout = "maven"
+        [toolchains]
+        java = "%d"
+        [test-dependencies]
+        junit-console = "sample:junit-console:1.0"
+        """
+            .formatted(Runtime.version().feature()));
+    ProjectConfig config = ProjectConfig.read(temp.resolve("jot.toml"), null);
+    WorkspaceProject project = new WorkspaceProject(temp, config, List.of());
+    MavenResolver resolver = new MavenResolver(temp.resolve("test-cache"), repository.toUri());
+
+    BuildEngine.test(project, resolver);
+
+    Path firstClass = temp.resolve("target/test-classes/sample/FirstTest.class");
+    Path secondClass = temp.resolve("target/test-classes/sample/SecondTest.class");
+    FileTime sentinel = FileTime.fromMillis(1_234_567_890_000L);
+    Files.setLastModifiedTime(firstClass, sentinel);
+    Files.setLastModifiedTime(secondClass, sentinel);
+    BuildEngine.test(project, resolver);
+    assertEquals(sentinel, Files.getLastModifiedTime(firstClass));
+    assertEquals(sentinel, Files.getLastModifiedTime(secondClass));
+
+    write(
+        "src/test/java/sample/FirstTest.java",
+        "package sample; public final class FirstTest { public String value() { return \"changed\";"
+            + " } }\n");
+    BuildEngine.test(project, resolver);
+    assertNotEquals(sentinel, Files.getLastModifiedTime(firstClass));
+    assertEquals(sentinel, Files.getLastModifiedTime(secondClass));
+
+    Files.delete(temp.resolve("src/test/java/sample/SecondTest.java"));
+    BuildEngine.test(project, resolver);
+    assertFalse(Files.exists(secondClass), "deleted test sources must not leave stale classes");
+    Files.delete(temp.resolve("src/test/java/sample/FirstTest.java"));
+    BuildEngine.test(project, resolver);
+    assertFalse(Files.exists(firstClass), "removing all test sources must clear test outputs");
+  }
+
+  @Test
+  void runsConfiguredTestAnnotationProcessorsAndLocksTheirArtifacts() throws Exception {
+    Path repository = temp.resolve("test-processor-repository");
+    MavenCoordinate junit = MavenCoordinate.parse("sample:junit-console:1.0");
+    addMavenArtifact(
+        repository,
+        junit,
+        Map.of(
+            "org/junit/platform/console/ConsoleLauncher.java",
+            "package org.junit.platform.console; public final class ConsoleLauncher { "
+                + "public static void main(String[] args) {} }"),
+        null,
+        null);
+    MavenCoordinate processor = MavenCoordinate.parse("sample:test-processor:1.0");
+    addMavenArtifact(
+        repository,
+        processor,
+        Map.of(
+            "sample/FixtureProcessor.java",
+            """
+            package sample;
+            import java.io.IOException;
+            import java.io.Writer;
+            import java.util.Set;
+            import javax.annotation.processing.AbstractProcessor;
+            import javax.annotation.processing.RoundEnvironment;
+            import javax.annotation.processing.SupportedAnnotationTypes;
+            import javax.annotation.processing.SupportedOptions;
+            import javax.lang.model.SourceVersion;
+            import javax.lang.model.element.TypeElement;
+            @SupportedAnnotationTypes("*")
+            @SupportedOptions("greeting")
+            public final class FixtureProcessor extends AbstractProcessor {
+                private boolean generated;
+                @Override public SourceVersion getSupportedSourceVersion() {
+                    return SourceVersion.latestSupported();
+                }
+                @Override public boolean process(Set<? extends TypeElement> annotations,
+                        RoundEnvironment round) {
+                    if (generated || round.processingOver()) return false;
+                    generated = true;
+                    String greeting = processingEnv.getOptions().getOrDefault("greeting", "default");
+                    try (Writer writer = processingEnv.getFiler()
+                            .createSourceFile("sample.generated.Fixture").openWriter()) {
+                        writer.write("package sample.generated; public final class Fixture { "
+                                + "public static String greeting() { return \\"" + greeting + "\\"; } }");
+                    } catch (IOException error) { throw new RuntimeException(error); }
+                    return false;
+                }
+            }
+            """),
+        "META-INF/services/javax.annotation.processing.Processor",
+        "sample.FixtureProcessor\n");
+    write("src/main/java/sample/App.java", "package sample; public final class App {}\n");
+    write(
+        "src/test/java/sample/ExampleTest.java",
+        "package sample; public final class ExampleTest { "
+            + "String greeting() { return sample.generated.Fixture.greeting(); } }\n");
+    write(
+        "jot.toml",
+        """
+        [project]
+        name = "test-processor-app"
+        layout = "maven"
+        [toolchains]
+        java = "%d"
+        [test-dependencies]
+        junit-console = "sample:junit-console:1.0"
+        [test-processors.fixture]
+        coords = "sample:test-processor:1.0"
+        options = { greeting = "first" }
+        """
+            .formatted(Runtime.version().feature()));
+    MavenResolver resolver =
+        new MavenResolver(temp.resolve("test-processor-cache"), repository.toUri());
+    ProjectConfig config = ProjectConfig.read(temp.resolve("jot.toml"), null);
+    WorkspaceProject project = new WorkspaceProject(temp, config, List.of());
+    Path lockfile = temp.resolve("jot.lock");
+
+    BuildEngine.lock(new ProjectWorkspace(List.of(project)), lockfile, resolver);
+    assertTrue(
+        Lockfile.read(lockfile).roots().stream()
+            .anyMatch(root -> root.notation().equals(processor.notation())));
+    BuildEngine.test(project, resolver);
+    Path generatedSource =
+        temp.resolve("target/generated-test-sources/sample/generated/Fixture.java");
+    assertTrue(Files.readString(generatedSource).contains("return \"first\""));
+
+    write(
+        "jot.toml",
+        Files.readString(temp.resolve("jot.toml"))
+            .replace("greeting = \"first\"", "greeting = \"second\""));
+    config = ProjectConfig.read(temp.resolve("jot.toml"), null);
+    BuildEngine.test(new WorkspaceProject(temp, config, List.of()), resolver);
+    assertTrue(Files.readString(generatedSource).contains("return \"second\""));
+  }
+
+  private void addMavenArtifact(
+      Path repository,
+      MavenCoordinate coordinate,
+      Map<String, String> sources,
+      String serviceFile,
+      String serviceContents)
+      throws Exception {
+    Path sourceRoot = temp.resolve("artifact-sources").resolve(coordinate.artifact());
+    Path classes = temp.resolve("artifact-classes").resolve(coordinate.artifact());
+    Files.createDirectories(sourceRoot);
+    Files.createDirectories(classes);
+    List<String> javac = new java.util.ArrayList<>(List.of("-proc:none", "-d", classes.toString()));
+    for (Map.Entry<String, String> source : sources.entrySet()) {
+      Path file = sourceRoot.resolve(source.getKey());
+      Files.createDirectories(file.getParent());
+      Files.writeString(file, source.getValue());
+      javac.add(file.toString());
+    }
+    assertEquals(
+        0,
+        ToolProvider.getSystemJavaCompiler().run(null, null, null, javac.toArray(String[]::new)));
+    Path jarPath = repository.resolve(coordinate.repositoryPath("jar"));
+    Files.createDirectories(jarPath.getParent());
+    try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(jarPath));
+        var classFiles = Files.walk(classes)) {
+      for (Path file : classFiles.filter(Files::isRegularFile).toList()) {
+        jar.putNextEntry(
+            new JarEntry(
+                classes.relativize(file).toString().replace(java.io.File.separatorChar, '/')));
+        Files.copy(file, jar);
+        jar.closeEntry();
+      }
+      if (serviceFile != null) {
+        jar.putNextEntry(new JarEntry(serviceFile));
+        jar.write(serviceContents.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        jar.closeEntry();
+      }
+    }
+    Path pom = repository.resolve(coordinate.pomPath());
+    Files.createDirectories(pom.getParent());
+    Files.writeString(
+        pom,
+        "<project><groupId>"
+            + coordinate.group()
+            + "</groupId><artifactId>"
+            + coordinate.artifact()
+            + "</artifactId><version>"
+            + coordinate.version()
+            + "</version></project>");
   }
 
   private void write(String relativePath, String contents) throws Exception {

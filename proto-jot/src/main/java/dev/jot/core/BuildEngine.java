@@ -431,6 +431,9 @@ public final class BuildEngine {
       for (String coordinate : project.config().processors().values()) {
         declarations.put("processor-" + index++, coordinate);
       }
+      for (String coordinate : project.config().testProcessors().values()) {
+        declarations.put("test-processor-" + index++, coordinate);
+      }
       if (project.config().javaFormatter() != null && !project.config().javaFormatter().isBlank()) {
         declarations.putIfAbsent(
             "java-formatter-" + project.config().javaFormatter(), project.config().javaFormatter());
@@ -462,25 +465,32 @@ public final class BuildEngine {
     ProjectConfig config = project.config();
     Path javaHome = JavaToolchain.javaHome(config.javaVersion(), config.javaVendor());
     List<Path> testSources = collectSources(root, config.testSourceDirectories());
+    Path testClasses = root.resolve(config.testOutputDirectory()).normalize();
+    Path target = root.resolve("target");
     if (testSources.isEmpty()) {
+      if (!testClasses.startsWith(target) || testClasses.equals(target)) {
+        throw new IllegalArgumentException("test.output-directory must be below target/");
+      }
+      deleteTree(testClasses);
+      deleteTree(target.resolve("generated-test-sources"));
+      Files.deleteIfExists(target.resolve(".jot/test-build-state.properties"));
       System.out.println("test: no test sources in " + config.name());
       return;
     }
-    Path testClasses = root.resolve(config.testOutputDirectory()).normalize();
-    Path target = root.resolve("target");
     if (!testClasses.startsWith(target) || testClasses.equals(target)) {
       throw new IllegalArgumentException("test.output-directory must be below target/");
     }
-    deleteTree(testClasses);
-    Files.createDirectories(testClasses);
-
     List<MavenResolver.ResolvedArtifact> mainArtifacts =
         resolveExternalArtifacts(project, resolver);
     List<MavenResolver.ResolvedArtifact> testArtifacts =
         resolver.resolve(config.testDependencies());
+    List<MavenResolver.ResolvedArtifact> testProcessorArtifacts =
+        resolver.resolve(config.testProcessors());
     Path lockPath = findLockfile(root);
     if (lockPath != null)
       Lockfile.read(lockPath).verify(config.testDependencies().values(), testArtifacts);
+    if (lockPath != null)
+      Lockfile.read(lockPath).verify(config.testProcessors().values(), testProcessorArtifacts);
     List<String> classpathEntries = new ArrayList<>();
     classpathEntries.add(root.resolve(config.outputDirectory()).toString());
     for (WorkspaceProject dependency : transitiveDependencies(project)) {
@@ -495,18 +505,31 @@ public final class BuildEngine {
         .forEach(classpathEntries::add);
     List<String> testClasspath = List.copyOf(classpathEntries);
 
-    List<String> javac =
-        new ArrayList<>(
-            List.of(
-                jdkTool(javaHome, "javac"),
-                "--release",
-                config.javaVersion(),
-                "-classpath",
-                String.join(System.getProperty("path.separator"), testClasspath),
-                "-d",
-                testClasses.toString()));
-    testSources.forEach(path -> javac.add(path.toString()));
-    runProcess(root, javac);
+    String testProcessorPath =
+        testProcessorArtifacts.stream()
+            .map(processor -> processor.jar().toString())
+            .collect(java.util.stream.Collectors.joining(System.getProperty("path.separator")));
+    String testCompileFingerprint =
+        testCompileFingerprint(
+            config, javaHome, testClasspath, testProcessorArtifacts, config.testProcessorOptions());
+    Path testStateFile = target.resolve(".jot/test-build-state.properties");
+    Properties testState = readState(testStateFile);
+    IncrementalJavaCompiler.compile(
+        root,
+        testClasses,
+        config.javaVersion(),
+        javaHome,
+        String.join(System.getProperty("path.separator"), testClasspath),
+        testProcessorPath,
+        config.testProcessorOptions(),
+        target.resolve("generated-test-sources"),
+        testCompileFingerprint,
+        testSources,
+        testState);
+    Files.createDirectories(testStateFile.getParent());
+    try (var output = Files.newOutputStream(testStateFile)) {
+      testState.store(output, "Jot test compilation state. Generated file.");
+    }
 
     List<String> runtimeClasspath = new ArrayList<>();
     runtimeClasspath.add(testClasses.toString());
@@ -658,6 +681,45 @@ public final class BuildEngine {
     for (MavenResolver.ResolvedArtifact artifact : externalArtifacts) {
       updateDigest(digest, artifact.coordinate().notation());
       digest.update(Files.readAllBytes(artifact.jar()));
+    }
+    for (MavenResolver.ResolvedArtifact artifact : processorArtifacts) {
+      updateDigest(digest, artifact.coordinate().notation());
+      digest.update(Files.readAllBytes(artifact.jar()));
+    }
+    processorOptions.forEach(
+        (key, value) -> {
+          updateDigest(digest, key);
+          updateDigest(digest, value);
+        });
+    return HexFormat.of().formatHex(digest.digest());
+  }
+
+  private static String testCompileFingerprint(
+      ProjectConfig config,
+      Path javaHome,
+      List<String> classpath,
+      List<MavenResolver.ResolvedArtifact> processorArtifacts,
+      java.util.Map<String, String> processorOptions)
+      throws Exception {
+    MessageDigest digest = MessageDigest.getInstance("SHA-256");
+    updateDigest(digest, config.javaVersion());
+    updateDigest(digest, java.util.Objects.toString(config.javaVendor(), ""));
+    updateDigest(digest, config.testSourceDirectories().toString());
+    updateDigest(digest, config.testOutputDirectory());
+    updateDigest(digest, javaHome.toString());
+    for (String entry : classpath) {
+      Path path = Path.of(entry);
+      updateDigest(digest, path.toAbsolutePath().normalize().toString());
+      if (Files.isDirectory(path)) {
+        try (Stream<Path> files = Files.walk(path)) {
+          for (Path file : files.filter(Files::isRegularFile).sorted().toList()) {
+            updateDigest(digest, path.relativize(file).toString());
+            digest.update(Files.readAllBytes(file));
+          }
+        }
+      } else if (Files.isRegularFile(path)) {
+        digest.update(Files.readAllBytes(path));
+      }
     }
     for (MavenResolver.ResolvedArtifact artifact : processorArtifacts) {
       updateDigest(digest, artifact.coordinate().notation());

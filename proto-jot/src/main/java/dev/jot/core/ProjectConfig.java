@@ -28,6 +28,8 @@ public record ProjectConfig(
     Map<String, String> testDependencies,
     Map<String, String> processors,
     Map<String, String> processorOptions,
+    Map<String, String> testProcessors,
+    Map<String, String> testProcessorOptions,
     PublishMetadata publish,
     String javaFormatter,
     String javaFormatterStyle,
@@ -116,6 +118,10 @@ public record ProjectConfig(
     Map<String, String> processors = new TreeMap<>();
     Map<String, String> processorOptions = new TreeMap<>();
     parseProcessors(document.table("processors"), catalog, file, processors, processorOptions);
+    Map<String, String> testProcessors = new TreeMap<>();
+    Map<String, String> testProcessorOptions = new TreeMap<>();
+    parseProcessors(
+        document.table("test-processors"), catalog, file, testProcessors, testProcessorOptions);
     PublishMetadata publish = parsePublish(document.table("publish"), file);
     String group =
         document.string("project.group", document.string("workspace.group", inheritedGroup));
@@ -147,6 +153,8 @@ public record ProjectConfig(
         Collections.unmodifiableMap(new TreeMap<>(testDependencies)),
         Collections.unmodifiableMap(processors),
         Collections.unmodifiableMap(processorOptions),
+        Collections.unmodifiableMap(testProcessors),
+        Collections.unmodifiableMap(testProcessorOptions),
         publish,
         document.string("format.java", null),
         formatterStyle,

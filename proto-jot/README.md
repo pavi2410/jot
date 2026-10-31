@@ -122,9 +122,14 @@ Configure a pinned formatter with `[format] java = "group:artifact:version"` and
 `style = "google"` or `"aosp"`; `jot fmt` formats main and test sources, while
 `jot fmt --check` verifies them without writing changes. Formatter artifacts are
 included in `jot.lock`.
-Main-source annotation processors can be configured in `[processors]`; their Maven
-artifacts and options participate in the compile fingerprint and lockfile. A source
-change triggers a full compile with processing so generated sources cannot go stale.
+Main-source annotation processors can be configured in `[processors]`; test-source
+processors use the parallel `[test-processors]` table. Their Maven artifacts and
+options participate in their respective compile fingerprints and lockfile. A source
+change triggers a full compile when processors are enabled so generated sources
+cannot go stale. Test compilation is incremental when source APIs remain compatible;
+removed sources and changes to the compiler, classpath, processor artifacts, or
+processor options trigger the needed rebuild. Generated test sources are written to
+`target/generated-test-sources`.
 Neither the Rust nor Java CLI currently has a file-watching mode.
 
 The Java CLI includes a `test` command that compiles configured test sources and

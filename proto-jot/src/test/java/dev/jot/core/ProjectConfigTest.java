@@ -113,6 +113,28 @@ class ProjectConfigTest {
   }
 
   @Test
+  void readsTestAnnotationProcessorCoordinatesAndOptionsSeparately() throws Exception {
+    Path manifest = temp.resolve("jot.toml");
+    Files.writeString(
+        manifest,
+        """
+        [project]
+        name = "test-processor-config"
+        [toolchains]
+        java = "27"
+        [test-processors.example]
+        coords = "org.example:test-processor:1.0"
+        options = { greeting = "test hello" }
+        """);
+
+    ProjectConfig config = ProjectConfig.read(manifest, null);
+
+    assertEquals("org.example:test-processor:1.0", config.testProcessors().get("example"));
+    assertEquals("test hello", config.testProcessorOptions().get("greeting"));
+    assertEquals(java.util.Map.of(), config.processors());
+  }
+
+  @Test
   void readsMavenPublicationMetadataAndProjectGroup() throws Exception {
     Path manifest = temp.resolve("jot.toml");
     Files.writeString(
