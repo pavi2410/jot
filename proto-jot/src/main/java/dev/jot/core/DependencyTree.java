@@ -9,40 +9,78 @@ public final class DependencyTree {
 
   public static String render(List<TreeEntry> entries) {
     if (entries.isEmpty()) return "";
-    StringBuilder output = new StringBuilder(entries.getFirst().coordinate().notation());
-    appendChildren(entries, 1, 0, "", output);
+    return render(toNode(entries));
+  }
+
+  public static String renderWorkspace(List<WorkspaceModule> modules) {
+    TreeNode root = new TreeNode("workspace");
+    for (WorkspaceModule module : modules) {
+      TreeNode moduleNode = root.add(new TreeNode(module.name()));
+      for (String dependency : module.workspaceDependencies()) {
+        moduleNode.add(new TreeNode(dependency + " (workspace)"));
+      }
+      for (List<TreeEntry> entries : module.externalTrees()) {
+        if (!entries.isEmpty()) moduleNode.add(toNode(entries));
+      }
+    }
+    return render(root);
+  }
+
+  private static TreeNode toNode(List<TreeEntry> entries) {
+    TreeNode root = new TreeNode(entries.getFirst().coordinate().notation());
+    List<TreeNode> parents = new java.util.ArrayList<>(List.of(root));
+    for (int i = 1; i < entries.size(); i++) {
+      TreeEntry entry = entries.get(i);
+      String label = entry.coordinate().notation() + " [" + entry.scope();
+      if (entry.optional()) label += " optional";
+      label += "]";
+      if (entry.note() != null) label += " " + entry.note();
+      TreeNode node = new TreeNode(label);
+      TreeNode parent = parents.get(entry.depth() - 1);
+      parent.add(node);
+      while (parents.size() > entry.depth()) parents.removeLast();
+      parents.add(node);
+    }
+    return root;
+  }
+
+  private static String render(TreeNode root) {
+    StringBuilder output = new StringBuilder(root.label());
+    append(root, "", output);
     return output.append(System.lineSeparator()).toString();
   }
 
-  private static int appendChildren(
-      List<TreeEntry> entries, int cursor, int parentDepth, String prefix, StringBuilder output) {
-    int end = cursor;
-    while (end < entries.size() && entries.get(end).depth() > parentDepth) end++;
-    int childCount = 0;
-    for (int i = cursor; i < end; i++) {
-      if (entries.get(i).depth() == parentDepth + 1) childCount++;
-    }
-    int childIndex = 0;
-    while (cursor < end) {
-      TreeEntry entry = entries.get(cursor);
-      if (entry.depth() != parentDepth + 1) {
-        cursor++;
-        continue;
-      }
-      boolean last = ++childIndex == childCount;
+  private static void append(TreeNode parent, String prefix, StringBuilder output) {
+    for (int i = 0; i < parent.children.size(); i++) {
+      TreeNode child = parent.children.get(i);
+      boolean last = i == parent.children.size() - 1;
       output
           .append(System.lineSeparator())
           .append(prefix)
           .append(last ? "└── " : "├── ")
-          .append(entry.coordinate().notation())
-          .append(" [")
-          .append(entry.scope());
-      if (entry.optional()) output.append(" optional");
-      output.append(']');
-      if (entry.note() != null) output.append(' ').append(entry.note());
-      String childPrefix = prefix + (last ? "    " : "│   ");
-      cursor = appendChildren(entries, cursor + 1, entry.depth(), childPrefix, output);
+          .append(child.label());
+      append(child, prefix + (last ? "    " : "│   "), output);
     }
-    return end;
+  }
+
+  public record WorkspaceModule(
+      String name, List<String> workspaceDependencies, List<List<TreeEntry>> externalTrees) {}
+
+  private static final class TreeNode {
+    private final String label;
+    private final List<TreeNode> children = new java.util.ArrayList<>();
+
+    private TreeNode(String label) {
+      this.label = label;
+    }
+
+    private String label() {
+      return label;
+    }
+
+    private TreeNode add(TreeNode child) {
+      children.add(child);
+      return child;
+    }
   }
 }

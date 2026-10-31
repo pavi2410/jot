@@ -68,6 +68,8 @@ the nearest `libs.versions.toml` up the project path.
 `jot outdated [--module name]` compares locked versions with Maven release metadata.
 `jot tree group:artifact:version [--depth levels]` displays Maven transitive
 dependencies, marking omitted scopes, optional dependencies, and cycles.
+`jot tree --workspace [--module name]` shows local module edges and each
+selected module's external dependency tree.
 `jot resolve group:artifact:version` verifies a pinned coordinate's POM, while
 `--deps` lists its effective direct dependencies.
 `jot doc [--module name]` generates Java API documentation under `target/docs`.

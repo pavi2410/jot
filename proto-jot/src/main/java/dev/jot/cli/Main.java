@@ -88,6 +88,37 @@ public final class Main {
               Path.of(System.getProperty("user.home"), ".jot", "java-maven-cache"),
               MavenResolver.defaultRepository(),
               commandLine.offline());
+      if (commandLine.treeWorkspace()) {
+        Path root =
+            commandLine.projectRoot() == null
+                ? findProjectRoot(Path.of("").toAbsolutePath())
+                : commandLine.projectRoot();
+        ProjectConfig config = ProjectConfig.read(root.resolve("jot.toml"), null);
+        if (!config.isWorkspace()) {
+          throw new IllegalArgumentException("--workspace requires a workspace jot.toml");
+        }
+        ProjectWorkspace workspace = ProjectWorkspace.load(root, config);
+        List<WorkspaceProject> projects =
+            commandLine.module() == null
+                ? workspace.ordered()
+                : List.of(workspace.find(commandLine.module()));
+        List<DependencyTree.WorkspaceModule> modules = new java.util.ArrayList<>();
+        for (WorkspaceProject project : projects) {
+          List<List<MavenResolver.TreeEntry>> externalTrees = new java.util.ArrayList<>();
+          for (String coordinate : project.config().dependencies().values()) {
+            externalTrees.add(
+                resolver.resolveDependencyTree(
+                    MavenCoordinate.parse(coordinate), commandLine.treeDepth()));
+          }
+          modules.add(
+              new DependencyTree.WorkspaceModule(
+                  project.name(),
+                  project.dependencies().stream().map(WorkspaceProject::name).toList(),
+                  externalTrees));
+        }
+        System.out.print(DependencyTree.renderWorkspace(modules));
+        return;
+      }
       List<MavenResolver.TreeEntry> entries =
           resolver.resolveDependencyTree(
               MavenCoordinate.parse(commandLine.dependencyCoordinate()), commandLine.treeDepth());
@@ -347,6 +378,8 @@ public final class Main {
     System.out.println("       jot deps [--module <name>]");
     System.out.println("       jot outdated [--module <name>] [--offline]");
     System.out.println("       jot tree <group:artifact:version> [--depth <levels>] [--offline]");
+    System.out.println(
+        "       jot tree --workspace [--module <name>] [--depth <levels>] [--offline]");
     System.out.println("       jot resolve <group:artifact:version> [--deps] [--offline]");
     System.out.println("       jot doc [--project <directory>] [--module <name>] [--offline]");
     System.out.println("       jot lint [--project <directory>] [--module <name>] [--offline]");

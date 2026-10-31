@@ -22,6 +22,7 @@ record CommandLine(
     boolean resolveDependencies,
     boolean testDependency,
     int treeDepth,
+    boolean treeWorkspace,
     boolean formatCheck) {
 
   static CommandLine parse(String[] args) {
@@ -62,7 +63,7 @@ record CommandLine(
   private static CommandLine specialCommand(boolean help, boolean version) {
     return new CommandLine(
         "", null, null, List.of(), help, version, false, null, null, null, null, null, null, false,
-        false, 0, false);
+        false, 0, false, false);
   }
 
   private static final class Options {
@@ -79,6 +80,7 @@ record CommandLine(
     private boolean offline;
     private boolean testDependency;
     private int treeDepth = 3;
+    private boolean treeWorkspace;
     private boolean resolveDependencies;
     private boolean formatCheck;
 
@@ -109,6 +111,10 @@ record CommandLine(
         case "--deps" -> {
           require(command.equals("resolve"), option);
           resolveDependencies = true;
+        }
+        case "--workspace" -> {
+          require(command.equals("tree"), option);
+          treeWorkspace = true;
         }
         case "--offline" -> offline = true;
         case "--test" -> {
@@ -178,7 +184,11 @@ record CommandLine(
         throw new IllegalArgumentException("remove needs a dependency name");
       }
       if (command.equals("tree") && dependencyCoordinate == null) {
-        throw new IllegalArgumentException("tree needs a dependency coordinate");
+        if (!treeWorkspace)
+          throw new IllegalArgumentException("tree needs a dependency coordinate or --workspace");
+      }
+      if (command.equals("tree") && treeWorkspace && dependencyCoordinate != null) {
+        throw new IllegalArgumentException("tree dependency cannot be combined with --workspace");
       }
       if (command.equals("resolve") && dependencyCoordinate == null) {
         throw new IllegalArgumentException("resolve needs a dependency coordinate");
@@ -203,6 +213,7 @@ record CommandLine(
           resolveDependencies,
           testDependency,
           treeDepth,
+          treeWorkspace,
           formatCheck);
     }
 

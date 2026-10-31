@@ -41,9 +41,23 @@ class CommandLineTest {
     assertEquals("org.example:library:1.2", parsed.dependencyCoordinate());
     assertEquals(3, parsed.treeDepth());
     assertTrue(parsed.offline());
-    assertEquals("tree needs a dependency coordinate", parseError("tree"));
+    assertEquals("tree needs a dependency coordinate or --workspace", parseError("tree"));
     assertEquals(
         "--depth needs a non-negative integer", parseError("tree", "x:y:1", "--depth", "deep"));
+  }
+
+  @Test
+  void parsesWorkspaceTreeSelectionAndRejectsConflictingInputs() {
+    CommandLine parsed =
+        CommandLine.parse(new String[] {"tree", "--workspace", "--module", "app", "--depth", "2"});
+
+    assertEquals("tree", parsed.command());
+    assertTrue(parsed.treeWorkspace());
+    assertEquals("app", parsed.module());
+    assertEquals(2, parsed.treeDepth());
+    assertEquals(
+        "tree dependency cannot be combined with --workspace",
+        parseError("tree", "org.example:library:1.0", "--workspace"));
   }
 
   @Test
