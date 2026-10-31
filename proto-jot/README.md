@@ -30,8 +30,10 @@ java -jar target/bin/jot-java.jar build
 java -jar target/bin/jot-java.jar run -- --version
 ```
 
-The prototype supports `build`, `run`, `test`, `lock`, and `clean`, and accepts
-`--project`, `--module`, and `--offline`. Build source directories, resource
+The prototype supports `init`, `build`, `run`, `test`, `lock`, and `clean`, and accepts
+`--project`, `--module`, and `--offline`. `jot init [name]` creates a Jot-native
+Java app; `--template library` creates a library, and `--package` sets its Java
+package. Build source directories, resource
 directories, and the Java release are read from `jot.toml`. A Jot manifest may
 select `project.layout = "maven"` for familiar Java source, resource, and test
 paths; this only selects directory defaults and does not import a `pom.xml`.

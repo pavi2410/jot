@@ -2,6 +2,7 @@ package dev.jot.cli;
 
 import dev.jot.core.BuildEngine;
 import dev.jot.core.ProjectConfig;
+import dev.jot.core.ProjectInitializer;
 import dev.jot.core.ProjectWorkspace;
 import dev.jot.core.WorkspaceProject;
 import dev.jot.core.resolve.MavenResolver;
@@ -29,6 +30,15 @@ public final class Main {
                 ? error.toString() : error.getMessage();
     }
 
+    static String inferredProjectName(Path destination) {
+        Path fileName = destination.toAbsolutePath().normalize().getFileName();
+        String name = fileName == null ? "jot-project" : fileName.toString()
+                .replaceAll("[^A-Za-z0-9_-]+", "-").replaceAll("-+", "-");
+        if (name.isBlank()) return "jot-project";
+        if (!Character.isLetter(name.charAt(0))) name = "project-" + name;
+        return name;
+    }
+
     private static void execute(String[] rawArguments) throws Exception {
         CommandLine commandLine = CommandLine.parse(rawArguments);
         if (commandLine.help()) {
@@ -37,6 +47,26 @@ public final class Main {
         }
         if (commandLine.version()) {
             System.out.println("jot " + VERSION);
+            return;
+        }
+
+        if (commandLine.command().equals("init")) {
+            if (commandLine.projectRoot() != null && commandLine.projectName() != null) {
+                throw new IllegalArgumentException("use either the init name or --project, not both");
+            }
+            Path destination = commandLine.projectRoot();
+            if (destination == null) {
+                Path current = Path.of("").toAbsolutePath();
+                destination = commandLine.projectName() == null ? current
+                        : current.resolve(commandLine.projectName());
+            }
+            String name = commandLine.projectName();
+            if (name == null) name = inferredProjectName(destination);
+            Path created = ProjectInitializer.initialize(destination, name,
+                    commandLine.template(), commandLine.packageName());
+            System.out.println("init: created "
+                    + (commandLine.template() == null ? "app" : commandLine.template())
+                    + " project at " + created);
             return;
         }
 
@@ -103,7 +133,9 @@ public final class Main {
 
     private static void help() {
         System.out.println("jot " + VERSION + " — a Java build tool");
-        System.out.println("Usage: jot <build|run|test|lock|clean> [--project <directory>] [--module <name>] [--offline] [-- <args...>]");
+        System.out.println("Usage: jot <init|build|run|test|lock|clean> [options]");
+        System.out.println("       jot init [name] [--template app|library] [--package java.package]");
+        System.out.println("       jot <build|run|test|lock|clean> [--project <directory>] [--module <name>] [--offline]");
     }
 
     private static Path findProjectRoot(Path start) {
