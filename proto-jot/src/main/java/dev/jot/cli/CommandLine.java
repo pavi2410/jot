@@ -4,22 +4,39 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Small, isolated command-line parser for the bootstrap implementation. */
+/** Parsed command and the options shared by the bootstrap CLI. */
 record CommandLine(String command, Path projectRoot, String module, List<String> runArguments,
                    boolean help, boolean version, boolean offline, String projectName,
                    String template, String packageName, String dependencyCoordinate,
                    String dependencyName, String dependencyCatalog, boolean testDependency) {
     static CommandLine parse(String[] arguments) {
-        if (arguments.length == 0) return helpCommand();
-        int commandIndex = 0;
+        Arguments input = new Arguments(arguments);
+        if (!input.hasNext()) return helpCommand();
+
         boolean offline = false;
-        while (commandIndex < arguments.length && arguments[commandIndex].equals("--offline")) {
+        while (input.peekIs("--offline")) {
+            input.next();
             offline = true;
-            commandIndex++;
         }
-        if (commandIndex == arguments.length || isHelp(arguments[commandIndex])) return helpCommand();
-        if (isVersion(arguments[commandIndex])) return versionCommand();
-        return new Parser(arguments[commandIndex], offline).parse(arguments, commandIndex + 1);
+        if (!input.hasNext() || isHelp(input.peek())) return helpCommand();
+        if (isVersion(input.peek())) return versionCommand();
+
+        String command = input.next();
+        Options options = new Options(command, offline);
+        while (input.hasNext()) {
+            String token = input.next();
+            if (token.equals("--") && command.equals("run")) {
+                options.runArguments.addAll(input.remaining());
+                break;
+            }
+            if (token.startsWith("--")) {
+                options.parse(token, input);
+            } else {
+                options.parsePositional(token);
+            }
+        }
+        options.validate();
+        return options.toCommandLine();
     }
 
     private static boolean isHelp(String argument) {
@@ -40,7 +57,7 @@ record CommandLine(String command, Path projectRoot, String module, List<String>
                 null, null, null, null, null, null, false);
     }
 
-    private static final class Parser {
+    private static final class Options {
         private final String command;
         private final List<String> runArguments = new ArrayList<>();
         private Path projectRoot;
@@ -53,24 +70,62 @@ record CommandLine(String command, Path projectRoot, String module, List<String>
         private String dependencyCatalog;
         private boolean offline;
         private boolean testDependency;
-        private boolean applicationArguments;
 
-        private Parser(String command, boolean offline) {
+        private Options(String command, boolean offline) {
             this.command = command;
             this.offline = offline;
         }
 
-        private CommandLine parse(String[] arguments, int firstOption) {
-            for (int i = firstOption; i < arguments.length; i++) {
-                String argument = arguments[i];
-                if (applicationArguments) {
-                    runArguments.add(argument);
-                } else if (argument.equals("--")) {
-                    applicationArguments = true;
-                } else {
-                    i += parseOption(argument, arguments, i);
+        private void parse(String option, Arguments input) {
+            switch (option) {
+                case "--project" -> projectRoot = Path.of(input.value(option)).toAbsolutePath().normalize();
+                case "--module" -> module = input.value(option);
+                case "--offline" -> offline = true;
+                case "--test" -> {
+                    require(command.equals("add") || command.equals("remove"), option);
+                    testDependency = true;
                 }
+                case "--name" -> {
+                    require(command.equals("add"), option);
+                    dependencyName = input.value(option);
+                }
+                case "--catalog" -> {
+                    require(command.equals("add"), option);
+                    dependencyCatalog = input.value(option);
+                }
+                case "--template" -> {
+                    require(command.equals("init"), option);
+                    template = input.value(option);
+                }
+                case "--package" -> {
+                    require(command.equals("init"), option);
+                    packageName = input.value(option);
+                }
+                default -> throw new IllegalArgumentException("unknown argument: " + option);
             }
+        }
+
+        private void parsePositional(String value) {
+            switch (command) {
+                case "init" -> {
+                    if (projectName != null) throw new IllegalArgumentException("init accepts one project name");
+                    projectName = value;
+                }
+                case "add" -> {
+                    if (dependencyCoordinate != null) {
+                        throw new IllegalArgumentException("add accepts one dependency coordinate");
+                    }
+                    dependencyCoordinate = value;
+                }
+                case "remove" -> {
+                    if (dependencyName != null) throw new IllegalArgumentException("remove accepts one dependency name");
+                    dependencyName = value;
+                }
+                default -> throw new IllegalArgumentException("unknown argument: " + value);
+            }
+        }
+
+        private void validate() {
             if (command.equals("add") && dependencyCoordinate == null && dependencyCatalog == null) {
                 throw new IllegalArgumentException("add needs a coordinate or --catalog alias");
             }
@@ -80,96 +135,54 @@ record CommandLine(String command, Path projectRoot, String module, List<String>
             if (command.equals("remove") && dependencyName == null) {
                 throw new IllegalArgumentException("remove needs a dependency name");
             }
+        }
+
+        private CommandLine toCommandLine() {
             return new CommandLine(command, projectRoot, module, List.copyOf(runArguments),
                     false, false, offline, projectName, template, packageName,
                     dependencyCoordinate, dependencyName, dependencyCatalog, testDependency);
         }
 
-        /** Returns the number of consumed value arguments. */
-        private int parseOption(String argument, String[] arguments, int index) {
-            return switch (argument) {
-                case "--project" -> {
-                    projectRoot = Path.of(valueAfter(argument, arguments, index))
-                            .toAbsolutePath().normalize();
-                    yield 1;
-                }
-                case "--module" -> {
-                    module = valueAfter(argument, arguments, index);
-                    yield 1;
-                }
-                case "--offline" -> {
-                    offline = true;
-                    yield 0;
-                }
-                case "--test" -> {
-                    requireDependencyCommand(argument);
-                    testDependency = true;
-                    yield 0;
-                }
-                case "--name" -> {
-                    if (!command.equals("add")) throw new IllegalArgumentException("unknown argument: " + argument);
-                    dependencyName = valueAfter(argument, arguments, index);
-                    yield 1;
-                }
-                case "--catalog" -> {
-                    if (!command.equals("add")) throw new IllegalArgumentException("unknown argument: " + argument);
-                    dependencyCatalog = valueAfter(argument, arguments, index);
-                    yield 1;
-                }
-                case "--template" -> {
-                    requireInitOption(argument);
-                    template = valueAfter(argument, arguments, index);
-                    yield 1;
-                }
-                case "--package" -> {
-                    requireInitOption(argument);
-                    packageName = valueAfter(argument, arguments, index);
-                    yield 1;
-                }
-                default -> {
-                    if (command.equals("init") && !argument.startsWith("-")) {
-                        if (projectName != null) {
-                            throw new IllegalArgumentException("init accepts one project name");
-                        }
-                        projectName = argument;
-                        yield 0;
-                    }
-                    if (command.equals("add") && !argument.startsWith("-")) {
-                        if (dependencyCoordinate != null) {
-                            throw new IllegalArgumentException("add accepts one dependency coordinate");
-                        }
-                        dependencyCoordinate = argument;
-                        yield 0;
-                    }
-                    if (command.equals("remove") && !argument.startsWith("-")) {
-                        if (dependencyName != null) {
-                            throw new IllegalArgumentException("remove accepts one dependency name");
-                        }
-                        dependencyName = argument;
-                        yield 0;
-                    }
-                    throw new IllegalArgumentException("unknown argument: " + argument);
-                }
-            };
+        private static void require(boolean condition, String option) {
+            if (!condition) throw new IllegalArgumentException("unknown argument: " + option);
+        }
+    }
+
+    private static final class Arguments {
+        private final String[] values;
+        private int index;
+
+        private Arguments(String[] values) {
+            this.values = values;
         }
 
-        private String valueAfter(String option, String[] arguments, int index) {
-            if (index + 1 >= arguments.length || arguments[index + 1].equals("--")) {
+        private boolean hasNext() {
+            return index < values.length;
+        }
+
+        private String peek() {
+            return values[index];
+        }
+
+        private boolean peekIs(String value) {
+            return hasNext() && peek().equals(value);
+        }
+
+        private String next() {
+            return values[index++];
+        }
+
+        private String value(String option) {
+            if (!hasNext() || peek().equals("--")) {
                 throw new IllegalArgumentException(option + " needs a value");
             }
-            return arguments[index + 1];
+            return next();
         }
 
-        private void requireInitOption(String option) {
-            if (!command.equals("init")) {
-                throw new IllegalArgumentException("unknown argument: " + option);
-            }
-        }
-
-        private void requireDependencyCommand(String option) {
-            if (!command.equals("add") && !command.equals("remove")) {
-                throw new IllegalArgumentException("unknown argument: " + option);
-            }
+        private List<String> remaining() {
+            List<String> remaining = List.of(values).subList(index, values.length);
+            index = values.length;
+            return remaining;
         }
     }
 }
