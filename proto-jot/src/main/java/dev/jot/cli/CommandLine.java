@@ -5,7 +5,12 @@ import java.util.List;
 
 /** Parsed global options and one command with only the options that command accepts. */
 record CommandLine(
-    boolean help, boolean version, boolean offline, Path projectRoot, Command command) {
+    boolean help,
+    boolean version,
+    boolean offline,
+    Path projectRoot,
+    Command command,
+    String helpTopic) {
   sealed interface Command
       permits Build,
           Run,

@@ -174,6 +174,79 @@ class CommandLineTest {
   }
 
   @Test
+  void supportsHelpFlagsOnTopLevelAndNestedSubcommands() {
+    List<String> commands =
+        List.of(
+            "init",
+            "build",
+            "run",
+            "test",
+            "bench",
+            "audit",
+            "doc",
+            "lint",
+            "fmt",
+            "add",
+            "remove",
+            "deps",
+            "outdated",
+            "resolve",
+            "tree",
+            "toolchain",
+            "lock",
+            "clean",
+            "self",
+            "publish");
+    for (String command : commands) {
+      CommandLine help = CommandLineParser.parse(new String[] {command, "--help"});
+      assertTrue(help.help(), command);
+      assertEquals(command, help.helpTopic());
+    }
+
+    assertEquals(
+        "toolchain install",
+        CommandLineParser.parse(new String[] {"toolchain", "install", "java@27", "-h"})
+            .helpTopic());
+    assertEquals(
+        "self update",
+        CommandLineParser.parse(new String[] {"self", "update", "--version", "1.2.3", "--help"})
+            .helpTopic());
+    assertEquals(
+        "toolchain list",
+        CommandLineParser.parse(new String[] {"toolchain", "list", "--help"}).helpTopic());
+    assertEquals(
+        "toolchain pin",
+        CommandLineParser.parse(new String[] {"toolchain", "pin", "java@27", "--help"})
+            .helpTopic());
+    assertEquals(
+        "self uninstall",
+        CommandLineParser.parse(new String[] {"self", "uninstall", "--help"}).helpTopic());
+    assertTrue(
+        CommandLineParser.parse(new String[] {"run", "--", "--help"}).command()
+            instanceof CommandLine.Run);
+  }
+
+  @Test
+  void generatesConciseRootAndCommandSpecificHelp() {
+    String rootHelp = HelpPrinter.render("", "1.2.3");
+    assertTrue(rootHelp.contains("Usage: jot [OPTIONS] <COMMAND> [ARGS]"));
+    assertTrue(rootHelp.contains("build"));
+    assertTrue(rootHelp.contains("Compile and package the current project"));
+    assertTrue(!rootHelp.contains("<init|build|run|"));
+    assertTrue(!rootHelp.contains("--forks"));
+    assertEquals(rootHelp.indexOf("-h, --help"), rootHelp.lastIndexOf("-h, --help"));
+
+    String buildHelp = HelpPrinter.render("build", "1.2.3");
+    assertTrue(buildHelp.contains("Usage: jot build [OPTIONS]"));
+    assertTrue(buildHelp.contains("--module <name>"));
+    assertTrue(buildHelp.contains("-h, --help"));
+
+    String toolchainHelp = HelpPrinter.render("toolchain", "1.2.3");
+    assertTrue(toolchainHelp.contains("install  Install a Java toolchain"));
+    assertTrue(HelpPrinter.render("self update", "1.2.3").contains("--version <version>"));
+  }
+
+  @Test
   void buildCommandPrintsElapsedBuildTime() throws Exception {
     Path project = temp.resolve("timed-build");
     ProjectInitializer.initialize(project, "timed-build", null, null, null);

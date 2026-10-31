@@ -50,11 +50,14 @@ final class CommandLineParser {
       tokens.removeFirst();
     }
     if (tokens.isEmpty() || tokens.getFirst().equals("--help") || tokens.getFirst().equals("-h"))
-      return special(true, false);
+      return help("");
     if (tokens.getFirst().equals("--version") || tokens.getFirst().equals("-V"))
       return special(false, true);
 
-    String command = tokens.removeFirst();
+    String command = tokens.getFirst();
+    int helpIndex = helpIndex(tokens);
+    if (helpIndex >= 0) return help(helpTopic(command, tokens.subList(1, helpIndex)));
+    tokens.removeFirst();
     Path project = null;
     var positionals = new ArrayList<String>();
     var runArguments = new ArrayList<String>();
@@ -107,10 +110,44 @@ final class CommandLineParser {
               SimpleCommandParser.parse(command, args);
           default -> throw new IllegalArgumentException("unknown command: " + command);
         };
-    return new CommandLine(false, false, offline, project, parsed);
+    return new CommandLine(false, false, offline, project, parsed, null);
+  }
+
+  private static int helpIndex(java.util.List<String> tokens) {
+    for (int index = 1; index < tokens.size(); index++) {
+      String token = tokens.get(index);
+      if (token.equals("--")) return -1;
+      if (token.equals("--help") || token.equals("-h")) return index;
+    }
+    return -1;
+  }
+
+  private static String helpTopic(String command, java.util.List<String> precedingTokens) {
+    if (!command.equals("toolchain") && !command.equals("self")) return command;
+    String action = firstPositional(precedingTokens);
+    String nested = action == null ? command : command + " " + action;
+    return HelpPrinter.hasTopic(nested) ? nested : command;
+  }
+
+  private static String firstPositional(java.util.List<String> tokens) {
+    for (int index = 0; index < tokens.size(); index++) {
+      String token = tokens.get(index);
+      if (token.equals("--")) return null;
+      if (token.equals("--project")
+          || VALUE_OPTIONS.contains(token.startsWith("--") ? token.substring(2) : "")) {
+        index++;
+      } else if (!token.startsWith("-")) {
+        return token;
+      }
+    }
+    return null;
+  }
+
+  private static CommandLine help(String topic) {
+    return new CommandLine(true, false, false, null, null, topic);
   }
 
   private static CommandLine special(boolean help, boolean version) {
-    return new CommandLine(help, version, false, null, null);
+    return new CommandLine(help, version, false, null, null, help ? "" : null);
   }
 }

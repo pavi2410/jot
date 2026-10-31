@@ -54,7 +54,7 @@ public final class Main {
   static void execute(String[] rawArguments) throws Exception {
     CommandLine commandLine = CommandLineParser.parse(rawArguments);
     if (commandLine.help()) {
-      help();
+      System.out.print(HelpPrinter.render(commandLine.helpTopic(), VERSION));
       return;
     }
     if (commandLine.version()) {
@@ -655,47 +655,6 @@ public final class Main {
       System.out.println(
           check ? "fmt: " + project.name() + " is formatted" : "fmt: formatted " + project.name());
     }
-  }
-
-  private static void help() {
-    System.out.println("jot " + VERSION + " — a Java build tool");
-    System.out.println(
-        "Usage: jot"
-            + " <init|build|run|test|bench|audit|doc|lint|fmt|add|remove|deps|outdated|resolve|tree|toolchain|lock|clean>"
-            + " [options]");
-    System.out.println("       jot add <group:artifact:version> [--name <alias>] [--test]");
-    System.out.println("       jot add --catalog <alias> [--name <dependency>] [--test]");
-    System.out.println("       jot remove <alias> [--test]");
-    System.out.println(
-        "       jot bench [filter] [--module <name>] [--forks <count>] [--warmup <count>]"
-            + " [--iterations <count>]");
-    System.out.println("       jot audit [--fix] [--ci]");
-    System.out.println("       jot deps [--module <name>]");
-    System.out.println("       jot outdated [--module <name>] [--offline]");
-    System.out.println("       jot tree <group:artifact:version> [--depth <levels>] [--offline]");
-    System.out.println(
-        "       jot tree --workspace [--module <name>] [--depth <levels>] [--offline]");
-    System.out.println("       jot resolve <group:artifact:version> [--deps] [--offline]");
-    System.out.println("       jot lock [coordinates...] [--depth <levels>] [--output <file>]");
-    System.out.println("       jot toolchain list");
-    System.out.println(
-        "       jot toolchain install java@<version|vendor-version> [--force] [--offline]");
-    System.out.println("       jot toolchain pin java@<version|vendor-version> [--workspace]");
-    System.out.println(
-        "       jot doc [--project <directory>] [--module <name>] [--open] [--offline]");
-    System.out.println(
-        "       jot publish [--module <name>] [--repository <url-or-path>] [--dry-run]"
-            + " [--allow-snapshot]");
-    System.out.println("       jot lint [--project <directory>] [--module <name>] [--offline]");
-    System.out.println(
-        "       jot fmt [--project <directory>] [--module <name>] [--check] [--offline]");
-    System.out.println(
-        "       jot init [name] [--template"
-            + " java-minimal|java-lib|java-cli|java-server|java-workspace] [--group id] [--package"
-            + " java.package]");
-    System.out.println(
-        "       jot <build|run|test|lock|clean> [--project <directory>] [--module <name>]"
-            + " [--offline]");
   }
 
   private static Path findProjectRoot(Path start) {
