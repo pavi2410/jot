@@ -35,6 +35,9 @@ final class IncrementalJavaCompiler {
       String javaVersion,
       Path javaHome,
       String classpath,
+      String processorPath,
+      Map<String, String> processorOptions,
+      Path generatedSources,
       String compileFingerprint,
       List<Path> sources,
       Properties state)
@@ -42,6 +45,7 @@ final class IncrementalJavaCompiler {
     Map<String, String> currentHashes = sourceHashes(sources);
     Map<String, String> previousHashes = previousSourceHashes(state);
     String previousEnvironment = state.getProperty("compile-fingerprint");
+    boolean processing = !processorPath.isBlank();
     boolean reusable =
         Files.isDirectory(classes)
             && compileFingerprint.equals(previousEnvironment)
@@ -60,17 +64,36 @@ final class IncrementalJavaCompiler {
       }
     }
 
-    boolean fullRebuild = !reusable || previousHashes.isEmpty() || removedSource;
+    boolean fullRebuild =
+        !reusable || previousHashes.isEmpty() || removedSource || (processing && !dirty.isEmpty());
     boolean compiled = fullRebuild || !dirty.isEmpty();
     if (fullRebuild) {
-      compileAll(projectRoot, classes, javaVersion, javaHome, classpath, sources);
+      compileAll(
+          projectRoot,
+          classes,
+          javaVersion,
+          javaHome,
+          classpath,
+          processorPath,
+          processorOptions,
+          generatedSources,
+          sources);
     } else if (!dirty.isEmpty()) {
       boolean applied =
           compileIncrementally(
               projectRoot, classes, javaVersion, javaHome, classpath, sources, dirty);
       if (!applied) {
         fullRebuild = true;
-        compileAll(projectRoot, classes, javaVersion, javaHome, classpath, sources);
+        compileAll(
+            projectRoot,
+            classes,
+            javaVersion,
+            javaHome,
+            classpath,
+            processorPath,
+            processorOptions,
+            generatedSources,
+            sources);
       }
     }
 
@@ -107,7 +130,16 @@ final class IncrementalJavaCompiler {
     Path staging = Files.createTempDirectory(classes.getParent(), ".jot-compile-");
     try {
       String incrementalClasspath = joinClasspath(classes.toString(), classpath);
-      compileTo(projectRoot, staging, javaVersion, javaHome, incrementalClasspath, dirtySources);
+      compileTo(
+          projectRoot,
+          staging,
+          javaVersion,
+          javaHome,
+          incrementalClasspath,
+          "",
+          Map.of(),
+          staging.resolve("generated-sources"),
+          dirtySources);
       Map<String, List<Path>> previousOutputs = ownedClassFiles(classes, identities.values());
       Map<String, List<Path>> newOutputs = ownedClassFiles(staging, identities.values());
 
@@ -213,11 +245,25 @@ final class IncrementalJavaCompiler {
       String javaVersion,
       Path javaHome,
       String classpath,
+      String processorPath,
+      Map<String, String> processorOptions,
+      Path generatedSources,
       List<Path> sources)
       throws Exception {
     deleteTree(classes);
     Files.createDirectories(classes);
-    compileTo(projectRoot, classes, javaVersion, javaHome, classpath, sources);
+    deleteTree(generatedSources);
+    if (!processorPath.isBlank()) Files.createDirectories(generatedSources);
+    compileTo(
+        projectRoot,
+        classes,
+        javaVersion,
+        javaHome,
+        classpath,
+        processorPath,
+        processorOptions,
+        generatedSources,
+        sources);
   }
 
   private static void compileTo(
@@ -226,12 +272,21 @@ final class IncrementalJavaCompiler {
       String javaVersion,
       Path javaHome,
       String classpath,
+      String processorPath,
+      Map<String, String> processorOptions,
+      Path generatedSources,
       List<Path> sources)
       throws Exception {
     List<String> command =
         new ArrayList<>(
             List.of(jdkTool(javaHome, "javac"), "--release", javaVersion, "-d", output.toString()));
     if (!classpath.isBlank()) command.addAll(List.of("-classpath", classpath));
+    if (processorPath.isBlank()) {
+      command.add("-proc:none");
+    } else {
+      command.addAll(List.of("-processorpath", processorPath, "-s", generatedSources.toString()));
+      processorOptions.forEach((key, value) -> command.add("-A" + key + "=" + value));
+    }
     sources.forEach(path -> command.add(path.toString()));
     int status =
         new ProcessBuilder(command).directory(projectRoot.toFile()).inheritIO().start().waitFor();

@@ -79,6 +79,27 @@ class ProjectConfigTest {
   }
 
   @Test
+  void readsAnnotationProcessorCoordinatesAndOptions() throws Exception {
+    Path manifest = temp.resolve("jot.toml");
+    Files.writeString(
+        manifest,
+        """
+        [project]
+        name = "processor-config"
+        [toolchains]
+        java = "27"
+        [processors.example]
+        coords = "org.example:processor:1.0"
+        options = { greeting = "hello from processor" }
+        """);
+
+    ProjectConfig config = ProjectConfig.read(manifest, null);
+
+    assertEquals("org.example:processor:1.0", config.processors().get("example"));
+    assertEquals("hello from processor", config.processorOptions().get("greeting"));
+  }
+
+  @Test
   void readsExplicitJavaFormatterConfiguration() throws Exception {
     Path manifest = temp.resolve("jot.toml");
     Files.writeString(

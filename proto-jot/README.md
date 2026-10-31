@@ -92,6 +92,10 @@ Configure a pinned formatter with `[format] java = "group:artifact:version"` and
 `style = "google"` or `"aosp"`; `jot fmt` formats main and test sources, while
 `jot fmt --check` verifies them without writing changes. Formatter artifacts are
 included in `jot.lock`.
+Main-source annotation processors can be configured in `[processors]`; their Maven
+artifacts and options participate in the compile fingerprint and lockfile. A source
+change triggers a full compile with processing so generated sources cannot go stale.
+Neither the Rust nor Java CLI currently has a file-watching mode.
 
 The Java CLI includes a `test` command that compiles configured test sources and
 runs JUnit Platform Console. The prototype's own tests run through that command:

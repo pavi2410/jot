@@ -28,6 +28,130 @@ class BuildEngineTest {
   @TempDir Path temp;
 
   @Test
+  void runsConfiguredAnnotationProcessorsAndRebuildsGeneratedSourcesWhenOptionsChange()
+      throws Exception {
+    Path repository = temp.resolve("processor-repository");
+    MavenCoordinate processor = MavenCoordinate.parse("sample:greeting-processor:1.0");
+    Path processorSource = temp.resolve("processor-src/sample/GreetingProcessor.java");
+    Files.createDirectories(processorSource.getParent());
+    Files.writeString(
+        processorSource,
+        """
+        package sample;
+        import java.io.IOException;
+        import java.io.Writer;
+        import java.util.Set;
+        import javax.annotation.processing.AbstractProcessor;
+        import javax.annotation.processing.RoundEnvironment;
+        import javax.annotation.processing.SupportedAnnotationTypes;
+        import javax.annotation.processing.SupportedOptions;
+        import javax.lang.model.SourceVersion;
+        import javax.lang.model.element.TypeElement;
+        @SupportedAnnotationTypes("*")
+        @SupportedOptions("greeting")
+        public final class GreetingProcessor extends AbstractProcessor {
+            private boolean generated;
+            @Override public SourceVersion getSupportedSourceVersion() {
+                return SourceVersion.latestSupported();
+            }
+            @Override public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment round) {
+                if (generated || round.processingOver()) return false;
+                generated = true;
+                String value = processingEnv.getOptions().getOrDefault("greeting", "default");
+                char quote = 34;
+                try (Writer writer = processingEnv.getFiler()
+                        .createSourceFile("sample.generated.Greeting").openWriter()) {
+                    writer.write("package sample.generated; public final class Greeting { "
+                        + "public static String value() { return " + quote + value + quote + "; } }");
+                } catch (IOException error) { throw new RuntimeException(error); }
+                return false;
+            }
+        }
+        """);
+    Path processorClasses = temp.resolve("processor-classes");
+    Files.createDirectories(processorClasses);
+    assertEquals(
+        0,
+        ToolProvider.getSystemJavaCompiler()
+            .run(
+                null,
+                null,
+                null,
+                "--release",
+                "27",
+                "-d",
+                processorClasses.toString(),
+                processorSource.toString()));
+    Path processorJar = repository.resolve(processor.repositoryPath("jar"));
+    Files.createDirectories(processorJar.getParent());
+    try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(processorJar));
+        var classes = Files.walk(processorClasses)) {
+      for (Path file : classes.filter(Files::isRegularFile).toList()) {
+        jar.putNextEntry(
+            new JarEntry(
+                processorClasses
+                    .relativize(file)
+                    .toString()
+                    .replace(java.io.File.separatorChar, '/')));
+        Files.copy(file, jar);
+        jar.closeEntry();
+      }
+      jar.putNextEntry(new JarEntry("META-INF/services/javax.annotation.processing.Processor"));
+      jar.write("sample.GreetingProcessor\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      jar.closeEntry();
+    }
+    Path processorPom = repository.resolve(processor.pomPath());
+    Files.createDirectories(processorPom.getParent());
+    Files.writeString(
+        processorPom,
+        "<project><groupId>sample</groupId><artifactId>greeting-processor</artifactId>"
+            + "<version>1.0</version></project>");
+    write(
+        "src/main/java/sample/App.java",
+        "package sample; public class App { public static String greeting() "
+            + "{ return sample.generated.Greeting.value(); } }\n");
+    write(
+        "jot.toml",
+        """
+        [project]
+        name = "processor-app"
+        [toolchains]
+        java = "27"
+        [processors.greeting]
+        coords = "sample:greeting-processor:1.0"
+        options = { greeting = "first" }
+        """);
+    MavenResolver resolver = new MavenResolver(temp.resolve("cache"), repository.toUri());
+    ProjectConfig firstConfig = ProjectConfig.read(temp.resolve("jot.toml"), null);
+    WorkspaceProject project = new WorkspaceProject(temp, firstConfig, List.of());
+    Path lockfile = temp.resolve("jot.lock");
+
+    BuildEngine.lock(new ProjectWorkspace(List.of(project)), lockfile, resolver);
+    assertTrue(
+        Lockfile.read(lockfile).roots().stream()
+            .anyMatch(root -> root.notation().equals(processor.notation())));
+
+    BuildEngine.build(project, resolver);
+
+    assertTrue(
+        Files.isRegularFile(
+            temp.resolve("target/generated-sources/sample/generated/Greeting.java")));
+    assertEquals("first", generatedGreeting());
+    Path generatedClass = temp.resolve("target/classes/sample/generated/Greeting.class");
+    var firstTimestamp = Files.getLastModifiedTime(generatedClass);
+    BuildEngine.build(project, resolver);
+    assertEquals(firstTimestamp, Files.getLastModifiedTime(generatedClass));
+
+    write(
+        "jot.toml",
+        Files.readString(temp.resolve("jot.toml"))
+            .replace("greeting = \"first\"", "greeting = \"second\""));
+    ProjectConfig secondConfig = ProjectConfig.read(temp.resolve("jot.toml"), null);
+    BuildEngine.build(new WorkspaceProject(temp, secondConfig, List.of()), resolver);
+    assertEquals("second", generatedGreeting());
+  }
+
+  @Test
   void skipsJmhResolutionWhenNoBenchmarkSourcesExist() throws Exception {
     write(
         "src/sample/App.java",
@@ -628,5 +752,13 @@ class BuildEngineTest {
     Path file = temp.resolve(relativePath);
     Files.createDirectories(file.getParent());
     Files.writeString(file, contents);
+  }
+
+  private String generatedGreeting() throws Exception {
+    try (URLClassLoader loader =
+        new URLClassLoader(
+            new java.net.URL[] {temp.resolve("target/classes").toUri().toURL()}, null)) {
+      return (String) loader.loadClass("sample.App").getMethod("greeting").invoke(null);
+    }
   }
 }

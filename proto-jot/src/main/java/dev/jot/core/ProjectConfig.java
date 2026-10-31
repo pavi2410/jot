@@ -23,6 +23,8 @@ public record ProjectConfig(
     Map<String, String> pathDependencies,
     Map<String, String> dependencies,
     Map<String, String> testDependencies,
+    Map<String, String> processors,
+    Map<String, String> processorOptions,
     String javaFormatter,
     String javaFormatterStyle,
     BenchmarkConfig benchmarks) {
@@ -60,6 +62,9 @@ public record ProjectConfig(
     Map<String, String> testDependencies =
         parseDependencies(
             document.table("test-dependencies"), new TreeMap<>(), true, catalog, file);
+    Map<String, String> processors = new TreeMap<>();
+    Map<String, String> processorOptions = new TreeMap<>();
+    parseProcessors(document.table("processors"), catalog, file, processors, processorOptions);
     String formatterStyle = document.string("format.style", "google");
     if (!formatterStyle.equals("google") && !formatterStyle.equals("aosp")) {
       throw new IllegalArgumentException("format.style must be `google` or `aosp` in " + file);
@@ -83,9 +88,54 @@ public record ProjectConfig(
         Collections.unmodifiableMap(new TreeMap<>(pathDependencies)),
         Collections.unmodifiableMap(new TreeMap<>(dependencies)),
         Collections.unmodifiableMap(new TreeMap<>(testDependencies)),
+        Collections.unmodifiableMap(processors),
+        Collections.unmodifiableMap(processorOptions),
         document.string("format.java", null),
         formatterStyle,
         benchmarks);
+  }
+
+  private static void parseProcessors(
+      Map<String, Object> declarations,
+      Map<String, Object> catalog,
+      Path manifest,
+      Map<String, String> coordinates,
+      Map<String, String> options)
+      throws IOException {
+    for (Map.Entry<String, Object> declaration : declarations.entrySet()) {
+      String name = declaration.getKey();
+      Object value = declaration.getValue();
+      String coordinate;
+      if (value instanceof String string) {
+        coordinate = string;
+      } else if (value instanceof Map<?, ?> details) {
+        Object coords = details.get("coords");
+        Object alias = details.get("catalog");
+        if (coords instanceof String string && !string.isBlank()) coordinate = string;
+        else if (alias instanceof String string && !string.isBlank())
+          coordinate = resolveCatalogDependency(name, string, catalog, manifest);
+        else
+          throw new IllegalArgumentException(
+              "processor declaration `" + name + "` needs `coords` or `catalog` in " + manifest);
+        Object processorOptions = details.get("options");
+        if (processorOptions != null) {
+          if (!(processorOptions instanceof Map<?, ?> map))
+            throw new IllegalArgumentException(
+                "processor options for `" + name + "` must be a table");
+          for (Map.Entry<?, ?> option : map.entrySet()) {
+            if (!(option.getKey() instanceof String key)
+                || !(option.getValue() instanceof String optionValue))
+              throw new IllegalArgumentException(
+                  "processor options must be strings in " + manifest);
+            if (options.putIfAbsent(key, optionValue) != null)
+              throw new IllegalArgumentException("duplicate annotation processor option: " + key);
+          }
+        }
+      } else {
+        throw new IllegalArgumentException("invalid processor declaration for `" + name + "`");
+      }
+      coordinates.put(name, coordinate);
+    }
   }
 
   private static Map<String, String> parseDependencies(

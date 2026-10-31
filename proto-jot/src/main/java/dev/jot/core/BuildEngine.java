@@ -30,6 +30,8 @@ public final class BuildEngine {
     Path javaHome = JavaToolchain.javaHome(config.javaVersion());
     List<MavenResolver.ResolvedArtifact> externalArtifacts =
         resolveExternalArtifacts(project, resolver);
+    List<MavenResolver.ResolvedArtifact> processorArtifacts =
+        resolveProcessorArtifacts(project, resolver);
     List<Path> sources = new ArrayList<>();
     for (String sourceDirectory : config.sourceDirectories()) {
       Path sourceRoot = root.resolve(sourceDirectory).normalize();
@@ -55,7 +57,9 @@ public final class BuildEngine {
     }
     Path artifact = target.resolve(config.name() + "-" + config.version() + ".jar");
     Path stateFile = target.resolve(".jot/build-state.properties");
-    String compileFingerprint = compileFingerprint(project, externalArtifacts, javaHome);
+    String compileFingerprint =
+        compileFingerprint(
+            project, externalArtifacts, processorArtifacts, config.processorOptions(), javaHome);
     Properties previousState = readState(stateFile);
     IncrementalJavaCompiler.Result compilation =
         IncrementalJavaCompiler.compile(
@@ -64,6 +68,11 @@ public final class BuildEngine {
             config.javaVersion(),
             javaHome,
             classpath(project, externalArtifacts),
+            processorArtifacts.stream()
+                .map(processor -> processor.jar().toString())
+                .collect(java.util.stream.Collectors.joining(System.getProperty("path.separator"))),
+            config.processorOptions(),
+            target.resolve("generated-sources"),
             compileFingerprint,
             sources,
             previousState);
@@ -289,6 +298,9 @@ public final class BuildEngine {
       for (String coordinate : project.config().testDependencies().values()) {
         declarations.put("test-dependency-" + index++, coordinate);
       }
+      for (String coordinate : project.config().processors().values()) {
+        declarations.put("processor-" + index++, coordinate);
+      }
       if (project.config().javaFormatter() != null && !project.config().javaFormatter().isBlank()) {
         declarations.putIfAbsent(
             "java-formatter-" + project.config().javaFormatter(), project.config().javaFormatter());
@@ -484,6 +496,8 @@ public final class BuildEngine {
   private static String compileFingerprint(
       WorkspaceProject project,
       List<MavenResolver.ResolvedArtifact> externalArtifacts,
+      List<MavenResolver.ResolvedArtifact> processorArtifacts,
+      java.util.Map<String, String> processorOptions,
       Path javaHome)
       throws IOException, NoSuchAlgorithmException {
     Path root = project.root();
@@ -514,6 +528,15 @@ public final class BuildEngine {
       updateDigest(digest, artifact.coordinate().notation());
       digest.update(Files.readAllBytes(artifact.jar()));
     }
+    for (MavenResolver.ResolvedArtifact artifact : processorArtifacts) {
+      updateDigest(digest, artifact.coordinate().notation());
+      digest.update(Files.readAllBytes(artifact.jar()));
+    }
+    processorOptions.forEach(
+        (key, value) -> {
+          updateDigest(digest, key);
+          updateDigest(digest, value);
+        });
     return HexFormat.of().formatHex(digest.digest());
   }
 
@@ -689,6 +712,15 @@ public final class BuildEngine {
     List<MavenResolver.ResolvedArtifact> resolved = resolver.resolve(declarations);
     Path lockPath = findLockfile(project.root());
     if (lockPath != null) Lockfile.read(lockPath).verify(declarations.values(), resolved);
+    return resolved;
+  }
+
+  private static List<MavenResolver.ResolvedArtifact> resolveProcessorArtifacts(
+      WorkspaceProject project, MavenResolver resolver) throws Exception {
+    List<MavenResolver.ResolvedArtifact> resolved = resolver.resolve(project.config().processors());
+    Path lockPath = findLockfile(project.root());
+    if (lockPath != null)
+      Lockfile.read(lockPath).verify(project.config().processors().values(), resolved);
     return resolved;
   }
 
