@@ -46,13 +46,16 @@ Explicit source and resource directories override those defaults. Workspaces lis
 build and run.
 
 Jot selects an installed JDK under `~/.jot/jdks` when its release matches
-`toolchains.java`; otherwise it uses the running JDK when that JDK is newer than
-the requested release. `jot toolchain list` shows managed JDKs, and
-`jot toolchain pin java@21` updates the nearest project manifest
-(`--workspace` targets the workspace manifest). `jot toolchain install java@21`
-installs an Adoptium JDK into the shared Jot toolchain directory; `--offline`
-only succeeds when that JDK is already installed. The Java prototype currently
-installs Adoptium distributions only.
+`toolchains.java`; vendor-qualified values such as `corretto-21`, `zulu-21`,
+and `oracle-21` select that vendor. Plain release values accept any matching
+installed JDK and can fall back to a compatible running JDK. `jot toolchain list`
+shows managed JDKs. `jot toolchain pin java@21` updates the nearest project
+manifest; `jot toolchain pin java@corretto-21` pins Corretto instead. Use
+`--workspace` to target the workspace manifest. `jot toolchain install java@21`
+installs an Adoptium JDK into the shared Jot toolchain directory. Vendor
+prefixes (`adoptium`, `temurin`, `corretto`, `zulu`, or `oracle`) select a JDK
+distribution through the Adoptium API; `--offline` only succeeds when that
+vendor and release are already installed.
 
 The build cache fingerprints compiler inputs separately from package inputs.
 Resource-only changes update the class output and JAR without recompiling Java

@@ -28,7 +28,7 @@ import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
-/** Installs Adoptium JDKs into Jot's shared toolchain directory. */
+/** Installs JDK distributions from Adoptium's API into Jot's shared toolchain directory. */
 public final class JavaToolchainManager {
   private static final URI ADOPTIUM_API = URI.create("https://api.adoptium.net/v3/");
   private static final JsonFactory JSON = new JsonFactory();
@@ -63,7 +63,18 @@ public final class JavaToolchainManager {
 
   public JavaToolchain.Installation install(String requestedVersion, boolean force, boolean offline)
       throws Exception {
-    int feature = JavaToolchain.parseRelease(requestedVersion);
+    JavaToolchain.ToolchainRequest request = JavaToolchain.parseRequest(requestedVersion);
+    String version = request.version();
+    String vendor = request.vendor() == null ? "adoptium" : request.vendor();
+    String apiVendor =
+        switch (vendor) {
+          case "adoptium" -> "eclipse";
+          case "corretto" -> "amazon";
+          case "zulu" -> "azul";
+          case "oracle" -> "oracle";
+          default -> throw new IllegalArgumentException("unsupported JDK vendor: " + vendor);
+        };
+    int feature = JavaToolchain.parseRelease(version);
     Path jdks = jotHome.resolve("jdks");
     Path downloads = jotHome.resolve("downloads");
     Path locks = jotHome.resolve("locks");
@@ -71,28 +82,31 @@ public final class JavaToolchainManager {
     Files.createDirectories(downloads);
     Files.createDirectories(locks);
 
-    Path lockPath = locks.resolve("jdk-adoptium-" + requestedVersion + "-" + platform() + ".lock");
+    Path lockPath = locks.resolve("jdk-" + vendor + "-" + version + "-" + platform() + ".lock");
     try (FileChannel channel =
             FileChannel.open(lockPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
         FileLock ignored = channel.lock()) {
       List<JavaToolchain.Installation> installed = JavaToolchain.installedJdks(jdks);
       if (!force) {
         for (JavaToolchain.Installation installation : installed) {
-          if (installation.feature() == feature) return installation;
+          if (installation.feature() == feature && installation.vendor().equals(vendor))
+            return installation;
         }
       }
       if (offline) {
         throw new IOException(
             "offline mode: cannot install Java "
-                + requestedVersion
+                + request.specification()
                 + " because it is not already installed");
       }
 
-      Asset asset = resolveAsset(requestedVersion);
-      Path archive = downloads.resolve(asset.name());
+      Asset asset = resolveAsset(version, apiVendor);
+      Path vendorDownloads = downloads.resolve(vendor);
+      Files.createDirectories(vendorDownloads);
+      Path archive = vendorDownloads.resolve(asset.name());
       fetchArchive(asset, archive);
       Path installationDirectory =
-          jdks.resolve("adoptium-" + asset.releaseName() + "-" + platform());
+          jdks.resolve(vendor + "-" + asset.releaseName() + "-" + platform());
       if (Files.exists(installationDirectory)) deleteTree(installationDirectory);
       Path staging = Files.createTempDirectory(jdks, ".jdk-install-");
       try {
@@ -106,10 +120,11 @@ public final class JavaToolchainManager {
         Path javaHome = installationDirectory.resolve(staging.relativize(extractedHome));
         String installedVersion = readJavaVersion(javaHome);
         JavaToolchain.Installation result =
-            new JavaToolchain.Installation(feature, installedVersion, javaHome);
+            new JavaToolchain.Installation(feature, installedVersion, javaHome, vendor);
         writeRustCompatibleMetadata(
             installationDirectory.resolve("install.json"),
-            requestedVersion,
+            vendor,
+            version,
             asset,
             javaHome,
             installationDirectory);
@@ -175,7 +190,7 @@ public final class JavaToolchainManager {
     throw new IOException("unsupported JDK archive format: " + archive);
   }
 
-  private Asset resolveAsset(String version) throws Exception {
+  private Asset resolveAsset(String version, String vendor) throws Exception {
     String os = adoptiumOs();
     String architecture = adoptiumArchitecture();
     URI uri =
@@ -186,7 +201,8 @@ public final class JavaToolchainManager {
                 + os
                 + "&architecture="
                 + architecture
-                + "&image_type=jdk&vendor=eclipse");
+                + "&image_type=jdk&vendor="
+                + vendor);
     return parseAsset(transport.get(uri));
   }
 
@@ -313,12 +329,17 @@ public final class JavaToolchainManager {
   }
 
   private static void writeRustCompatibleMetadata(
-      Path file, String requestedVersion, Asset asset, Path javaHome, Path installDirectory)
+      Path file,
+      String vendor,
+      String requestedVersion,
+      Asset asset,
+      Path javaHome,
+      Path installDirectory)
       throws IOException {
     OffsetDateTime now = OffsetDateTime.now();
     try (JsonGenerator json = JSON.createGenerator(Files.newOutputStream(file))) {
       json.writeStartObject();
-      json.writeStringField("vendor", "adoptium");
+      json.writeStringField("vendor", vendor);
       json.writeStringField("requested_version", requestedVersion);
       json.writeStringField("release_name", asset.releaseName());
       json.writeStringField("semver", asset.semver());

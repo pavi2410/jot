@@ -438,13 +438,20 @@ public final class Main {
     if (command.action() instanceof CommandLine.InstallToolchain install) {
       String spec = install.specification();
       if (!spec.startsWith("java@")) {
-        throw new IllegalArgumentException(
-            "Java Jot currently installs Adoptium JDKs; got " + spec);
+        throw new IllegalArgumentException("expected java@<version>, got " + spec);
       }
       String version = spec.substring("java@".length());
+      JavaToolchain.ToolchainRequest request = JavaToolchain.parseRequest(version);
       JavaToolchain.Installation installation =
-          new JavaToolchainManager().install(version, install.force(), globals.offline());
-      System.out.println("install: java " + installation.version() + " -> " + installation.home());
+          new JavaToolchainManager()
+              .install(request.specification(), install.force(), globals.offline());
+      System.out.println(
+          "install: java "
+              + installation.vendor()
+              + "-"
+              + installation.version()
+              + " -> "
+              + installation.home());
       return;
     }
     if (command.action() instanceof CommandLine.ListToolchains) {
@@ -457,6 +464,7 @@ public final class Main {
       for (JavaToolchain.Installation installation : installed) {
         System.out.println(
             "java@"
+                + (installation.vendor().equals("unknown") ? "" : installation.vendor() + "-")
                 + installation.feature()
                 + " ("
                 + installation.version()
@@ -472,13 +480,13 @@ public final class Main {
       throw new IllegalArgumentException("expected java@<version>, got " + spec);
     }
     String version = spec.substring("java@".length());
-    JavaToolchain.parseRelease(version);
+    JavaToolchain.ToolchainRequest request = JavaToolchain.parseRequest(version);
     Path start =
         globals.projectRoot() == null ? Path.of("").toAbsolutePath() : globals.projectRoot();
     Path manifest =
         pin.workspace() ? findWorkspaceManifest(start) : findProjectRoot(start).resolve("jot.toml");
-    ManifestEditor.pinJavaToolchain(manifest, version);
-    System.out.println("toolchain: pinned java@" + version + " in " + manifest);
+    ManifestEditor.pinJavaToolchain(manifest, request.version(), request.vendor());
+    System.out.println("toolchain: pinned java@" + request.specification() + " in " + manifest);
   }
 
   private static Path findWorkspaceManifest(Path start) {
@@ -641,8 +649,9 @@ public final class Main {
     System.out.println("       jot resolve <group:artifact:version> [--deps] [--offline]");
     System.out.println("       jot lock [coordinates...] [--depth <levels>] [--output <file>]");
     System.out.println("       jot toolchain list");
-    System.out.println("       jot toolchain install java@<version> [--force] [--offline]");
-    System.out.println("       jot toolchain pin java@<version> [--workspace]");
+    System.out.println(
+        "       jot toolchain install java@<version|vendor-version> [--force] [--offline]");
+    System.out.println("       jot toolchain pin java@<version|vendor-version> [--workspace]");
     System.out.println(
         "       jot doc [--project <directory>] [--module <name>] [--open] [--offline]");
     System.out.println(

@@ -13,6 +13,7 @@ import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import org.junit.jupiter.api.Assumptions;
@@ -61,6 +62,42 @@ class JavaToolchainManagerTest {
 
     assertEquals(installed, reused);
     assertEquals(1, metadataRequests.get());
+  }
+
+  @Test
+  void installsTheRequestedJdkVendorFromTheMatchingAdoptiumDistribution() throws Exception {
+    byte[] archive = jdkArchive();
+    String checksum =
+        HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(archive));
+    AtomicReference<URI> metadataUri = new AtomicReference<>();
+    JavaToolchainManager.Transport transport =
+        new JavaToolchainManager.Transport() {
+          @Override
+          public String get(URI uri) {
+            metadataUri.set(uri);
+            return assetJson(checksum);
+          }
+
+          @Override
+          public void download(URI uri, Path destination) throws IOException {
+            Files.write(destination, archive);
+          }
+        };
+    JavaToolchainManager manager =
+        new JavaToolchainManager(
+            temp.resolve("corretto-jot"), URI.create("https://api.example/v3/"), transport);
+
+    JavaToolchain.Installation installed = manager.install("corretto-21", false, false);
+
+    assertEquals("corretto", installed.vendor());
+    assertTrue(metadataUri.get().getQuery().contains("vendor=amazon"));
+    assertTrue(installed.home().toString().contains("/jdks/corretto-"));
+    assertTrue(
+        Files.readString(installed.home().getParent().resolve("install.json"))
+            .contains("\"vendor\":\"corretto\""));
+    assertEquals(
+        "corretto",
+        JavaToolchain.installedJdks(temp.resolve("corretto-jot/jdks")).getFirst().vendor());
   }
 
   @Test

@@ -1,6 +1,7 @@
 package dev.jot.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.IOException;
@@ -12,6 +13,14 @@ import org.junit.jupiter.api.io.TempDir;
 
 class JavaToolchainTest {
   @TempDir Path temp;
+
+  @Test
+  void parsesOptionalJavaVendorPrefixesAndAliases() {
+    assertEquals("21", JavaToolchain.parseRequest("21").version());
+    assertNull(JavaToolchain.parseRequest("21").vendor());
+    assertEquals("corretto", JavaToolchain.parseRequest("corretto-21").vendor());
+    assertEquals("adoptium-21", JavaToolchain.parseRequest("temurin-21").specification());
+  }
 
   @Test
   void selectsAnInstalledMatchingJdkBeforeTheRunningJdk() {
@@ -34,6 +43,25 @@ class JavaToolchainTest {
   }
 
   @Test
+  void selectsThePinnedJdkVendorWhenSeveralBuildsMatchTheRelease() {
+    Path adoptium = Path.of("/managed/adoptium");
+    Path corretto = Path.of("/managed/corretto");
+
+    Path selected =
+        JavaToolchain.selectHome(
+            "21",
+            "corretto",
+            Path.of("/running"),
+            27,
+            "adoptium",
+            List.of(
+                new JavaToolchain.Installation(21, "21.0.2", adoptium, "adoptium"),
+                new JavaToolchain.Installation(21, "21.0.2", corretto, "corretto")));
+
+    assertEquals(corretto, selected);
+  }
+
+  @Test
   void explainsHowToInstallARequiredJdkWhenNoCompatibleToolchainExists() {
     IllegalStateException error =
         assertThrows(
@@ -42,7 +70,7 @@ class JavaToolchainTest {
 
     assertEquals(
         "project requires Java 27, but Jot runs on Java 21 and no managed JDK 27 is installed;"
-            + " install it with `jot toolchain install java@27` using the current Rust Jot CLI",
+            + " install it with `jot toolchain install java@27` using Java Jot",
         error.getMessage());
   }
 

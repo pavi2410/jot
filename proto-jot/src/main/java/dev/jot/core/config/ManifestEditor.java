@@ -23,10 +23,22 @@ public final class ManifestEditor {
   }
 
   public static void pinJavaToolchain(Path manifest, String version) throws IOException {
+    pinJavaToolchain(manifest, version, null);
+  }
+
+  public static void pinJavaToolchain(Path manifest, String version, String vendor)
+      throws IOException {
     TomlDocument.read(manifest);
     List<String> lines = new ArrayList<>(Files.readAllLines(manifest));
     removeEntry(lines, "toolchains", "java");
-    insertEntry(lines, "toolchains", "java", version);
+    Object value = version;
+    if (vendor != null) {
+      java.util.Map<String, String> request = new java.util.LinkedHashMap<>();
+      request.put("version", version);
+      request.put("vendor", vendor);
+      value = request;
+    }
+    insertEntry(lines, "toolchains", "java", value);
     writeValidated(manifest, String.join("\n", lines) + "\n");
   }
 

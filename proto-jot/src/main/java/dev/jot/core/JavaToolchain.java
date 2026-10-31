@@ -14,34 +14,55 @@ public final class JavaToolchain {
   private JavaToolchain() {}
 
   public static Path javaHome(String requestedRelease) throws IOException {
+    return javaHome(requestedRelease, null);
+  }
+
+  public static Path javaHome(String requestedRelease, String requestedVendor) throws IOException {
     Path managedJdks =
         Path.of(System.getProperty("user.home"), ".jot", "jdks").toAbsolutePath().normalize();
     return selectHome(
         requestedRelease,
+        requestedVendor,
         Path.of(System.getProperty("java.home")).toAbsolutePath().normalize(),
         Runtime.version().feature(),
+        canonicalVendor(System.getProperty("java.vendor")),
         installedJdks(managedJdks));
   }
 
   static Path selectHome(
       String requestedRelease, Path runningHome, int runningFeature, List<Installation> installed) {
+    return selectHome(requestedRelease, null, runningHome, runningFeature, null, installed);
+  }
+
+  static Path selectHome(
+      String requestedRelease,
+      String requestedVendor,
+      Path runningHome,
+      int runningFeature,
+      String runningVendor,
+      List<Installation> installed) {
     int requested = parseRelease(requestedRelease);
     for (Installation installation : installed) {
-      if (installation.feature() == requested) return installation.home();
+      if (installation.feature() == requested
+          && (requestedVendor == null || requestedVendor.equals(installation.vendor())))
+        return installation.home();
     }
 
-    if (runningFeature >= requested) return runningHome;
+    if (runningFeature >= requested
+        && (requestedVendor == null || requestedVendor.equals(runningVendor))) return runningHome;
 
     throw new IllegalStateException(
         "project requires Java "
             + requested
+            + (requestedVendor == null ? "" : " from " + requestedVendor)
             + ", but Jot runs on Java "
             + runningFeature
             + " and no managed JDK "
             + requested
+            + (requestedVendor == null ? "" : " from " + requestedVendor)
             + " is installed; install it with `jot toolchain install java@"
-            + requested
-            + "` using the current Rust Jot CLI");
+            + (requestedVendor == null ? requested : requestedVendor + "-" + requested)
+            + "` using Java Jot");
   }
 
   public static List<Installation> installedJdks(Path jdksDirectory) throws IOException {
@@ -70,13 +91,17 @@ public final class JavaToolchain {
         } catch (IllegalArgumentException ignored) {
           continue;
         }
-        installations.add(new Installation(feature, version, home));
+        String vendor = managedVendor(home, jdksDirectory);
+        if (vendor.equals("unknown")) vendor = canonicalVendor(release.getProperty("IMPLEMENTOR"));
+        if (vendor == null) vendor = "unknown";
+        installations.add(new Installation(feature, version, home, vendor));
       }
     }
     installations.sort(
         Comparator.comparingInt(Installation::feature)
             .thenComparing(Installation::version)
-            .reversed());
+            .reversed()
+            .thenComparing(Installation::vendor));
     return List.copyOf(installations);
   }
 
@@ -95,6 +120,55 @@ public final class JavaToolchain {
     return requested;
   }
 
+  public static ToolchainRequest parseRequest(String specification) {
+    if (specification == null || specification.isBlank())
+      throw new IllegalArgumentException("Java toolchain version is required");
+    int separator = specification.indexOf('-');
+    String vendor = null;
+    String version = specification;
+    if (separator > 0) {
+      String prefix = specification.substring(0, separator).toLowerCase(java.util.Locale.ROOT);
+      vendor =
+          switch (prefix) {
+            case "adoptium", "temurin", "openjdk" -> "adoptium";
+            case "corretto" -> "corretto";
+            case "zulu" -> "zulu";
+            case "oracle" -> "oracle";
+            default -> null;
+          };
+      if (vendor != null) version = specification.substring(separator + 1);
+    }
+    parseRelease(version);
+    return new ToolchainRequest(version, vendor);
+  }
+
+  private static String canonicalVendor(String vendor) {
+    if (vendor == null) return null;
+    String value = vendor.toLowerCase(java.util.Locale.ROOT);
+    if (value.contains("adoptium") || value.contains("temurin")) return "adoptium";
+    if (value.contains("amazon") || value.contains("corretto")) return "corretto";
+    if (value.contains("azul") || value.contains("zulu")) return "zulu";
+    if (value.contains("oracle")) return "oracle";
+    return value;
+  }
+
+  private static String managedVendor(Path javaHome, Path jdksDirectory) {
+    Path install = javaHome.toAbsolutePath().normalize();
+    while (install.getParent() != null
+        && !install
+            .getParent()
+            .toAbsolutePath()
+            .normalize()
+            .equals(jdksDirectory.toAbsolutePath().normalize())) {
+      install = install.getParent();
+    }
+    String name = install.getFileName() == null ? "" : install.getFileName().toString();
+    for (String vendor : List.of("adoptium", "corretto", "zulu", "oracle")) {
+      if (name.startsWith(vendor + "-")) return vendor;
+    }
+    return "unknown";
+  }
+
   public static Path tool(Path javaHome, String name) {
     String executable = System.getProperty("os.name").startsWith("Windows") ? name + ".exe" : name;
     Path tool = javaHome.resolve("bin").resolve(executable);
@@ -104,5 +178,15 @@ public final class JavaToolchain {
     return tool;
   }
 
-  public record Installation(int feature, String version, Path home) {}
+  public record ToolchainRequest(String version, String vendor) {
+    public String specification() {
+      return vendor == null ? version : vendor + "-" + version;
+    }
+  }
+
+  public record Installation(int feature, String version, Path home, String vendor) {
+    public Installation(int feature, String version, Path home) {
+      this(feature, version, home, "unknown");
+    }
+  }
 }

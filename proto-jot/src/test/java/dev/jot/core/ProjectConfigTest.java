@@ -129,6 +129,25 @@ class ProjectConfigTest {
   }
 
   @Test
+  void readsVendorQualifiedJavaToolchainsAsCompilerReleaseAndVendor() throws Exception {
+    Path manifest = temp.resolve("vendor-jot.toml");
+    Files.writeString(
+        manifest,
+        """
+        [project]
+        name = "vendor-app"
+        [toolchains]
+        java = { version = "21", vendor = "corretto" }
+        """);
+
+    ProjectConfig config = ProjectConfig.read(manifest, null);
+
+    assertEquals("21", config.javaVersion());
+    assertEquals("corretto", config.javaVendor());
+    assertEquals("corretto-21", config.javaSpecification());
+  }
+
+  @Test
   void readsExplicitJavaFormatterConfiguration() throws Exception {
     Path manifest = temp.resolve("jot.toml");
     Files.writeString(

@@ -117,4 +117,16 @@ class ManifestEditorTest {
     assertTrue(contents.contains("name = \"demo\""));
     assertTrue(contents.contains("annotations = \"org.example:annotations:1.0\""));
   }
+
+  @Test
+  void pinsVendorQualifiedJavaToolchainsAsRustCompatibleInlineTables() throws Exception {
+    Path manifest = temp.resolve("vendor-jot.toml");
+    Files.writeString(manifest, "[project]\nname = \"demo\"\n[toolchains]\njava = \"21\"\n");
+
+    ManifestEditor.pinJavaToolchain(manifest, "21", "corretto");
+
+    String result = Files.readString(manifest);
+    assertTrue(result.contains("java = { version = \"21\", vendor = \"corretto\" }"));
+    assertEquals("corretto", ProjectConfig.read(manifest, null).javaVendor());
+  }
 }

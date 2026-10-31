@@ -124,24 +124,25 @@ class CommandLineTest {
   @Test
   void parsesJavaToolchainCommands() {
     CommandLine parsed =
-        CommandLineParser.parse(new String[] {"toolchain", "pin", "java@21", "--workspace"});
+        CommandLineParser.parse(
+            new String[] {"toolchain", "pin", "java@corretto-21", "--workspace"});
 
     CommandLine.Toolchain toolchain =
         assertInstanceOf(CommandLine.Toolchain.class, parsed.command());
     CommandLine.PinToolchain pin =
         assertInstanceOf(CommandLine.PinToolchain.class, toolchain.action());
-    assertEquals("java@21", pin.specification());
+    assertEquals("java@corretto-21", pin.specification());
     assertTrue(pin.workspace());
     assertEquals("toolchain needs list, pin, or install", parseError("toolchain"));
 
     CommandLine install =
         CommandLineParser.parse(
-            new String[] {"toolchain", "install", "java@21", "--force", "--offline"});
+            new String[] {"toolchain", "install", "java@zulu-21", "--force", "--offline"});
     CommandLine.Toolchain installCommand =
         assertInstanceOf(CommandLine.Toolchain.class, install.command());
     CommandLine.InstallToolchain installAction =
         assertInstanceOf(CommandLine.InstallToolchain.class, installCommand.action());
-    assertEquals("java@21", installAction.specification());
+    assertEquals("java@zulu-21", installAction.specification());
     assertTrue(installAction.force());
     assertTrue(install.offline());
     assertEquals(
@@ -161,7 +162,7 @@ class CommandLineTest {
                 "dev.jot.cli.Main",
                 "toolchain",
                 "pin",
-                "java@21",
+                "java@corretto-21",
                 "--project",
                 temp.toString())
             .directory(temp.toFile())
@@ -170,8 +171,10 @@ class CommandLineTest {
     String output = new String(process.getInputStream().readAllBytes());
 
     assertEquals(0, process.waitFor(), output);
-    assertTrue(Files.readString(temp.resolve("jot.toml")).contains("java = \"21\""));
-    assertTrue(output.contains("pinned java@21"));
+    assertTrue(
+        Files.readString(temp.resolve("jot.toml"))
+            .contains("java = { version = \"21\", vendor = \"corretto\" }"));
+    assertTrue(output.contains("pinned java@corretto-21"));
   }
 
   @Test

@@ -22,7 +22,7 @@ class ProjectWorkspaceTest {
         members = ["app", "core"]
         group = "org.example"
         [toolchains]
-        java = "27"
+        java = { version = "27", vendor = "corretto" }
         """);
     write(
         "core/jot.toml",
@@ -47,6 +47,7 @@ class ProjectWorkspaceTest {
         List.of("jot-core", "jot-app"),
         workspace.ordered().stream().map(WorkspaceProject::name).toList());
     assertEquals("27", workspace.find("app").config().javaVersion());
+    assertEquals("corretto", workspace.find("app").config().javaVendor());
     assertEquals("org.example", workspace.find("app").config().group());
     assertEquals("jot-core", workspace.find("app").dependencies().getFirst().name());
     assertEquals("jot-app", workspace.selectRunnable("app").name());

@@ -15,6 +15,7 @@ public record ProjectConfig(
     String group,
     String mainClass,
     String javaVersion,
+    String javaVendor,
     java.util.List<String> sourceDirectories,
     String outputDirectory,
     java.util.List<String> resourceDirectories,
@@ -34,6 +35,10 @@ public record ProjectConfig(
     return !workspaceMembers.isEmpty();
   }
 
+  public String javaSpecification() {
+    return javaVendor == null ? javaVersion : javaVendor + "-" + javaVersion;
+  }
+
   public static ProjectConfig read(Path file, String inheritedJava) throws IOException {
     return read(file, inheritedJava, null);
   }
@@ -46,10 +51,32 @@ public record ProjectConfig(
       Path parent = file.toAbsolutePath().getParent();
       projectName = parent == null ? "workspace" : parent.getFileName().toString();
     }
-    String javaVersion = document.string("toolchains.java", inheritedJava);
-    if (javaVersion == null || javaVersion.isBlank()) {
+    Object rawJavaToolchain = document.table("toolchains").get("java");
+    String javaSpecification = inheritedJava;
+    if (rawJavaToolchain instanceof String value) {
+      javaSpecification = value;
+    } else if (rawJavaToolchain instanceof Map<?, ?> values) {
+      Object version = values.get("version");
+      Object vendor = values.get("vendor");
+      if (!(version instanceof String release))
+        throw new IllegalArgumentException("toolchains.java.version must be a string in " + file);
+      if (vendor != null && !(vendor instanceof String))
+        throw new IllegalArgumentException("toolchains.java.vendor must be a string in " + file);
+      if (vendor != null) {
+        String name = ((String) vendor).toLowerCase(java.util.Locale.ROOT);
+        if (!java.util.Set.of("adoptium", "corretto", "zulu", "oracle").contains(name))
+          throw new IllegalArgumentException("unsupported Java vendor `" + vendor + "` in " + file);
+        javaSpecification = name + "-" + release;
+      } else {
+        javaSpecification = release;
+      }
+    } else if (rawJavaToolchain != null) {
+      throw new IllegalArgumentException("toolchains.java must be a string or table in " + file);
+    }
+    if (javaSpecification == null || javaSpecification.isBlank()) {
       throw new IllegalArgumentException("missing toolchains.java in " + file);
     }
+    JavaToolchain.ToolchainRequest javaRequest = JavaToolchain.parseRequest(javaSpecification);
     String layout = document.string("project.layout", "standard");
     if (!layout.equals("standard") && !layout.equals("maven")) {
       throw new IllegalArgumentException("project.layout must be `standard` or `maven` in " + file);
@@ -89,7 +116,8 @@ public record ProjectConfig(
         document.string("project.version", "0.1.0"),
         group,
         document.string("project.main-class", ""),
-        javaVersion,
+        javaRequest.version(),
+        javaRequest.vendor(),
         document.stringList("build.source-dirs", sourceDefaults),
         document.string("build.output-directory", "target/classes"),
         document.stringList("build.resource-dirs", resourceDefaults),

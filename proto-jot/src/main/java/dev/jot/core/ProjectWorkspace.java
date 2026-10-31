@@ -18,7 +18,7 @@ public record ProjectWorkspace(List<WorkspaceProject> ordered) {
     for (String member : rootConfig.workspaceMembers()) {
       visit(
           root.resolve(member),
-          rootConfig.javaVersion(),
+          rootConfig.javaSpecification(),
           rootConfig.group(),
           visiting,
           byPath,
@@ -57,7 +57,7 @@ public record ProjectWorkspace(List<WorkspaceProject> ordered) {
         throw new IllegalArgumentException("missing project manifest: " + manifest);
       }
       ProjectConfig dependencyConfig =
-          ProjectConfig.read(manifest, config.javaVersion(), config.group());
+          ProjectConfig.read(manifest, config.javaSpecification(), config.group());
       dependencies.add(visitProject(dependencyRoot, dependencyConfig, visiting, byPath, ordered));
     }
     visiting.removeLast();
@@ -97,7 +97,7 @@ public record ProjectWorkspace(List<WorkspaceProject> ordered) {
       dependencies.add(
           visit(
               normalizedRoot.resolve(dependencyPath),
-              config.javaVersion(),
+              config.javaSpecification(),
               config.group(),
               visiting,
               byPath,

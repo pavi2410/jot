@@ -27,7 +27,7 @@ public final class BuildEngine {
   public static void build(WorkspaceProject project, MavenResolver resolver) throws Exception {
     Path root = project.root();
     ProjectConfig config = project.config();
-    Path javaHome = JavaToolchain.javaHome(config.javaVersion());
+    Path javaHome = JavaToolchain.javaHome(config.javaVersion(), config.javaVendor());
     List<MavenResolver.ResolvedArtifact> externalArtifacts =
         resolveExternalArtifacts(project, resolver);
     List<MavenResolver.ResolvedArtifact> processorArtifacts =
@@ -133,7 +133,8 @@ public final class BuildEngine {
 
   public static void run(WorkspaceProject project, List<String> arguments, MavenResolver resolver)
       throws Exception {
-    Path javaHome = JavaToolchain.javaHome(project.config().javaVersion());
+    Path javaHome =
+        JavaToolchain.javaHome(project.config().javaVersion(), project.config().javaVendor());
     List<String> classpathEntries = new ArrayList<>();
     classpathEntries.add(project.root().resolve(project.config().outputDirectory()).toString());
     for (WorkspaceProject dependency : transitiveDependencies(project)) {
@@ -157,7 +158,7 @@ public final class BuildEngine {
   public static Path doc(WorkspaceProject project, MavenResolver resolver) throws Exception {
     Path root = project.root();
     ProjectConfig config = project.config();
-    Path javaHome = JavaToolchain.javaHome(config.javaVersion());
+    Path javaHome = JavaToolchain.javaHome(config.javaVersion(), config.javaVendor());
     List<Path> sources = collectSources(root, config.sourceDirectories());
     if (sources.isEmpty()) {
       throw new IllegalStateException(
@@ -187,7 +188,7 @@ public final class BuildEngine {
   public static LintResult lint(WorkspaceProject project, MavenResolver resolver) throws Exception {
     Path root = project.root();
     ProjectConfig config = project.config();
-    Path javaHome = JavaToolchain.javaHome(config.javaVersion());
+    Path javaHome = JavaToolchain.javaHome(config.javaVersion(), config.javaVendor());
     List<Path> sources = collectSources(root, config.sourceDirectories());
     if (sources.isEmpty()) {
       throw new IllegalStateException(
@@ -231,7 +232,7 @@ public final class BuildEngine {
       throws Exception {
     Path root = project.root();
     ProjectConfig config = project.config();
-    Path javaHome = JavaToolchain.javaHome(config.javaVersion());
+    Path javaHome = JavaToolchain.javaHome(config.javaVersion(), config.javaVendor());
     if (config.javaFormatter() == null || config.javaFormatter().isBlank()) {
       throw new IllegalArgumentException(
           "missing [format].java in jot.toml; set it to a pinned formatter coordinate");
@@ -336,7 +337,7 @@ public final class BuildEngine {
     build(project, resolver);
     Path root = project.root();
     ProjectConfig config = project.config();
-    Path javaHome = JavaToolchain.javaHome(config.javaVersion());
+    Path javaHome = JavaToolchain.javaHome(config.javaVersion(), config.javaVendor());
     List<Path> testSources = collectSources(root, config.testSourceDirectories());
     if (testSources.isEmpty()) {
       System.out.println("test: no test sources in " + config.name());
@@ -461,7 +462,7 @@ public final class BuildEngine {
     String mainClasspath = classpath(project, benchmarkDependencies);
     if (!mainClasspath.isBlank()) classpathEntries.add(mainClasspath);
     String joinedClasspath = String.join(System.getProperty("path.separator"), classpathEntries);
-    Path javaHome = JavaToolchain.javaHome(config.javaVersion());
+    Path javaHome = JavaToolchain.javaHome(config.javaVersion(), config.javaVendor());
     List<String> compile =
         new ArrayList<>(
             List.of(
@@ -510,6 +511,7 @@ public final class BuildEngine {
     ProjectConfig config = project.config();
     MessageDigest digest = MessageDigest.getInstance("SHA-256");
     updateDigest(digest, config.javaVersion());
+    updateDigest(digest, java.util.Objects.toString(config.javaVendor(), ""));
     updateDigest(digest, config.sourceDirectories().toString());
     updateDigest(digest, config.outputDirectory());
     updateDigest(digest, javaHome.toString());
