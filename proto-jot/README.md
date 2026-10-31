@@ -16,12 +16,18 @@ cd proto-jot
 cargo run --manifest-path ../Cargo.toml -p jot -- build
 ```
 
-Then use the JAR produced by that build to rebuild the same project. Set
-`JAVA_HOME` to the Java 27 installation shown by `jot toolchain list`:
+For the Java Jot commands below, use the managed Java 27 installation as
+`JAVA_HOME` and put `$JAVA_HOME/bin` first on `PATH`.
+
+The Java implementation is one project, organized into packages for the CLI,
+configuration, workspace loading, and build execution. The narrow TOML reader
+and CLI parser are isolated classes, so they can be replaced by dedicated Java
+libraries without moving build logic. Use the resulting Java Jot to build
+itself:
 
 ```sh
-export PATH="$JAVA_HOME/bin:$PATH"
-java -jar target/proto-jot-0.1.0.jar build
+java -jar target/bin/jot-java.jar build
+java -jar target/bin/jot-java.jar run -- --version
 ```
 
 The prototype supports `build`, `run`, and `clean`, and accepts `--project` and
@@ -31,10 +37,18 @@ The prototype supports `build`, `run`, and `clean`, and accepts `--project` and
 build and run.
 
 External Maven dependencies, tests, Kotlin, and the full TOML specification are
-not implemented yet. The parser currently handles the strings, string arrays,
-and path dependency inline tables needed by this slice.
+not implemented in the Java CLI yet. The Java sources have JUnit 5 tests; while
+the Java `test` command is pending, run them with the current Rust Jot from this
+directory:
 
 ```sh
-"$JAVA_HOME/bin/java" -jar target/bin/proto-jot.jar build --project examples/tiny-workspace
-"$JAVA_HOME/bin/java" -jar target/bin/proto-jot.jar run --project examples/tiny-workspace --module app
+cargo run --manifest-path ../Cargo.toml -p jot -- test
+```
+
+The TOML reader currently handles the strings, string arrays, and path
+dependency inline tables needed by this slice.
+
+```sh
+java -jar target/bin/jot-java.jar build --project examples/tiny-workspace
+java -jar target/bin/jot-java.jar run --project examples/tiny-workspace --module app
 ```

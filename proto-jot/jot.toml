@@ -1,7 +1,7 @@
 [project]
-name = "proto-jot"
-version = "0.1.0"
-main-class = "dev.jot.proto.Jot"
+name = "jot-java"
+version = "0.2.0-dev"
+main-class = "dev.jot.cli.Main"
 layout = "maven"
 
 [toolchains]
@@ -10,3 +10,6 @@ java = "27"
 [build]
 source-dirs = ["src/main/java"]
 output-directory = "target/classes"
+
+[test-dependencies]
+junit = "org.junit.jupiter:junit-jupiter:5.11.0"
