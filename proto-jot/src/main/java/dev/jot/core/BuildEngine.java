@@ -56,6 +56,8 @@ public final class BuildEngine {
       throw new IllegalArgumentException("build.output-directory must be below target/");
     }
     Path artifact = target.resolve(config.name() + "-" + config.version() + ".jar");
+    Path displayArtifact =
+        root.toAbsolutePath().normalize().relativize(artifact.toAbsolutePath().normalize());
     Path stateFile = target.resolve(".jot/build-state.properties");
     String compileFingerprint =
         compileFingerprint(
@@ -119,11 +121,12 @@ public final class BuildEngine {
       state.store(output, "Jot content fingerprint. Generated file.");
     }
     if (compileRequired) {
-      System.out.println("build: " + config.name() + " " + config.version() + " -> " + artifact);
+      System.out.println(
+          "build: " + config.name() + " " + config.version() + " -> " + displayArtifact);
     } else if (artifactIsIntact) {
       System.out.println("build: " + config.name() + " is up to date");
     } else {
-      System.out.println("package: " + config.name() + " -> " + artifact);
+      System.out.println("package: " + config.name() + " -> " + displayArtifact);
     }
   }
 
