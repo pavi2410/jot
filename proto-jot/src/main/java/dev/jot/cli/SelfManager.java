@@ -105,6 +105,18 @@ final class SelfManager {
     return path;
   }
 
+  static Path runningJarIfPackaged() {
+    try {
+      URI location = Main.class.getProtectionDomain().getCodeSource().getLocation().toURI();
+      Path path = Path.of(location).toAbsolutePath().normalize();
+      return Files.isRegularFile(path) && path.getFileName().toString().endsWith(".jar")
+          ? path
+          : null;
+    } catch (Exception ignored) {
+      return null;
+    }
+  }
+
   private static Release release(String requestedVersion) throws Exception {
     String endpoint;
     if (requestedVersion == null)

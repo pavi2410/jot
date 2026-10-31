@@ -284,7 +284,33 @@ public final class BuildEngine {
   public record FormatResult(boolean formatted, String diagnostics) {}
 
   public static void clean(WorkspaceProject project) throws IOException {
-    deleteTree(project.root().resolve("target"));
+    clean(project, null);
+  }
+
+  public static void clean(WorkspaceProject project, Path preserveArtifact) throws IOException {
+    Path target = project.root().resolve("target").toAbsolutePath().normalize();
+    Path savedArtifact = null;
+    if (preserveArtifact != null) {
+      Path artifact = preserveArtifact.toAbsolutePath().normalize();
+      if (!artifact.startsWith(target) || !Files.isRegularFile(artifact)) {
+        throw new IllegalArgumentException(
+            "preserved artifact must be a file inside the project target directory");
+      }
+      savedArtifact = Files.createTempFile("jot-clean-bootstrap-", ".jar");
+      Files.copy(artifact, savedArtifact, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+    }
+    try {
+      deleteTree(target);
+      if (savedArtifact != null) {
+        Files.createDirectories(preserveArtifact.toAbsolutePath().normalize().getParent());
+        Files.copy(
+            savedArtifact,
+            preserveArtifact.toAbsolutePath().normalize(),
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+      }
+    } finally {
+      if (savedArtifact != null) Files.deleteIfExists(savedArtifact);
+    }
     System.out.println("clean: " + project.config().name());
   }
 

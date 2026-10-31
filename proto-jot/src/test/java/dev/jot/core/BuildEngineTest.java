@@ -420,6 +420,23 @@ class BuildEngineTest {
   }
 
   @Test
+  void cleanCanPreserveTheRunningBootstrapJarWhileRemovingOtherOutputs() throws Exception {
+    Files.createDirectories(temp.resolve("target/bin"));
+    Path bootstrap = temp.resolve("target/bin/jot-java.jar");
+    Files.writeString(bootstrap, "bootstrap jar");
+    Files.writeString(temp.resolve("target/stale-output"), "stale");
+    Path manifest = temp.resolve("jot.toml");
+    Files.writeString(manifest, "[project]\nname = \"sample\"\n\n[toolchains]\njava = \"27\"\n");
+    ProjectConfig config = ProjectConfig.read(manifest, null);
+    WorkspaceProject project = new WorkspaceProject(temp, config, List.of());
+
+    BuildEngine.clean(project, bootstrap);
+
+    assertEquals("bootstrap jar", Files.readString(bootstrap));
+    assertTrue(!Files.exists(temp.resolve("target/stale-output")));
+  }
+
+  @Test
   void buildsAndRunsWithTransitiveLocalDependencies() throws Exception {
     write(
         "jot.toml",

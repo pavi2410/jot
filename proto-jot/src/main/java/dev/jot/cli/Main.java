@@ -213,7 +213,15 @@ public final class Main {
       case CommandLine.Remove remove -> removeDependency(projectRoot, remove, resolver);
       case CommandLine.Lock lock -> lock(projectRoot, workspace, lock, resolver);
       case CommandLine.Clean ignored -> {
-        for (WorkspaceProject project : workspace.ordered()) BuildEngine.clean(project);
+        Path runningJar = SelfManager.runningJarIfPackaged();
+        for (WorkspaceProject project : workspace.ordered()) {
+          Path target = project.root().resolve("target").toAbsolutePath().normalize();
+          if (runningJar != null && runningJar.startsWith(target)) {
+            BuildEngine.clean(project, runningJar);
+          } else {
+            BuildEngine.clean(project);
+          }
+        }
       }
       default -> throw new IllegalStateException("command handled before project loading");
     }
