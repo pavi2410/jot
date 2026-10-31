@@ -47,6 +47,12 @@ class CommandLineTest {
             CommandLine.Build.class,
             CommandLineParser.parse(new String[] {"build", "--module", "core"}).command());
     assertEquals("core", build.module());
+    assertTrue(!build.clean());
+    CommandLine.Build cleanBuild =
+        assertInstanceOf(
+            CommandLine.Build.class,
+            CommandLineParser.parse(new String[] {"build", "--clean"}).command());
+    assertTrue(cleanBuild.clean());
     assertInstanceOf(
         CommandLine.Test.class, CommandLineParser.parse(new String[] {"test"}).command());
     assertInstanceOf(
@@ -239,6 +245,7 @@ class CommandLineTest {
     String buildHelp = HelpPrinter.render("build", "1.2.3");
     assertTrue(buildHelp.contains("Usage: jot build [OPTIONS]"));
     assertTrue(buildHelp.contains("--module <name>"));
+    assertTrue(buildHelp.contains("--clean"));
     assertTrue(buildHelp.contains("-h, --help"));
 
     String toolchainHelp = HelpPrinter.render("toolchain", "1.2.3");
@@ -266,6 +273,29 @@ class CommandLineTest {
                 "(?s).*-> target/timed-build-0.1.0.jar \\(\\d+(?:\\.\\d)?"
                     + " (?:B|KiB|MiB|GiB|TiB)\\).*"));
     assertTrue(output.toString().matches("(?s).*build: finished in \\d+\\.\\d{3} s\\R?$"));
+  }
+
+  @Test
+  void buildCleanRemovesPreviousOutputsBeforeRebuilding() throws Exception {
+    Path project = temp.resolve("clean-build");
+    ProjectInitializer.initialize(project, "clean-build", null, null, null);
+    Main.execute(new String[] {"build", "--project", project.toString(), "--offline"});
+    Path staleOutput = project.resolve("target/stale-output");
+    Files.writeString(staleOutput, "stale");
+
+    ByteArrayOutputStream output = new ByteArrayOutputStream();
+    PrintStream originalOut = System.out;
+    try (PrintStream captured = new PrintStream(output)) {
+      System.setOut(captured);
+      Main.execute(new String[] {"build", "--clean", "--project", project.toString(), "--offline"});
+    } finally {
+      System.setOut(originalOut);
+    }
+
+    assertTrue(!Files.exists(staleOutput));
+    assertTrue(Files.isRegularFile(project.resolve("target/clean-build-0.1.0.jar")));
+    assertTrue(output.toString().contains("clean: clean-build"));
+    assertTrue(output.toString().contains("build: clean-build 0.1.0"));
   }
 
   @Test

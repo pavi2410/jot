@@ -21,7 +21,9 @@ final class HelpPrinter {
               "build",
               "Compile and package the current project",
               "[OPTIONS]",
-              projectOptions(opt("--module <name>", "Build one workspace module"))),
+              projectOptions(
+                  opt("--module <name>", "Build one workspace module"),
+                  opt("--clean", "Remove build outputs before building"))),
           command(
               "run",
               "Build and run the project",

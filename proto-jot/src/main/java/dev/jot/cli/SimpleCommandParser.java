@@ -7,9 +7,9 @@ final class SimpleCommandParser {
   static CommandLine.Command parse(String command, CommandArguments args) {
     return switch (command) {
       case "build" -> {
-        args.allow("module");
+        args.allow("module", "clean");
         args.noPositionals(command);
-        yield new CommandLine.Build(args.value("module"));
+        yield new CommandLine.Build(args.value("module"), args.flag("clean"));
       }
       case "run" -> {
         args.allow("module");

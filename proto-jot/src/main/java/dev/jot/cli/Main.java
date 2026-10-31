@@ -192,7 +192,8 @@ public final class Main {
             : ProjectWorkspace.loadProject(projectRoot, config);
     MavenResolver resolver = newResolver(commandLine.offline());
     switch (commandLine.command()) {
-      case CommandLine.Build build -> build(config, workspace, build.module(), resolver);
+      case CommandLine.Build build ->
+          build(config, workspace, build.module(), build.clean(), resolver);
       case CommandLine.Run run -> run(config, workspace, run.module(), run.arguments(), resolver);
       case CommandLine.Test test -> test(config, workspace, test.module(), resolver);
       case CommandLine.Doc doc -> doc(config, workspace, doc.module(), doc.open(), resolver);
@@ -530,7 +531,11 @@ public final class Main {
   }
 
   private static void build(
-      ProjectConfig config, ProjectWorkspace workspace, String module, MavenResolver resolver)
+      ProjectConfig config,
+      ProjectWorkspace workspace,
+      String module,
+      boolean clean,
+      MavenResolver resolver)
       throws Exception {
     long started = System.nanoTime();
     if (!config.isWorkspace() && module != null) {
@@ -540,6 +545,17 @@ public final class Main {
         module == null && config.isWorkspace()
             ? workspace.ordered()
             : workspace.dependenciesFirst(workspace.find(module == null ? config.name() : module));
+    if (clean) {
+      Path runningJar = SelfManager.runningJarIfPackaged();
+      for (WorkspaceProject project : projects) {
+        Path target = project.root().resolve("target").toAbsolutePath().normalize();
+        if (runningJar != null && runningJar.startsWith(target)) {
+          BuildEngine.clean(project, runningJar);
+        } else {
+          BuildEngine.clean(project);
+        }
+      }
+    }
     for (WorkspaceProject project : projects) BuildEngine.build(project, resolver);
     double seconds = (System.nanoTime() - started) / 1_000_000_000.0;
     System.out.printf(java.util.Locale.ROOT, "build: finished in %.3f s%n", seconds);

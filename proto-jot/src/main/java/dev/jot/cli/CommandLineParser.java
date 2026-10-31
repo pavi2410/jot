@@ -37,6 +37,7 @@ final class CommandLineParser {
           "yes",
           "test",
           "global",
+          "clean",
           "dry-run",
           "allow-snapshot");
 
