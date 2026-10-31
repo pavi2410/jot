@@ -52,9 +52,9 @@ final class SimpleCommandParser {
         yield new CommandLine.Lock();
       }
       case "clean" -> {
-        args.allow();
+        args.allow("global");
         args.noPositionals(command);
-        yield new CommandLine.Clean();
+        yield new CommandLine.Clean(args.flag("global"));
       }
       default -> throw new IllegalArgumentException("unknown command: " + command);
     };

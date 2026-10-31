@@ -48,7 +48,7 @@ record CommandLine(
 
   record Lock() implements Command {}
 
-  record Clean() implements Command {}
+  record Clean(boolean global) implements Command {}
 
   record Init(String name, String template, String packageName) implements Command {}
 

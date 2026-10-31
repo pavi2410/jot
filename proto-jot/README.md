@@ -29,8 +29,9 @@ java -jar target/bin/jot-java.jar run -- --version
 ```
 
 The prototype supports `init`, `build`, `run`, `test`, `bench`, `fmt`, `lint`, `doc`,
-`add`, `remove`, `deps`, `outdated`, `resolve`, `tree`, `toolchain`, `lock`, and
-`clean`, and accepts `--project`, `--module`, and global `--offline`.
+`add`, `remove`, `deps`, `outdated`, `resolve`, `tree`, `toolchain`, `lock`, `audit`, and
+`clean`, and accepts `--project`, `--module`, and global `--offline`. `jot clean --global`
+clears managed JDK downloads and Maven artifact caches while preserving other files in `~/.jot`.
 `jot init [name]` creates a Jot-native
 Java app; `--template library` creates a library, and `--package` sets its Java
 package. Build source directories, resource

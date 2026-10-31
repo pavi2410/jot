@@ -19,7 +19,7 @@ final class CommandLineParser {
           "template",
           "package");
   private static final java.util.Set<String> FLAG_OPTIONS =
-      java.util.Set.of("check", "deps", "fix", "ci", "workspace", "force", "test");
+      java.util.Set.of("check", "deps", "fix", "ci", "workspace", "force", "test", "global");
 
   private CommandLineParser() {}
 

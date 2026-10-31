@@ -51,6 +51,11 @@ class CommandLineTest {
         CommandLine.Lock.class, CommandLineParser.parse(new String[] {"lock"}).command());
     assertInstanceOf(
         CommandLine.Clean.class, CommandLineParser.parse(new String[] {"clean"}).command());
+    CommandLine.Clean globalClean =
+        assertInstanceOf(
+            CommandLine.Clean.class,
+            CommandLineParser.parse(new String[] {"clean", "--global"}).command());
+    assertTrue(globalClean.global());
   }
 
   @Test

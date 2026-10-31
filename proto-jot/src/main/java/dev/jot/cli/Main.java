@@ -4,6 +4,7 @@ import dev.jot.core.BuildEngine;
 import dev.jot.core.DependencyAuditor;
 import dev.jot.core.DependencyListing;
 import dev.jot.core.DependencyTree;
+import dev.jot.core.GlobalCache;
 import dev.jot.core.JavaToolchain;
 import dev.jot.core.JavaToolchainManager;
 import dev.jot.core.ProjectConfig;
@@ -57,6 +58,16 @@ public final class Main {
     }
     if (commandLine.version()) {
       System.out.println("jot " + VERSION);
+      return;
+    }
+    if (commandLine.command() instanceof CommandLine.Clean clean && clean.global()) {
+      Path jotHome = Path.of(System.getProperty("user.home"), ".jot");
+      GlobalCache.CleanupSummary summary = GlobalCache.clear(jotHome);
+      System.out.println(
+          "clean: removed "
+              + summary.removedEntries()
+              + " cache entries from "
+              + jotHome.toAbsolutePath().normalize());
       return;
     }
     if (commandLine.command() instanceof CommandLine.Toolchain toolchain) {
