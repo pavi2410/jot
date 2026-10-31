@@ -39,6 +39,10 @@ Explicit source and resource directories override those defaults. Workspaces lis
 `{ path = "../module" }`. `examples/tiny-workspace` demonstrates a two-module
 build and run.
 
+The build cache fingerprints compiler inputs separately from package inputs.
+Resource-only changes update the class output and JAR without recompiling Java
+sources; changed Java sources currently trigger a full project compile.
+
 The Java CLI resolves pinned Maven coordinates and their compile/runtime
 transitive dependencies from POMs, checking repository SHA-256 sidecars when
 available. `jot lock` writes the shared version 1 `jot.lock` format with

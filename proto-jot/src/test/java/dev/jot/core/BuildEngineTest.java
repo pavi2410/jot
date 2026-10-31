@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
@@ -213,6 +214,9 @@ class BuildEngineTest {
 
         BuildEngine.build(project);
         byte[] firstBuild = Files.readAllBytes(artifact);
+        Path compiledClass = temp.resolve("target/classes/sample/Main.class");
+        FileTime unchangedClassTimestamp = FileTime.fromMillis(1_234_567_890_000L);
+        Files.setLastModifiedTime(compiledClass, unchangedClassTimestamp);
         try (ZipFile jar = new ZipFile(artifact.toFile())) {
             assertEquals("mode=first\n", new String(jar.getInputStream(
                     jar.getEntry("config/app.properties")).readAllBytes()));
@@ -221,6 +225,8 @@ class BuildEngineTest {
         write("assets/config/app.properties", "mode=second\n");
         BuildEngine.build(project);
         byte[] secondBuild = Files.readAllBytes(artifact);
+        assertEquals(unchangedClassTimestamp, Files.getLastModifiedTime(compiledClass),
+                "resource-only changes should skip javac");
         assertTrue(!java.util.Arrays.equals(firstBuild, secondBuild),
                 "resource changes should invalidate the build fingerprint");
         try (ZipFile jar = new ZipFile(artifact.toFile())) {
@@ -230,6 +236,8 @@ class BuildEngineTest {
 
         Files.delete(temp.resolve("assets/config/app.properties"));
         BuildEngine.build(project);
+        assertEquals(unchangedClassTimestamp, Files.getLastModifiedTime(compiledClass),
+                "resource deletion should skip javac");
         try (ZipFile jar = new ZipFile(artifact.toFile())) {
             assertNull(jar.getEntry("config/app.properties"),
                     "deleted resources should disappear from the rebuilt JAR");

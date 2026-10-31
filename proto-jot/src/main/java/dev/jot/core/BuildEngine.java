@@ -53,37 +53,59 @@ public final class BuildEngine {
         }
         Path artifact = target.resolve(config.name() + "-" + config.version() + ".jar");
         Path stateFile = target.resolve(".jot/build-state.properties");
-        String fingerprint = fingerprint(project, sources, resources, externalArtifacts);
-        if (outputsAreIntact(classes, artifact, stateFile, fingerprint)) {
-            System.out.println("build: " + config.name() + " is up to date");
-            return;
+        String compileFingerprint = compileFingerprint(project, sources, externalArtifacts);
+        Properties previousState = readState(stateFile);
+        boolean compileRequired = !compiledClassesAreReusable(classes, previousState,
+                compileFingerprint);
+        if (compileRequired) {
+            deleteTree(classes);
+            Files.createDirectories(classes);
+            List<String> javac = new ArrayList<>(List.of(jdkTool("javac"), "--release",
+                    config.javaVersion(), "-d", classes.toString()));
+            String classpath = classpath(project, externalArtifacts);
+            if (!classpath.isBlank()) javac.addAll(List.of("-classpath", classpath));
+            sources.forEach(path -> javac.add(path.toString()));
+            runProcess(root, javac);
         }
 
-        deleteTree(classes);
-        Files.createDirectories(classes);
-        List<String> javac = new ArrayList<>(List.of(jdkTool("javac"), "--release",
-                config.javaVersion(), "-d", classes.toString()));
-        String classpath = classpath(project, externalArtifacts);
-        if (!classpath.isBlank()) javac.addAll(List.of("-classpath", classpath));
-        sources.forEach(path -> javac.add(path.toString()));
-        runProcess(root, javac);
-        copyResources(resources, classes);
-
-        Files.createDirectories(artifact.getParent());
-        List<String> jar = new ArrayList<>(List.of(jdkTool("jar"), "--create", "--file",
-                artifact.toString(), "--date=1980-01-01T00:00:02Z"));
-        if (!config.mainClass().isBlank()) jar.addAll(List.of("--main-class", config.mainClass()));
-        jar.addAll(List.of("-C", classes.toString(), "."));
-        runProcess(root, jar);
+        copyResources(resources, classes, previousState);
+        String classesHash = classFingerprint(classes);
+        String outputHash = directoryFingerprint(classes);
+        String packageFingerprint = packageFingerprint(config, classesHash);
+        boolean artifactIsIntact = Files.isRegularFile(artifact)
+                && packageFingerprint.equals(previousState.getProperty("package-fingerprint"))
+                && outputHash.equals(previousState.getProperty("output-tree-sha256"))
+                && fileFingerprint(artifact).equals(previousState.getProperty("artifact-sha256"));
+        if (!artifactIsIntact) {
+            Files.createDirectories(artifact.getParent());
+            List<String> jar = new ArrayList<>(List.of(jdkTool("jar"), "--create", "--file",
+                    artifact.toString(), "--date=1980-01-01T00:00:02Z"));
+            if (!config.mainClass().isBlank()) {
+                jar.addAll(List.of("--main-class", config.mainClass()));
+            }
+            jar.addAll(List.of("-C", classes.toString(), "."));
+            runProcess(root, jar);
+        }
         Properties state = new Properties();
-        state.setProperty("fingerprint", fingerprint);
-        state.setProperty("classes-sha256", directoryFingerprint(classes));
+        for (String key : previousState.stringPropertyNames()) {
+            if (key.startsWith("resource.")) state.setProperty(key, previousState.getProperty(key));
+        }
+        state.setProperty("compile-fingerprint", compileFingerprint);
+        state.setProperty("compiled-classes-sha256", classesHash);
+        state.setProperty("package-fingerprint", packageFingerprint);
+        state.setProperty("output-tree-sha256", outputHash);
         state.setProperty("artifact-sha256", fileFingerprint(artifact));
         Files.createDirectories(stateFile.getParent());
         try (var output = Files.newOutputStream(stateFile)) {
             state.store(output, "Jot content fingerprint. Generated file.");
         }
-        System.out.println("build: " + config.name() + " " + config.version() + " -> " + artifact);
+        if (compileRequired) {
+            System.out.println("build: " + config.name() + " " + config.version() + " -> " + artifact);
+        } else if (artifactIsIntact) {
+            System.out.println("build: " + config.name() + " is up to date");
+        } else {
+            System.out.println("package: " + config.name() + " -> " + artifact);
+        }
     }
 
     public static void run(WorkspaceProject project, List<String> arguments)
@@ -178,33 +200,27 @@ public final class BuildEngine {
         runProcess(root, runner);
     }
 
-    private static String fingerprint(WorkspaceProject project, List<Path> sources,
-                                      List<ResourceFile> resources,
-                                      List<MavenResolver.ResolvedArtifact> externalArtifacts)
+    private static String compileFingerprint(WorkspaceProject project, List<Path> sources,
+                                             List<MavenResolver.ResolvedArtifact> externalArtifacts)
             throws IOException, NoSuchAlgorithmException {
         Path root = project.root();
         ProjectConfig config = project.config();
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         updateDigest(digest, config.javaVersion());
-        updateDigest(digest, config.mainClass());
         updateDigest(digest, config.sourceDirectories().toString());
-        updateDigest(digest, config.resourceDirectories().toString());
         updateDigest(digest, config.outputDirectory());
         updateDigest(digest, System.getProperty("java.version"));
         for (Path source : sources) {
             updateDigest(digest, root.relativize(source).toString());
             digest.update(Files.readAllBytes(source));
         }
-        for (ResourceFile resource : resources) {
-            updateDigest(digest, resource.relativePath().toString());
-            digest.update(Files.readAllBytes(resource.source()));
-        }
         for (WorkspaceProject dependency : transitiveDependencies(project)) {
             updateDigest(digest, dependency.root().toString());
             Path dependencyClasses = dependency.root().resolve(dependency.config().outputDirectory());
             if (Files.isDirectory(dependencyClasses)) {
                 try (Stream<Path> files = Files.walk(dependencyClasses)) {
-                    for (Path file : files.filter(Files::isRegularFile).sorted().toList()) {
+                    for (Path file : files.filter(Files::isRegularFile)
+                            .filter(path -> path.toString().endsWith(".class")).sorted().toList()) {
                         updateDigest(digest, dependencyClasses.relativize(file).toString());
                         digest.update(Files.readAllBytes(file));
                     }
@@ -218,22 +234,48 @@ public final class BuildEngine {
         return HexFormat.of().formatHex(digest.digest());
     }
 
+    private static String packageFingerprint(ProjectConfig config, String classesHash)
+            throws NoSuchAlgorithmException {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        updateDigest(digest, config.name());
+        updateDigest(digest, config.version());
+        updateDigest(digest, config.mainClass());
+        updateDigest(digest, classesHash);
+        return HexFormat.of().formatHex(digest.digest());
+    }
+
     private static void updateDigest(MessageDigest digest, String value) {
         digest.update(value.getBytes(StandardCharsets.UTF_8));
         digest.update((byte) 0);
     }
 
-    private static boolean outputsAreIntact(Path classes, Path artifact, Path stateFile,
-                                            String fingerprint) throws Exception {
-        if (!Files.isDirectory(classes) || !Files.isRegularFile(artifact)
-                || !Files.isRegularFile(stateFile)) return false;
+    private static Properties readState(Path stateFile) throws IOException {
         Properties state = new Properties();
-        try (var input = Files.newInputStream(stateFile)) {
-            state.load(input);
+        if (Files.isRegularFile(stateFile)) {
+            try (var input = Files.newInputStream(stateFile)) {
+                state.load(input);
+            }
         }
-        return fingerprint.equals(state.getProperty("fingerprint"))
-                && directoryFingerprint(classes).equals(state.getProperty("classes-sha256"))
-                && fileFingerprint(artifact).equals(state.getProperty("artifact-sha256"));
+        return state;
+    }
+
+    private static boolean compiledClassesAreReusable(Path classes, Properties state,
+                                                      String compileFingerprint) throws Exception {
+        return Files.isDirectory(classes)
+                && compileFingerprint.equals(state.getProperty("compile-fingerprint"))
+                && classFingerprint(classes).equals(state.getProperty("compiled-classes-sha256"));
+    }
+
+    private static String classFingerprint(Path directory) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        try (Stream<Path> paths = Files.walk(directory)) {
+            for (Path file : paths.filter(Files::isRegularFile)
+                    .filter(path -> path.toString().endsWith(".class")).sorted().toList()) {
+                updateDigest(digest, directory.relativize(file).toString());
+                digest.update(Files.readAllBytes(file));
+            }
+        }
+        return HexFormat.of().formatHex(digest.digest());
     }
 
     private static String directoryFingerprint(Path directory) throws Exception {
@@ -305,16 +347,59 @@ public final class BuildEngine {
                 .toList();
     }
 
-    private static void copyResources(List<ResourceFile> resources, Path classes)
-            throws IOException {
+    private static void copyResources(List<ResourceFile> resources, Path classes,
+                                      Properties previousState)
+            throws Exception {
+        java.util.Set<String> expectedKeys = new java.util.LinkedHashSet<>();
+        for (ResourceFile resource : resources) expectedKeys.add(resourceStateKey(resource.relativePath()));
+        List<String> oldResourceKeys = previousState.stringPropertyNames().stream()
+                .filter(key -> key.startsWith("resource.") && key.endsWith(".sha256")).toList();
+        for (String key : oldResourceKeys) {
+            if (expectedKeys.contains(key)) continue;
+            Path stale = classes.resolve(decodeResourcePath(key)).normalize();
+            if (!stale.startsWith(classes)) {
+                throw new IllegalStateException("invalid resource path in build state: " + key);
+            }
+            if (Files.deleteIfExists(stale)) removeEmptyDirectories(stale.getParent(), classes);
+            previousState.remove(key);
+        }
         for (ResourceFile resource : resources) {
             Path destination = classes.resolve(resource.relativePath()).normalize();
             if (!destination.startsWith(classes)) {
                 throw new IllegalArgumentException("resource path escapes build output: "
                         + resource.relativePath());
             }
+            String key = resourceStateKey(resource.relativePath());
+            String expectedHash = fileFingerprint(resource.source());
+            if (expectedHash.equals(previousState.getProperty(key))
+                    && Files.isRegularFile(destination)
+                    && expectedHash.equals(fileFingerprint(destination))) continue;
             Files.createDirectories(destination.getParent());
-            Files.copy(resource.source(), destination);
+            Files.copy(resource.source(), destination,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            previousState.setProperty(key, expectedHash);
+        }
+    }
+
+    private static String resourceStateKey(Path relativePath) {
+        String encoded = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(
+                relativePath.toString().getBytes(StandardCharsets.UTF_8));
+        return "resource." + encoded + ".sha256";
+    }
+
+    private static Path decodeResourcePath(String key) {
+        String encoded = key.substring("resource.".length(), key.length() - ".sha256".length());
+        return Path.of(new String(java.util.Base64.getUrlDecoder().decode(encoded),
+                StandardCharsets.UTF_8));
+    }
+
+    private static void removeEmptyDirectories(Path directory, Path stop) throws IOException {
+        for (Path current = directory; current != null && !current.equals(stop)
+                && current.startsWith(stop); current = current.getParent()) {
+            try (Stream<Path> children = Files.list(current)) {
+                if (children.findAny().isPresent()) return;
+            }
+            Files.delete(current);
         }
     }
 
