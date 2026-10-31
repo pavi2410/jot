@@ -33,11 +33,12 @@ record CommandLine(
           Toolchain,
           Self {}
 
-  record Build(String module, boolean clean, boolean nativeImage) implements Command {}
+  record Build(String module, boolean clean, boolean nativeImage, boolean watch)
+      implements Command {}
 
-  record Run(String module, List<String> arguments) implements Command {}
+  record Run(String module, List<String> arguments, boolean watch) implements Command {}
 
-  record Test(String module) implements Command {}
+  record Test(String module, boolean watch) implements Command {}
 
   record Doc(String module, boolean open) implements Command {}
 

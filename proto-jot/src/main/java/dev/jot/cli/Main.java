@@ -194,10 +194,21 @@ public final class Main {
             : ProjectWorkspace.loadProject(projectRoot, config);
     MavenResolver resolver = newResolver(commandLine.offline());
     switch (commandLine.command()) {
-      case CommandLine.Build build ->
+      case CommandLine.Build build -> {
+        if (build.watch()) {
+          watch(projectRoot, rawArguments, commandLine, build.clean());
+        } else {
           build(config, workspace, build.module(), build.clean(), build.nativeImage(), resolver);
-      case CommandLine.Run run -> run(config, workspace, run.module(), run.arguments(), resolver);
-      case CommandLine.Test test -> test(config, workspace, test.module(), resolver);
+        }
+      }
+      case CommandLine.Run run -> {
+        if (run.watch()) watch(projectRoot, rawArguments, commandLine, false);
+        else run(config, workspace, run.module(), run.arguments(), resolver);
+      }
+      case CommandLine.Test test -> {
+        if (test.watch()) watch(projectRoot, rawArguments, commandLine, false);
+        else test(config, workspace, test.module(), resolver);
+      }
       case CommandLine.Doc doc -> doc(config, workspace, doc.module(), doc.open(), resolver);
       case CommandLine.Lint lint -> lint(config, workspace, lint.module(), resolver);
       case CommandLine.Fmt fmt -> fmt(config, workspace, fmt.module(), fmt.check(), resolver);
@@ -238,6 +249,96 @@ public final class Main {
       return properties.getProperty("version", "0.2.0-dev");
     } catch (Exception ignored) {
       return "0.2.0-dev";
+    }
+  }
+
+  private static void watch(
+      Path projectRoot, String[] rawArguments, CommandLine commandLine, boolean cleanFirst)
+      throws Exception {
+    String[] ordinaryArguments = withoutOption(rawArguments, "--watch");
+    boolean[] firstRun = {true};
+    ProjectWatcher.watch(
+        () -> watchPlan(projectRoot, commandLine),
+        () -> {
+          String[] arguments = ordinaryArguments;
+          if (cleanFirst && !firstRun[0]) {
+            arguments = withoutOption(ordinaryArguments, "--clean");
+          }
+          firstRun[0] = false;
+          execute(arguments);
+        });
+  }
+
+  private static String[] withoutOption(String[] arguments, String option) {
+    List<String> result = new java.util.ArrayList<>();
+    boolean afterSeparator = false;
+    for (String argument : arguments) {
+      if (argument.equals("--")) afterSeparator = true;
+      if (!(argument.equals(option) && !afterSeparator)) {
+        result.add(argument);
+      }
+    }
+    return result.toArray(String[]::new);
+  }
+
+  private static ProjectWatcher.Plan watchPlan(Path projectRoot, CommandLine commandLine)
+      throws Exception {
+    ProjectConfig config = ProjectConfig.read(projectRoot.resolve("jot.toml"), null);
+    ProjectWorkspace workspace =
+        config.isWorkspace()
+            ? ProjectWorkspace.load(projectRoot, config)
+            : ProjectWorkspace.loadProject(projectRoot, config);
+    List<WorkspaceProject> projects;
+    boolean includeTests = commandLine.command() instanceof CommandLine.Test;
+    String module;
+    if (commandLine.command() instanceof CommandLine.Build build) module = build.module();
+    else if (commandLine.command() instanceof CommandLine.Run run) module = run.module();
+    else if (commandLine.command() instanceof CommandLine.Test test) module = test.module();
+    else throw new IllegalArgumentException("watch mode supports build, run, and test");
+
+    if (commandLine.command() instanceof CommandLine.Run) {
+      if (!config.isWorkspace() && module != null) {
+        throw new IllegalArgumentException("--module requires a workspace");
+      }
+      WorkspaceProject runnable =
+          config.isWorkspace() ? workspace.selectRunnable(module) : workspace.find(config.name());
+      projects = workspace.dependenciesFirst(runnable);
+    } else {
+      if (!config.isWorkspace() && module != null) {
+        throw new IllegalArgumentException("--module requires a workspace");
+      }
+      projects =
+          module == null && config.isWorkspace()
+              ? workspace.ordered()
+              : workspace.dependenciesFirst(
+                  workspace.find(module == null ? config.name() : module));
+    }
+
+    List<Path> trees = new java.util.ArrayList<>();
+    java.util.Set<Path> files = new java.util.LinkedHashSet<>();
+    files.add(projectRoot.resolve("jot.toml"));
+    addConfigAncestors(projectRoot, files);
+    for (WorkspaceProject project : projects) {
+      Path root = project.root();
+      files.add(root.resolve("jot.toml"));
+      addConfigAncestors(root, files);
+      for (String source : project.config().sourceDirectories()) trees.add(root.resolve(source));
+      for (String resource : project.config().resourceDirectories())
+        trees.add(root.resolve(resource));
+      if (includeTests) {
+        for (String source : project.config().testSourceDirectories())
+          trees.add(root.resolve(source));
+      }
+    }
+    return new ProjectWatcher.Plan(trees, files);
+  }
+
+  private static void addConfigAncestors(Path projectRoot, java.util.Set<Path> files) {
+    for (Path directory = projectRoot.toAbsolutePath().normalize();
+        directory != null;
+        directory = directory.getParent()) {
+      files.add(directory.resolve("jot.lock"));
+      files.add(directory.resolve("libs.versions.toml"));
     }
   }
 

@@ -7,19 +7,20 @@ final class SimpleCommandParser {
   static CommandLine.Command parse(String command, CommandArguments args) {
     return switch (command) {
       case "build" -> {
-        args.allow("module", "clean", "native");
+        args.allow("module", "clean", "native", "watch");
         args.noPositionals(command);
-        yield new CommandLine.Build(args.value("module"), args.flag("clean"), args.flag("native"));
+        yield new CommandLine.Build(
+            args.value("module"), args.flag("clean"), args.flag("native"), args.flag("watch"));
       }
       case "run" -> {
-        args.allow("module");
+        args.allow("module", "watch");
         args.noPositionals(command);
-        yield new CommandLine.Run(args.value("module"), args.runArguments());
+        yield new CommandLine.Run(args.value("module"), args.runArguments(), args.flag("watch"));
       }
       case "test" -> {
-        args.allow("module");
+        args.allow("module", "watch");
         args.noPositionals(command);
-        yield new CommandLine.Test(args.value("module"));
+        yield new CommandLine.Test(args.value("module"), args.flag("watch"));
       }
       case "doc" -> {
         args.allow("module", "open");

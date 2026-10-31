@@ -130,7 +130,10 @@ cannot go stale. Test compilation is incremental when source APIs remain compati
 removed sources and changes to the compiler, classpath, processor artifacts, or
 processor options trigger the needed rebuild. Generated test sources are written to
 `target/generated-test-sources`.
-Neither the Rust nor Java CLI currently has a file-watching mode.
+The Java CLI supports `build --watch`, `test --watch`, and `run --watch`. It
+watches configured Java source and resource directories plus manifests, lockfiles,
+and version catalogs, reruns the selected action after changes, and stops with
+Ctrl+C. `build --clean --watch` cleans once before the initial build.
 
 The Java CLI includes a `test` command that compiles configured test sources and
 runs JUnit Platform Console. The prototype's own tests run through that command:

@@ -63,10 +63,25 @@ class CommandLineTest {
     assertTrue(
         assertInstanceOf(
                 CommandLine.Build.class,
+                CommandLineParser.parse(new String[] {"build", "--watch"}).command())
+            .watch());
+    assertTrue(
+        assertInstanceOf(
+                CommandLine.Build.class,
                 CommandLineParser.parse(new String[] {"build", "--clean", "--native"}).command())
             .clean());
     assertInstanceOf(
         CommandLine.Test.class, CommandLineParser.parse(new String[] {"test"}).command());
+    assertTrue(
+        assertInstanceOf(
+                CommandLine.Run.class,
+                CommandLineParser.parse(new String[] {"run", "--watch", "--", "--watch"}).command())
+            .watch());
+    assertTrue(
+        assertInstanceOf(
+                CommandLine.Test.class,
+                CommandLineParser.parse(new String[] {"test", "--watch"}).command())
+            .watch());
     assertInstanceOf(
         CommandLine.Deps.class, CommandLineParser.parse(new String[] {"deps"}).command());
     assertInstanceOf(

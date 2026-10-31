@@ -24,17 +24,22 @@ final class HelpPrinter {
               projectOptions(
                   opt("--module <name>", "Build one workspace module"),
                   opt("--clean", "Remove build outputs before building"),
-                  opt("--native", "Build a GraalVM native executable"))),
+                  opt("--native", "Build a GraalVM native executable"),
+                  opt("--watch", "Rebuild when project inputs change"))),
           command(
               "run",
               "Build and run the project",
               "[OPTIONS] [-- <args>...]",
-              projectOptions(opt("--module <name>", "Run one workspace module"))),
+              projectOptions(
+                  opt("--module <name>", "Run one workspace module"),
+                  opt("--watch", "Rebuild and rerun when project inputs change"))),
           command(
               "test",
               "Build and run project tests",
               "[OPTIONS]",
-              projectOptions(opt("--module <name>", "Test one workspace module"))),
+              projectOptions(
+                  opt("--module <name>", "Test one workspace module"),
+                  opt("--watch", "Rebuild and rerun tests when project inputs change"))),
           command(
               "bench",
               "Run configured JMH benchmarks",
