@@ -10,6 +10,8 @@ import java.util.TreeMap;
 /** The explicit build inputs read from a project's jot.toml. */
 public record ProjectConfig(String name, String version, String mainClass, String javaVersion,
                             java.util.List<String> sourceDirectories, String outputDirectory,
+                            java.util.List<String> testSourceDirectories,
+                            String testOutputDirectory,
                             java.util.List<String> workspaceMembers,
                             Map<String, String> pathDependencies,
                             Map<String, String> dependencies,
@@ -39,6 +41,8 @@ public record ProjectConfig(String name, String version, String mainClass, Strin
                 document.string("project.main-class", ""), javaVersion,
                 document.stringList("build.source-dirs", java.util.List.of("src")),
                 document.string("build.output-directory", "target/classes"),
+                document.stringList("test.source-dirs", java.util.List.of("test")),
+                document.string("test.output-directory", "target/test-classes"),
                 document.stringList("workspace.members", java.util.List.of()),
                 Collections.unmodifiableMap(new TreeMap<>(pathDependencies)),
                 Collections.unmodifiableMap(new TreeMap<>(dependencies)),

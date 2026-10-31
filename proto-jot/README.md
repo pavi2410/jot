@@ -41,11 +41,11 @@ transitive dependencies from POMs, checking repository SHA-256 sidecars when
 available. It caches downloads under `~/.jot/java-maven-cache`. Version ranges,
 snapshots, Kotlin, and the full TOML specification are not implemented yet.
 
-The Java sources have JUnit 5 tests; while the Java `test` command is pending,
-run them with the current Rust Jot from this directory:
+The Java CLI includes a `test` command that compiles configured test sources and
+runs JUnit Platform Console:
 
 ```sh
-cargo run --manifest-path ../Cargo.toml -p jot -- test
+java -jar target/bin/jot-java.jar test
 ```
 
 The TOML reader currently handles the strings, string arrays, and path

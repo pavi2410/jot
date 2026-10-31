@@ -108,6 +108,52 @@ public final class BuildEngine {
         System.out.println("clean: " + project.config().name());
     }
 
+    public static void test(WorkspaceProject project, MavenResolver resolver) throws Exception {
+        build(project, resolver);
+        Path root = project.root();
+        ProjectConfig config = project.config();
+        List<Path> testSources = collectSources(root, config.testSourceDirectories());
+        if (testSources.isEmpty()) {
+            System.out.println("test: no test sources in " + config.name());
+            return;
+        }
+        Path testClasses = root.resolve(config.testOutputDirectory()).normalize();
+        Path target = root.resolve("target");
+        if (!testClasses.startsWith(target) || testClasses.equals(target)) {
+            throw new IllegalArgumentException("test.output-directory must be below target/");
+        }
+        deleteTree(testClasses);
+        Files.createDirectories(testClasses);
+
+        List<MavenResolver.ResolvedArtifact> mainArtifacts = resolveExternalArtifacts(project, resolver);
+        List<MavenResolver.ResolvedArtifact> testArtifacts = resolver.resolve(config.testDependencies());
+        List<String> classpathEntries = new ArrayList<>();
+        classpathEntries.add(root.resolve(config.outputDirectory()).toString());
+        for (WorkspaceProject dependency : transitiveDependencies(project)) {
+            classpathEntries.add(dependency.root().resolve(dependency.config().outputDirectory()).toString());
+        }
+        mainArtifacts.stream().map(artifact -> artifact.jar().toString()).forEach(classpathEntries::add);
+        testArtifacts.stream().map(artifact -> artifact.jar().toString()).forEach(classpathEntries::add);
+        List<String> testClasspath = List.copyOf(classpathEntries);
+
+        List<String> javac = new ArrayList<>(List.of(jdkTool("javac"), "--release",
+                config.javaVersion(), "-classpath",
+                String.join(System.getProperty("path.separator"), testClasspath),
+                "-d", testClasses.toString()));
+        testSources.forEach(path -> javac.add(path.toString()));
+        runProcess(root, javac);
+
+        List<String> runtimeClasspath = new ArrayList<>();
+        runtimeClasspath.add(testClasses.toString());
+        runtimeClasspath.addAll(testClasspath);
+        List<String> runner = new ArrayList<>(List.of(jdkTool("java"), "-cp",
+                String.join(System.getProperty("path.separator"), runtimeClasspath),
+                "--enable-final-field-mutation=ALL-UNNAMED",
+                "org.junit.platform.console.ConsoleLauncher", "execute", "--scan-class-path",
+                "--fail-if-no-tests", "--disable-ansi-colors"));
+        runProcess(root, runner);
+    }
+
     private static String fingerprint(WorkspaceProject project, List<Path> sources,
                                       List<MavenResolver.ResolvedArtifact> externalArtifacts)
             throws IOException, NoSuchAlgorithmException {
@@ -164,6 +210,23 @@ public final class BuildEngine {
                 .toList());
         externalArtifacts.stream().map(artifact -> artifact.jar().toString()).forEach(entries::add);
         return String.join(System.getProperty("path.separator"), entries);
+    }
+
+    private static List<Path> collectSources(Path root, List<String> sourceDirectories)
+            throws IOException {
+        List<Path> sources = new ArrayList<>();
+        for (String sourceDirectory : sourceDirectories) {
+            Path sourceRoot = root.resolve(sourceDirectory).normalize();
+            if (!sourceRoot.startsWith(root)) {
+                throw new IllegalArgumentException("source directory escapes project: " + sourceDirectory);
+            }
+            if (!Files.isDirectory(sourceRoot)) continue;
+            try (Stream<Path> paths = Files.walk(sourceRoot)) {
+                sources.addAll(paths.filter(path -> path.toString().endsWith(".java")).toList());
+            }
+        }
+        sources.sort(Comparator.naturalOrder());
+        return sources;
     }
 
     private static List<MavenResolver.ResolvedArtifact> resolveExternalArtifacts(

@@ -4,6 +4,7 @@ import dev.jot.core.BuildEngine;
 import dev.jot.core.ProjectConfig;
 import dev.jot.core.ProjectWorkspace;
 import dev.jot.core.WorkspaceProject;
+import dev.jot.core.resolve.MavenResolver;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -18,9 +19,14 @@ public final class Main {
         try {
             execute(args);
         } catch (Exception error) {
-            System.err.println("error: " + error.getMessage());
+            System.err.println("error: " + failureMessage(error));
             System.exit(1);
         }
+    }
+
+    static String failureMessage(Throwable error) {
+        return error.getMessage() == null || error.getMessage().isBlank()
+                ? error.toString() : error.getMessage();
     }
 
     private static void execute(String[] rawArguments) throws Exception {
@@ -43,6 +49,7 @@ public final class Main {
         switch (commandLine.command()) {
             case "build" -> build(config, workspace, commandLine.module());
             case "run" -> run(config, workspace, commandLine.module(), commandLine.runArguments());
+            case "test" -> test(config, workspace, commandLine.module());
             case "clean" -> {
                 for (WorkspaceProject project : workspace.ordered()) BuildEngine.clean(project);
             }
@@ -77,9 +84,21 @@ public final class Main {
         BuildEngine.run(project, runArguments);
     }
 
+    private static void test(ProjectConfig config, ProjectWorkspace workspace, String module)
+            throws Exception {
+        if (!config.isWorkspace() && module != null) {
+            throw new IllegalArgumentException("--module requires a workspace");
+        }
+        List<WorkspaceProject> projects = module == null && config.isWorkspace()
+                ? workspace.ordered()
+                : workspace.dependenciesFirst(workspace.find(module == null ? config.name() : module));
+        MavenResolver resolver = new MavenResolver();
+        for (WorkspaceProject project : projects) BuildEngine.test(project, resolver);
+    }
+
     private static void help() {
         System.out.println("jot " + VERSION + " — a Java build tool");
-        System.out.println("Usage: jot <build|run|clean> [--project <directory>] [--module <name>] [-- <args...>]");
+        System.out.println("Usage: jot <build|run|test|clean> [--project <directory>] [--module <name>] [-- <args...>]");
     }
 
     private static Path findProjectRoot(Path start) {

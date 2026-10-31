@@ -11,5 +11,10 @@ java = "27"
 source-dirs = ["src/main/java"]
 output-directory = "target/classes"
 
+[test]
+source-dirs = ["src/test/java"]
+output-directory = "target/test-classes"
+
 [test-dependencies]
 junit = "org.junit.jupiter:junit-jupiter:5.11.0"
+junit-console = "org.junit.platform:junit-platform-console:1.11.0"

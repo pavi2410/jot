@@ -18,4 +18,10 @@ class CommandLineTest {
         assertEquals(List.of("--port", "8080"), parsed.runArguments());
         assertTrue(parsed.projectRoot().endsWith("demo"));
     }
+
+    @Test
+    void errorsWithoutMessagesStillShowTheirType() {
+        assertEquals("java.lang.IllegalStateException",
+                Main.failureMessage(new IllegalStateException()));
+    }
 }
