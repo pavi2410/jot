@@ -39,8 +39,10 @@ public final class ProjectInitializer {
     List<FileContent> files =
         List.of(
             new FileContent(Path.of("jot.toml"), projectToml),
-            new FileContent(Path.of("src", packagePath, className + ".java"), source),
-            new FileContent(Path.of("test", packagePath, className + "Test.java"), test),
+            new FileContent(
+                Path.of("src", "main", "java", packagePath, className + ".java"), source),
+            new FileContent(
+                Path.of("src", "test", "java", packagePath, className + "Test.java"), test),
             new FileContent(Path.of("README.md"), readme(name, selectedTemplate)));
 
     for (FileContent file : files) {
@@ -82,6 +84,7 @@ public final class ProjectInitializer {
             """
                 .formatted(name));
     manifest.append("group = \"").append(group).append("\"\n");
+    manifest.append("layout = \"maven\"\n");
     if (!template.equals("java-lib")) {
       manifest.append("main-class = \"").append(javaPackage).append(".Main\"\n");
     }
@@ -90,12 +93,6 @@ public final class ProjectInitializer {
 
         [toolchains]
         java = "27"
-
-        [build]
-        source-dirs = ["src"]
-
-        [test]
-        source-dirs = ["test"]
 
         [test-dependencies]
         junit = "%s"

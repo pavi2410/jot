@@ -34,7 +34,7 @@ class ProjectInitializerTest {
     String output = new String(process.getInputStream().readAllBytes());
     assertEquals(0, process.waitFor());
     assertEquals("Hello, Ada!", output.strip());
-    assertTrue(Files.isRegularFile(root.resolve("test/example/hello/MainTest.java")));
+    assertTrue(Files.isRegularFile(root.resolve("src/test/java/example/hello/MainTest.java")));
   }
 
   @Test
@@ -44,7 +44,9 @@ class ProjectInitializerTest {
     ProjectConfig config = ProjectConfig.read(root.resolve("jot.toml"), null);
 
     assertEquals("", config.mainClass());
-    assertTrue(Files.isRegularFile(root.resolve("src/com/example/Greeting.java")));
+    assertTrue(Files.isRegularFile(root.resolve("src/main/java/com/example/Greeting.java")));
+    assertEquals(java.util.List.of("src/main/java"), config.sourceDirectories());
+    assertEquals(java.util.List.of("src/test/java"), config.testSourceDirectories());
     assertTrue(Files.readString(root.resolve("jot.toml")).contains("java = \"27\""));
   }
 
@@ -54,9 +56,10 @@ class ProjectInitializerTest {
         ProjectInitializer.initialize(
             temp.resolve("sample-cli"), "sample-cli", "java-cli", "org.example.tools", null);
     String manifest = Files.readString(root.resolve("jot.toml"));
-    String source = Files.readString(root.resolve("src/org/example/tools/Main.java"));
+    String source = Files.readString(root.resolve("src/main/java/org/example/tools/Main.java"));
 
     assertTrue(manifest.contains("group = \"org.example.tools\""));
+    assertTrue(manifest.contains("layout = \"maven\""));
     assertTrue(manifest.contains("picocli = \"info.picocli:picocli:4.7.6\""));
     assertTrue(source.contains("import picocli.CommandLine;"));
     assertTrue(source.contains("--name"));
