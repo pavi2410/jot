@@ -22,6 +22,14 @@ class CommandLineTest {
     }
 
     @Test
+    void acceptsOfflineAsAGlobalOptionBeforeTheCommand() {
+        CommandLine parsed = CommandLine.parse(new String[] {"--offline", "build"});
+
+        assertEquals("build", parsed.command());
+        assertTrue(parsed.offline());
+    }
+
+    @Test
     void errorsWithoutMessagesStillShowTheirType() {
         assertEquals("java.lang.IllegalStateException",
                 Main.failureMessage(new IllegalStateException()));

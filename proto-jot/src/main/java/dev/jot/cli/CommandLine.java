@@ -9,9 +9,16 @@ record CommandLine(String command, Path projectRoot, String module, List<String>
                    boolean help, boolean version, boolean offline, String projectName,
                    String template, String packageName) {
     static CommandLine parse(String[] arguments) {
-        if (arguments.length == 0 || isHelp(arguments[0])) return helpCommand();
-        if (isVersion(arguments[0])) return versionCommand();
-        return new Parser(arguments[0]).parse(arguments);
+        if (arguments.length == 0) return helpCommand();
+        int commandIndex = 0;
+        boolean offline = false;
+        while (commandIndex < arguments.length && arguments[commandIndex].equals("--offline")) {
+            offline = true;
+            commandIndex++;
+        }
+        if (commandIndex == arguments.length || isHelp(arguments[commandIndex])) return helpCommand();
+        if (isVersion(arguments[commandIndex])) return versionCommand();
+        return new Parser(arguments[commandIndex], offline).parse(arguments, commandIndex + 1);
     }
 
     private static boolean isHelp(String argument) {
@@ -43,12 +50,13 @@ record CommandLine(String command, Path projectRoot, String module, List<String>
         private boolean offline;
         private boolean applicationArguments;
 
-        private Parser(String command) {
+        private Parser(String command, boolean offline) {
             this.command = command;
+            this.offline = offline;
         }
 
-        private CommandLine parse(String[] arguments) {
-            for (int i = 1; i < arguments.length; i++) {
+        private CommandLine parse(String[] arguments, int firstOption) {
+            for (int i = firstOption; i < arguments.length; i++) {
                 String argument = arguments[i];
                 if (applicationArguments) {
                     runArguments.add(argument);
