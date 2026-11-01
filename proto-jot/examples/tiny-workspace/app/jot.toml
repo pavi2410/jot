@@ -1,0 +1,11 @@
+[project]
+name = "workspace-app"
+version = "0.1.0"
+main-class = "example.app.Main"
+layout = "maven"
+
+[dependencies]
+greeting = { path = "../greeting" }
+
+[build]
+source-dirs = ["src/main/java"]

@@ -1,0 +1,29 @@
+[project]
+name = "jot-java"
+version = "0.2.0-dev"
+main-class = "dev.jot.cli.Main"
+layout = "maven"
+
+[toolchains]
+java = "27"
+
+[build]
+source-dirs = ["src/main/java"]
+output-directory = "target/classes"
+
+[dependencies]
+jackson-core = "com.fasterxml.jackson.core:jackson-core:2.22.4"
+jackson-databind = "com.fasterxml.jackson.core:jackson-databind:2.22.4"
+tomlj = "org.tomlj:tomlj:1.1.1"
+
+[format]
+java = "com.google.googlejavaformat:google-java-format:1.37.0"
+style = "google"
+
+[test]
+source-dirs = ["src/test/java"]
+output-directory = "target/test-classes"
+
+[test-dependencies]
+junit = "org.junit.jupiter:junit-jupiter:5.11.0"
+junit-console = "org.junit.platform:junit-platform-console:1.11.0"

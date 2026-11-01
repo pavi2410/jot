@@ -1,0 +1,10 @@
+[project]
+name = "tiny-bench"
+version = "0.1.0"
+layout = "maven"
+
+[toolchains]
+java = "27"
+
+[bench]
+source-dirs = ["src/bench/java"]

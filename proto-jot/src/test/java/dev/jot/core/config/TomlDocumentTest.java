@@ -1,0 +1,94 @@
+package dev.jot.core.config;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+class TomlDocumentTest {
+  @TempDir Path temp;
+
+  @Test
+  void readsQuotedStringsArraysAndPathDependencyTables() throws Exception {
+    Path manifest = temp.resolve("jot.toml");
+    Files.writeString(
+        manifest,
+        """
+        [project]
+        name = "Jot # Java" # comment outside the value
+        version = "0.2.0"
+
+        [workspace]
+        members = ["core", "cli"]
+
+        [dependencies]
+        core = { path = "../core,shared" }
+        """);
+
+    TomlDocument document = TomlDocument.read(manifest);
+
+    assertEquals("Jot # Java", document.string("project.name", ""));
+    assertEquals("0.2.0", document.string("project.version", ""));
+    assertEquals(
+        java.util.List.of("core", "cli"),
+        document.stringList("workspace.members", java.util.List.of()));
+    assertEquals(
+        "../core,shared",
+        ((java.util.Map<?, ?>) document.table("dependencies").get("core")).get("path"));
+  }
+
+  @Test
+  void writesTomlStringsWithEscapingAndArrayTables() {
+    String output =
+        new TomlWriter()
+            .put("version", 1)
+            .appendTable("roots", java.util.Map.of("artifact", "a\"b", "group", "sample"))
+            .render();
+
+    assertTrue(output.startsWith("version = 1\n\n[[roots]]\n"));
+    assertTrue(output.contains("artifact = \"a\\\"b\""));
+    assertTrue(output.contains("group = \"sample\"\n"));
+  }
+
+  @Test
+  void readsIntegerHeadersAndArrayTables() throws Exception {
+    Path lockfile = temp.resolve("jot.lock");
+    Files.writeString(
+        lockfile,
+        """
+        version = 1
+
+        [[roots]]
+        group = "sample"
+        artifact = "api"
+        version = "1.0.0"
+        """);
+
+    TomlDocument document = TomlDocument.read(lockfile);
+
+    assertEquals(1, document.integer("version", -1));
+    assertEquals(1, document.tableArray("roots").size());
+    assertEquals("api", document.tableArray("roots").getFirst().get("artifact"));
+  }
+
+  @Test
+  void readsFullTomlStringsAndNestedDependencyTables() throws Exception {
+    Path manifest = temp.resolve("full.toml");
+    Files.writeString(
+        manifest,
+        "title = \"\"\"\n"
+            + "first line\nsecond line\n\"\"\"\n\n"
+            + "[dependencies.example]\npath = \"../example\"\noptional = true\n");
+
+    TomlDocument document = TomlDocument.read(manifest);
+
+    assertEquals("first line\nsecond line\n", document.string("title", ""));
+    java.util.Map<?, ?> dependency =
+        (java.util.Map<?, ?>) document.table("dependencies").get("example");
+    assertEquals("../example", dependency.get("path"));
+    assertEquals(true, dependency.get("optional"));
+  }
+}

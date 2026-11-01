@@ -1,0 +1,1040 @@
+package dev.jot.core;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import dev.jot.core.resolve.Lockfile;
+import dev.jot.core.resolve.MavenCoordinate;
+import dev.jot.core.resolve.MavenResolver;
+import java.net.URLClassLoader;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
+import java.security.MessageDigest;
+import java.util.HexFormat;
+import java.util.List;
+import java.util.Map;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
+import java.util.jar.JarOutputStream;
+import java.util.zip.ZipFile;
+import javax.tools.ToolProvider;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+class BuildEngineTest {
+  @TempDir Path temp;
+
+  @Test
+  void runsConfiguredAnnotationProcessorsAndRebuildsGeneratedSourcesWhenOptionsChange()
+      throws Exception {
+    Path repository = temp.resolve("processor-repository");
+    MavenCoordinate processor = MavenCoordinate.parse("sample:greeting-processor:1.0");
+    Path processorSource = temp.resolve("processor-src/sample/GreetingProcessor.java");
+    Files.createDirectories(processorSource.getParent());
+    Files.writeString(
+        processorSource,
+        """
+        package sample;
+        import java.io.IOException;
+        import java.io.Writer;
+        import java.util.Set;
+        import javax.annotation.processing.AbstractProcessor;
+        import javax.annotation.processing.RoundEnvironment;
+        import javax.annotation.processing.SupportedAnnotationTypes;
+        import javax.annotation.processing.SupportedOptions;
+        import javax.lang.model.SourceVersion;
+        import javax.lang.model.element.TypeElement;
+        @SupportedAnnotationTypes("*")
+        @SupportedOptions("greeting")
+        public final class GreetingProcessor extends AbstractProcessor {
+            private boolean generated;
+            @Override public SourceVersion getSupportedSourceVersion() {
+                return SourceVersion.latestSupported();
+            }
+            @Override public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment round) {
+                if (generated || round.processingOver()) return false;
+                generated = true;
+                String value = processingEnv.getOptions().getOrDefault("greeting", "default");
+                char quote = 34;
+                try (Writer writer = processingEnv.getFiler()
+                        .createSourceFile("sample.generated.Greeting").openWriter()) {
+                    writer.write("package sample.generated; public final class Greeting { "
+                        + "public static String value() { return " + quote + value + quote + "; } }");
+                } catch (IOException error) { throw new RuntimeException(error); }
+                return false;
+            }
+        }
+        """);
+    Path processorClasses = temp.resolve("processor-classes");
+    Files.createDirectories(processorClasses);
+    assertEquals(
+        0,
+        ToolProvider.getSystemJavaCompiler()
+            .run(
+                null,
+                null,
+                null,
+                "--release",
+                "27",
+                "-d",
+                processorClasses.toString(),
+                processorSource.toString()));
+    Path processorJar = repository.resolve(processor.repositoryPath("jar"));
+    Files.createDirectories(processorJar.getParent());
+    try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(processorJar));
+        var classes = Files.walk(processorClasses)) {
+      for (Path file : classes.filter(Files::isRegularFile).toList()) {
+        jar.putNextEntry(
+            new JarEntry(
+                processorClasses
+                    .relativize(file)
+                    .toString()
+                    .replace(java.io.File.separatorChar, '/')));
+        Files.copy(file, jar);
+        jar.closeEntry();
+      }
+      jar.putNextEntry(new JarEntry("META-INF/services/javax.annotation.processing.Processor"));
+      jar.write("sample.GreetingProcessor\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      jar.closeEntry();
+    }
+    Path processorPom = repository.resolve(processor.pomPath());
+    Files.createDirectories(processorPom.getParent());
+    Files.writeString(
+        processorPom,
+        "<project><groupId>sample</groupId><artifactId>greeting-processor</artifactId>"
+            + "<version>1.0</version></project>");
+    write(
+        "src/main/java/sample/App.java",
+        "package sample; public class App { public static String greeting() "
+            + "{ return sample.generated.Greeting.value(); } }\n");
+    write(
+        "jot.toml",
+        """
+        [project]
+        name = "processor-app"
+        [toolchains]
+        java = "27"
+        [processors.greeting]
+        coords = "sample:greeting-processor:1.0"
+        options = { greeting = "first" }
+        """);
+    MavenResolver resolver = new MavenResolver(temp.resolve("cache"), repository.toUri());
+    ProjectConfig firstConfig = ProjectConfig.read(temp.resolve("jot.toml"), null);
+    WorkspaceProject project = new WorkspaceProject(temp, firstConfig, List.of());
+    Path lockfile = temp.resolve("jot.lock");
+
+    BuildEngine.lock(new ProjectWorkspace(List.of(project)), lockfile, resolver);
+    assertTrue(
+        Lockfile.read(lockfile).roots().stream()
+            .anyMatch(root -> root.notation().equals(processor.notation())));
+
+    BuildEngine.build(project, resolver);
+
+    assertTrue(
+        Files.isRegularFile(
+            temp.resolve("target/generated-sources/sample/generated/Greeting.java")));
+    assertEquals("first", generatedGreeting());
+    Path generatedClass = temp.resolve("target/classes/sample/generated/Greeting.class");
+    var firstTimestamp = Files.getLastModifiedTime(generatedClass);
+    BuildEngine.build(project, resolver);
+    assertEquals(firstTimestamp, Files.getLastModifiedTime(generatedClass));
+
+    write(
+        "jot.toml",
+        Files.readString(temp.resolve("jot.toml"))
+            .replace("greeting = \"first\"", "greeting = \"second\""));
+    ProjectConfig secondConfig = ProjectConfig.read(temp.resolve("jot.toml"), null);
+    BuildEngine.build(new WorkspaceProject(temp, secondConfig, List.of()), resolver);
+    assertEquals("second", generatedGreeting());
+  }
+
+  @Test
+  void skipsJmhResolutionWhenNoBenchmarkSourcesExist() throws Exception {
+    write(
+        "src/sample/App.java",
+        "package sample; public final class App { public static void main(String[] args) {} }\n");
+    write(
+        "jot.toml",
+        """
+        [project]
+        name = "no-benchmarks"
+        main-class = "sample.App"
+        [toolchains]
+        java = "27"
+        """);
+    ProjectConfig config = ProjectConfig.read(temp.resolve("jot.toml"), null);
+    WorkspaceProject project = new WorkspaceProject(temp, config, List.of());
+    MavenResolver resolver =
+        new MavenResolver(temp.resolve("cache"), MavenResolver.defaultRepository(), true);
+
+    assertFalse(BuildEngine.bench(project, resolver, null, 1, null, null));
+    assertTrue(Files.isRegularFile(temp.resolve("target/no-benchmarks-0.1.0.jar")));
+  }
+
+  @Test
+  void generatesJavadocsForConfiguredSources() throws Exception {
+    write(
+        "src/sample/PublicApi.java",
+        """
+        package sample;
+        /** A public API for documentation generation. */
+        public final class PublicApi {
+            /** Creates the API instance. */
+            public PublicApi() {}
+            /**
+             * Returns the greeting.
+             * @return the greeting text
+             */
+            public String greeting() { return "hello"; }
+        }
+        """);
+    write(
+        "jot.toml",
+        """
+        [project]
+        name = "documented"
+        [toolchains]
+        java = "27"
+        """);
+    String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+    Process process =
+        new ProcessBuilder(
+                java,
+                "-Duser.home=" + temp.resolve("home"),
+                "-cp",
+                System.getProperty("java.class.path"),
+                "dev.jot.cli.Main",
+                "doc",
+                "--project",
+                temp.toString())
+            .directory(temp.toFile())
+            .redirectErrorStream(true)
+            .start();
+    String output = new String(process.getInputStream().readAllBytes());
+
+    assertTrue(process.waitFor() == 0, output);
+    assertTrue(Files.isRegularFile(temp.resolve("target/docs/index.html")));
+    assertTrue(Files.isRegularFile(temp.resolve("target/docs/sample/PublicApi.html")));
+  }
+
+  @Test
+  void reportsJavacLintWarningsAndRemovesItsTemporaryClasses() throws Exception {
+    write(
+        "src/sample/LintSample.java",
+        """
+        package sample;
+        import java.util.List;
+        public final class LintSample {
+            public List values() { return List.of("jot"); }
+        }
+        """);
+    write(
+        "jot.toml",
+        """
+        [project]
+        name = "lint-sample"
+        [toolchains]
+        java = "27"
+        """);
+    ProjectConfig config = ProjectConfig.read(temp.resolve("jot.toml"), null);
+    WorkspaceProject project = new WorkspaceProject(temp, config, List.of());
+    MavenResolver resolver =
+        new MavenResolver(temp.resolve("cache"), MavenResolver.defaultRepository());
+
+    BuildEngine.LintResult warnings = BuildEngine.lint(project, resolver);
+
+    assertTrue(!warnings.clean());
+    assertTrue(warnings.diagnostics().contains("[rawtypes]"), warnings.diagnostics());
+    try (var files = Files.list(temp.resolve("target"))) {
+      assertTrue(files.noneMatch(path -> path.getFileName().toString().startsWith(".jot-lint-")));
+    }
+
+    write(
+        "src/sample/LintSample.java",
+        """
+        package sample;
+        import java.util.List;
+        public final class LintSample {
+            public List<String> values() { return List.of("jot"); }
+        }
+        """);
+    assertTrue(BuildEngine.lint(project, resolver).clean());
+  }
+
+  @Test
+  void formatsConfiguredMainAndTestSourcesAndChecksWithoutWriting() throws Exception {
+    MavenCoordinate formatter = MavenCoordinate.parse("sample:formatter:1.0.0");
+    Path repository = temp.resolve("formatter-repository");
+    Path formatterSource = temp.resolve("formatter-src/com/google/googlejavaformat/java/Main.java");
+    Files.createDirectories(formatterSource.getParent());
+    Files.writeString(
+        formatterSource,
+        """
+        package com.google.googlejavaformat.java;
+        import java.nio.file.Files;
+        import java.nio.file.Path;
+        import java.util.Arrays;
+        public final class Main {
+            public static void main(String[] args) throws Exception {
+                boolean check = Arrays.asList(args).contains("--dry-run");
+                for (String argument : args) {
+                    if (!argument.endsWith(".java")) continue;
+                    Path file = Path.of(argument);
+                    if (check && !Files.readString(file).equals("class Sample {}\\n")) {
+                        System.err.println("Files are not formatted");
+                        System.exit(1);
+                    }
+                    if (!check) Files.writeString(file, "class Sample {}\\n");
+                }
+            }
+        }
+        """);
+    Path formatterClasses = temp.resolve("formatter-classes");
+    Files.createDirectories(formatterClasses);
+    assertEquals(
+        0,
+        ToolProvider.getSystemJavaCompiler()
+            .run(
+                null,
+                null,
+                null,
+                "--release",
+                "27",
+                "-d",
+                formatterClasses.toString(),
+                formatterSource.toString()));
+    Path formatterJar = repository.resolve(formatter.repositoryPath("jar"));
+    Files.createDirectories(formatterJar.getParent());
+    try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(formatterJar));
+        var classes = Files.walk(formatterClasses)) {
+      for (Path file : classes.filter(Files::isRegularFile).toList()) {
+        jar.putNextEntry(
+            new JarEntry(
+                formatterClasses
+                    .relativize(file)
+                    .toString()
+                    .replace(java.io.File.separatorChar, '/')));
+        Files.copy(file, jar);
+        jar.closeEntry();
+      }
+    }
+    Path formatterPom = repository.resolve(formatter.pomPath());
+    Files.createDirectories(formatterPom.getParent());
+    Files.writeString(
+        formatterPom,
+        "<project><groupId>sample</groupId>"
+            + "<artifactId>formatter</artifactId><version>1.0.0</version></project>");
+
+    write("src/main/java/sample/Sample.java", "class Sample{}\n");
+    write("src/test/java/sample/SampleTest.java", "class SampleTest{}\n");
+    write(
+        "jot.toml",
+        """
+        [project]
+        name = "format-sample"
+        layout = "maven"
+        [toolchains]
+        java = "27"
+        [format]
+        java = "sample:formatter:1.0.0"
+        style = "google"
+        """);
+    ProjectConfig config = ProjectConfig.read(temp.resolve("jot.toml"), null);
+    WorkspaceProject project = new WorkspaceProject(temp, config, List.of());
+    MavenResolver resolver = new MavenResolver(temp.resolve("formatter-cache"), repository.toUri());
+    ProjectWorkspace workspace = ProjectWorkspace.loadProject(temp, config);
+
+    BuildEngine.lock(workspace, temp.resolve("jot.lock"), resolver);
+    assertTrue(
+        Lockfile.read(temp.resolve("jot.lock")).roots().stream()
+            .anyMatch(root -> root.notation().equals(formatter.notation())));
+
+    BuildEngine.FormatResult needsFormatting = BuildEngine.format(project, resolver, true);
+    assertFalse(needsFormatting.formatted());
+    BuildEngine.format(project, resolver, false);
+    assertEquals(
+        "class Sample {}\n", Files.readString(temp.resolve("src/main/java/sample/Sample.java")));
+    assertEquals(
+        "class Sample {}\n",
+        Files.readString(temp.resolve("src/test/java/sample/SampleTest.java")));
+    assertTrue(BuildEngine.format(project, resolver, true).formatted());
+  }
+
+  @Test
+  void producesRepeatableJarAndRebuildsAfterSourceChanges() throws Exception {
+    Files.createDirectories(temp.resolve("src/main/java/sample"));
+    Path source = temp.resolve("src/main/java/sample/Main.java");
+    Files.writeString(
+        source,
+        "package sample; public class Main { public static String value() { return \"one\"; } }");
+    Files.writeString(
+        temp.resolve("jot.toml"),
+        """
+        [project]
+        name = "sample"
+        version = "1.0.0"
+        main-class = "sample.Main"
+        [toolchains]
+        java = "27"
+        [build]
+        source-dirs = ["src/main/java"]
+        """);
+    ProjectConfig config = ProjectConfig.read(temp.resolve("jot.toml"), null);
+    WorkspaceProject project = new WorkspaceProject(temp, config, List.of());
+
+    BuildEngine.build(project);
+    Path artifact = temp.resolve("target/sample-1.0.0.jar");
+    Path fatArtifact = temp.resolve("target/bin/sample.jar");
+    byte[] firstBuild = Files.readAllBytes(artifact);
+    byte[] firstFatBuild = Files.readAllBytes(fatArtifact);
+    BuildEngine.clean(project);
+    BuildEngine.build(project);
+    byte[] repeatBuild = Files.readAllBytes(artifact);
+    byte[] repeatFatBuild = Files.readAllBytes(fatArtifact);
+    assertArrayEquals(
+        firstBuild, repeatBuild, "unchanged inputs should produce identical JAR bytes");
+    assertArrayEquals(
+        firstFatBuild, repeatFatBuild, "unchanged inputs should produce identical fat-JAR bytes");
+
+    Path mainClass = temp.resolve("target/classes/sample/Main.class");
+    Files.delete(mainClass);
+    BuildEngine.build(project);
+    assertTrue(Files.isRegularFile(mainClass), "missing classes should be recompiled");
+    assertArrayEquals(repeatBuild, Files.readAllBytes(artifact));
+    assertArrayEquals(repeatFatBuild, Files.readAllBytes(fatArtifact));
+
+    Files.writeString(artifact, "damaged artifact");
+    BuildEngine.build(project);
+    assertArrayEquals(
+        repeatBuild, Files.readAllBytes(artifact), "a damaged JAR should be repackaged");
+    assertArrayEquals(repeatFatBuild, Files.readAllBytes(fatArtifact));
+
+    Files.writeString(
+        source,
+        "package sample; public class Main { public static String value() { return \"two\"; } }");
+    BuildEngine.build(project);
+    assertTrue(
+        !HexFormat.of()
+            .formatHex(MessageDigest.getInstance("SHA-256").digest(firstBuild))
+            .equals(
+                HexFormat.of()
+                    .formatHex(
+                        MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(artifact)))),
+        "changed source should change the artifact");
+    assertTrue(
+        !java.util.Arrays.equals(repeatFatBuild, Files.readAllBytes(fatArtifact)),
+        "changed source should change the executable fat JAR");
+  }
+
+  @Test
+  void cleanCanPreserveTheRunningBootstrapJarWhileRemovingOtherOutputs() throws Exception {
+    Files.createDirectories(temp.resolve("target/bin"));
+    Path bootstrap = temp.resolve("target/bin/jot-java.jar");
+    Files.writeString(bootstrap, "bootstrap jar");
+    Files.writeString(temp.resolve("target/stale-output"), "stale");
+    Path manifest = temp.resolve("jot.toml");
+    Files.writeString(manifest, "[project]\nname = \"sample\"\n\n[toolchains]\njava = \"27\"\n");
+    ProjectConfig config = ProjectConfig.read(manifest, null);
+    WorkspaceProject project = new WorkspaceProject(temp, config, List.of());
+
+    BuildEngine.clean(project, bootstrap);
+
+    assertEquals("bootstrap jar", Files.readString(bootstrap));
+    assertTrue(!Files.exists(temp.resolve("target/stale-output")));
+  }
+
+  @Test
+  void buildsAndRunsWithTransitiveLocalDependencies() throws Exception {
+    write(
+        "jot.toml",
+        """
+        [workspace]
+        members = ["app", "core", "base"]
+        [toolchains]
+        java = "27"
+        """);
+    write(
+        "base/jot.toml",
+        """
+        [project]
+        name = "base"
+        [build]
+        source-dirs = ["src/main/java"]
+        """);
+    write(
+        "base/src/main/java/sample/base/Base.java",
+        """
+        package sample.base;
+        public final class Base {
+            public static String message() { return "transitive-ok"; }
+        }
+        """);
+    write(
+        "core/jot.toml",
+        """
+        [project]
+        name = "core"
+        [dependencies]
+        base = { path = "../base" }
+        [build]
+        source-dirs = ["src/main/java"]
+        """);
+    write(
+        "core/src/main/java/sample/core/Core.java",
+        """
+        package sample.core;
+        import sample.base.Base;
+        public final class Core {
+            public static String message() { return Base.message(); }
+        }
+        """);
+    write(
+        "app/jot.toml",
+        """
+        [project]
+        name = "app"
+        main-class = "sample.app.Main"
+        [dependencies]
+        core = { path = "../core" }
+        [build]
+        source-dirs = ["src/main/java"]
+        """);
+    write(
+        "app/src/main/java/sample/app/Main.java",
+        """
+        package sample.app;
+        import sample.base.Base;
+        public final class Main {
+            public static void main(String[] args) { System.out.println(Base.message()); }
+        }
+        """);
+
+    ProjectConfig rootConfig = ProjectConfig.read(temp.resolve("jot.toml"), null);
+    ProjectWorkspace workspace = ProjectWorkspace.load(temp, rootConfig);
+    for (WorkspaceProject project : workspace.ordered()) BuildEngine.build(project);
+
+    BuildEngine.run(workspace.selectRunnable("app"), List.of());
+    assertTrue(Files.isRegularFile(temp.resolve("app/target/app-0.1.0.jar")));
+  }
+
+  @Test
+  void compilesAndRunsWithAResolvedMavenArtifact() throws Exception {
+    Path repository = temp.resolve("repository");
+    MavenCoordinate external = MavenCoordinate.parse("sample:external-api:1.0.0");
+    Path dependencySource = temp.resolve("dependency-src/sample/external/External.java");
+    Files.createDirectories(dependencySource.getParent());
+    Files.writeString(
+        dependencySource,
+        """
+        package sample.external;
+        public final class External {
+            public static String message() { return "maven-ok"; }
+        }
+        """);
+    Path dependencyClasses = temp.resolve("dependency-classes");
+    Files.createDirectories(dependencyClasses);
+    int compileStatus =
+        ToolProvider.getSystemJavaCompiler()
+            .run(
+                null,
+                null,
+                null,
+                "--release",
+                "27",
+                "-d",
+                dependencyClasses.toString(),
+                dependencySource.toString());
+    assertEquals(0, compileStatus);
+    Path dependencyJar = repository.resolve(external.repositoryPath("jar"));
+    Files.createDirectories(dependencyJar.getParent());
+    try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(dependencyJar));
+        var classes = Files.walk(dependencyClasses)) {
+      for (Path file : classes.filter(Files::isRegularFile).toList()) {
+        String entryName =
+            dependencyClasses.relativize(file).toString().replace(java.io.File.separatorChar, '/');
+        jar.putNextEntry(new JarEntry(entryName));
+        Files.copy(file, jar);
+        jar.closeEntry();
+      }
+      jar.putNextEntry(new JarEntry("META-INF/services/sample.Service"));
+      jar.write(
+          "sample.external.ExternalProvider\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      jar.closeEntry();
+      jar.putNextEntry(new JarEntry("META-INF/versions/9/module-info.class"));
+      jar.write(new byte[] {0, 1, 2, 3});
+      jar.closeEntry();
+    }
+    Path dependencyPom = repository.resolve(external.pomPath());
+    Files.createDirectories(dependencyPom.getParent());
+    Files.writeString(
+        dependencyPom,
+        """
+        <project xmlns="http://maven.apache.org/POM/4.0.0">
+          <modelVersion>4.0.0</modelVersion>
+          <groupId>sample</groupId><artifactId>external-api</artifactId><version>1.0.0</version>
+        </project>
+        """);
+
+    Files.createDirectories(temp.resolve("src/main/java/sample"));
+    Files.writeString(
+        temp.resolve("src/main/java/sample/Main.java"),
+        """
+        package sample;
+        import sample.external.External;
+        public final class Main {
+            public static void main(String[] args) { System.out.println(External.message()); }
+        }
+        """);
+    Files.createDirectories(temp.resolve("src/main/resources/META-INF/services"));
+    Files.writeString(
+        temp.resolve("src/main/resources/META-INF/services/sample.Service"),
+        "sample.project.ProjectProvider\n");
+    Files.writeString(
+        temp.resolve("jot.toml"),
+        """
+        [project]
+        name = "with-external"
+        version = "1.0.0"
+        main-class = "sample.Main"
+        layout = "maven"
+        [toolchains]
+        java = "27"
+        [dependencies]
+        external = "sample:external-api:1.0.0"
+        """);
+    ProjectConfig config = ProjectConfig.read(temp.resolve("jot.toml"), null);
+    WorkspaceProject project = new WorkspaceProject(temp, config, List.of());
+    MavenResolver resolver = new MavenResolver(temp.resolve("cache"), repository.toUri());
+
+    BuildEngine.build(project, resolver);
+    BuildEngine.run(project, List.of(), resolver);
+
+    assertTrue(Files.isRegularFile(temp.resolve("target/with-external-1.0.0.jar")));
+    Path fatJar = temp.resolve("target/bin/with-external.jar");
+    try (JarFile archive = new JarFile(fatJar.toFile())) {
+      assertEquals("sample.Main", archive.getManifest().getMainAttributes().getValue("Main-Class"));
+      assertTrue(archive.getEntry("sample/Main.class") != null);
+      assertTrue(archive.getEntry("sample/external/External.class") != null);
+      assertTrue(archive.getEntry("META-INF/versions/9/module-info.class") == null);
+      assertEquals(
+          "sample.external.ExternalProvider\nsample.project.ProjectProvider\n",
+          new String(
+              archive
+                  .getInputStream(archive.getEntry("META-INF/services/sample.Service"))
+                  .readAllBytes(),
+              java.nio.charset.StandardCharsets.UTF_8));
+    }
+    Path java = Path.of(System.getProperty("java.home"), "bin", "java");
+    Process process =
+        new ProcessBuilder(java.toString(), "-jar", fatJar.toString())
+            .redirectErrorStream(true)
+            .start();
+    String output = new String(process.getInputStream().readAllBytes());
+    assertEquals(0, process.waitFor(), output);
+    assertTrue(output.contains("maven-ok"));
+  }
+
+  @Test
+  void packagesConfiguredResourcesAndRebuildsWhenTheyChange() throws Exception {
+    write("src/main/java/sample/Main.java", "package sample; public class Main {}\n");
+    write("assets/config/app.properties", "mode=first\n");
+    write(
+        "jot.toml",
+        """
+        [project]
+        name = "resource-app"
+        version = "1.0.0"
+        layout = "maven"
+        [toolchains]
+        java = "27"
+        [build]
+        source-dirs = ["src/main/java"]
+        resource-dirs = ["assets"]
+        """);
+    ProjectConfig config = ProjectConfig.read(temp.resolve("jot.toml"), null);
+    WorkspaceProject project = new WorkspaceProject(temp, config, List.of());
+    Path artifact = temp.resolve("target/resource-app-1.0.0.jar");
+
+    BuildEngine.build(project);
+    byte[] firstBuild = Files.readAllBytes(artifact);
+    Path compiledClass = temp.resolve("target/classes/sample/Main.class");
+    FileTime unchangedClassTimestamp = FileTime.fromMillis(1_234_567_890_000L);
+    Files.setLastModifiedTime(compiledClass, unchangedClassTimestamp);
+    try (ZipFile jar = new ZipFile(artifact.toFile())) {
+      assertEquals(
+          "mode=first\n",
+          new String(jar.getInputStream(jar.getEntry("config/app.properties")).readAllBytes()));
+    }
+
+    write("assets/config/app.properties", "mode=second\n");
+    BuildEngine.build(project);
+    byte[] secondBuild = Files.readAllBytes(artifact);
+    assertEquals(
+        unchangedClassTimestamp,
+        Files.getLastModifiedTime(compiledClass),
+        "resource-only changes should skip javac");
+    assertTrue(
+        !java.util.Arrays.equals(firstBuild, secondBuild),
+        "resource changes should invalidate the build fingerprint");
+    try (ZipFile jar = new ZipFile(artifact.toFile())) {
+      assertEquals(
+          "mode=second\n",
+          new String(jar.getInputStream(jar.getEntry("config/app.properties")).readAllBytes()));
+    }
+
+    Files.delete(temp.resolve("assets/config/app.properties"));
+    BuildEngine.build(project);
+    assertEquals(
+        unchangedClassTimestamp,
+        Files.getLastModifiedTime(compiledClass),
+        "resource deletion should skip javac");
+    try (ZipFile jar = new ZipFile(artifact.toFile())) {
+      assertNull(
+          jar.getEntry("config/app.properties"),
+          "deleted resources should disappear from the rebuilt JAR");
+    }
+    byte[] withoutResource = Files.readAllBytes(artifact);
+    BuildEngine.build(project);
+    assertEquals(
+        unchangedClassTimestamp,
+        Files.getLastModifiedTime(compiledClass),
+        "an unchanged project should skip javac");
+    assertArrayEquals(
+        withoutResource,
+        Files.readAllBytes(artifact),
+        "an unchanged project should keep its artifact");
+  }
+
+  @Test
+  void incrementallyCompilesApiStableChangesAndFullyRebuildsForApiChanges() throws Exception {
+    write(
+        "src/sample/Library.java",
+        """
+        package sample;
+        public final class Library {
+            public static String message() { return "before"; }
+        }
+        """);
+    write(
+        "src/sample/Main.java",
+        """
+        package sample;
+        public final class Main {
+            public static String message() { return Library.message(); }
+        }
+        """);
+    write(
+        "jot.toml",
+        """
+        [project]
+        name = "incremental-app"
+        [toolchains]
+        java = "27"
+        """);
+    ProjectConfig config = ProjectConfig.read(temp.resolve("jot.toml"), null);
+    WorkspaceProject project = new WorkspaceProject(temp, config, List.of());
+    BuildEngine.build(project);
+
+    Path mainClass = temp.resolve("target/classes/sample/Main.class");
+    Path libraryClass = temp.resolve("target/classes/sample/Library.class");
+    FileTime sentinel = FileTime.fromMillis(1_234_567_890_000L);
+    Files.setLastModifiedTime(mainClass, sentinel);
+    byte[] oldLibraryClass = Files.readAllBytes(libraryClass);
+    write(
+        "src/sample/Library.java",
+        """
+        package sample;
+        public final class Library {
+            public static String message() { return "after"; }
+        }
+        """);
+
+    BuildEngine.build(project);
+
+    assertEquals(
+        sentinel,
+        Files.getLastModifiedTime(mainClass),
+        "an API-stable edit should leave dependent classes untouched");
+    assertTrue(!java.util.Arrays.equals(oldLibraryClass, Files.readAllBytes(libraryClass)));
+    try (URLClassLoader loader =
+        new URLClassLoader(
+            new java.net.URL[] {temp.resolve("target/classes").toUri().toURL()}, null)) {
+      assertEquals("after", loader.loadClass("sample.Library").getMethod("message").invoke(null));
+    }
+
+    Files.setLastModifiedTime(mainClass, sentinel);
+    write(
+        "src/sample/Library.java",
+        """
+        package sample;
+        public final class Library {
+            public static String greeting() { return "api-changed"; }
+        }
+        """);
+    write(
+        "src/sample/Main.java",
+        """
+        package sample;
+        public final class Main {
+            public static String message() { return Library.greeting(); }
+        }
+        """);
+
+    BuildEngine.build(project);
+
+    assertNotEquals(
+        sentinel,
+        Files.getLastModifiedTime(mainClass),
+        "an API change should recompile dependent project sources");
+
+    Files.setLastModifiedTime(mainClass, sentinel);
+    write("src/sample/Extra.java", "package sample; public final class Extra {}\n");
+    BuildEngine.build(project);
+    assertTrue(Files.isRegularFile(temp.resolve("target/classes/sample/Extra.class")));
+    assertNotEquals(
+        sentinel,
+        Files.getLastModifiedTime(mainClass),
+        "adding a source should rebuild the complete source set");
+
+    Files.setLastModifiedTime(mainClass, sentinel);
+    Files.delete(temp.resolve("src/sample/Extra.java"));
+    BuildEngine.build(project);
+    assertTrue(!Files.exists(temp.resolve("target/classes/sample/Extra.class")));
+    assertNotEquals(
+        sentinel,
+        Files.getLastModifiedTime(mainClass),
+        "deleting a source should remove stale classes in a full rebuild");
+  }
+
+  @Test
+  void incrementallyCompilesTestSourcesAndRemovesOutputsForDeletedSources() throws Exception {
+    Path repository = temp.resolve("test-repository");
+    MavenCoordinate junit = MavenCoordinate.parse("sample:junit-console:1.0");
+    addMavenArtifact(
+        repository,
+        junit,
+        Map.of(
+            "org/junit/platform/console/ConsoleLauncher.java",
+            "package org.junit.platform.console; public final class ConsoleLauncher { "
+                + "public static void main(String[] args) {} }"),
+        null,
+        null);
+    write("src/main/java/sample/App.java", "package sample; public final class App {}\n");
+    write(
+        "src/test/java/sample/FirstTest.java",
+        "package sample; public final class FirstTest { public String value() { return \"one\"; }"
+            + " }\n");
+    write(
+        "src/test/java/sample/SecondTest.java",
+        "package sample; public final class SecondTest { public String value() { return \"two\"; }"
+            + " }\n");
+    write(
+        "jot.toml",
+        """
+        [project]
+        name = "incremental-tests"
+        layout = "maven"
+        [toolchains]
+        java = "%d"
+        [test-dependencies]
+        junit-console = "sample:junit-console:1.0"
+        """
+            .formatted(Runtime.version().feature()));
+    ProjectConfig config = ProjectConfig.read(temp.resolve("jot.toml"), null);
+    WorkspaceProject project = new WorkspaceProject(temp, config, List.of());
+    MavenResolver resolver = new MavenResolver(temp.resolve("test-cache"), repository.toUri());
+
+    BuildEngine.test(project, resolver);
+
+    Path firstClass = temp.resolve("target/test-classes/sample/FirstTest.class");
+    Path secondClass = temp.resolve("target/test-classes/sample/SecondTest.class");
+    FileTime sentinel = FileTime.fromMillis(1_234_567_890_000L);
+    Files.setLastModifiedTime(firstClass, sentinel);
+    Files.setLastModifiedTime(secondClass, sentinel);
+    BuildEngine.test(project, resolver);
+    assertEquals(sentinel, Files.getLastModifiedTime(firstClass));
+    assertEquals(sentinel, Files.getLastModifiedTime(secondClass));
+
+    write(
+        "src/test/java/sample/FirstTest.java",
+        "package sample; public final class FirstTest { public String value() { return \"changed\";"
+            + " } }\n");
+    BuildEngine.test(project, resolver);
+    assertNotEquals(sentinel, Files.getLastModifiedTime(firstClass));
+    assertEquals(sentinel, Files.getLastModifiedTime(secondClass));
+
+    Files.delete(temp.resolve("src/test/java/sample/SecondTest.java"));
+    BuildEngine.test(project, resolver);
+    assertFalse(Files.exists(secondClass), "deleted test sources must not leave stale classes");
+    Files.delete(temp.resolve("src/test/java/sample/FirstTest.java"));
+    BuildEngine.test(project, resolver);
+    assertFalse(Files.exists(firstClass), "removing all test sources must clear test outputs");
+  }
+
+  @Test
+  void runsConfiguredTestAnnotationProcessorsAndLocksTheirArtifacts() throws Exception {
+    Path repository = temp.resolve("test-processor-repository");
+    MavenCoordinate junit = MavenCoordinate.parse("sample:junit-console:1.0");
+    addMavenArtifact(
+        repository,
+        junit,
+        Map.of(
+            "org/junit/platform/console/ConsoleLauncher.java",
+            "package org.junit.platform.console; public final class ConsoleLauncher { "
+                + "public static void main(String[] args) {} }"),
+        null,
+        null);
+    MavenCoordinate processor = MavenCoordinate.parse("sample:test-processor:1.0");
+    addMavenArtifact(
+        repository,
+        processor,
+        Map.of(
+            "sample/FixtureProcessor.java",
+            """
+            package sample;
+            import java.io.IOException;
+            import java.io.Writer;
+            import java.util.Set;
+            import javax.annotation.processing.AbstractProcessor;
+            import javax.annotation.processing.RoundEnvironment;
+            import javax.annotation.processing.SupportedAnnotationTypes;
+            import javax.annotation.processing.SupportedOptions;
+            import javax.lang.model.SourceVersion;
+            import javax.lang.model.element.TypeElement;
+            @SupportedAnnotationTypes("*")
+            @SupportedOptions("greeting")
+            public final class FixtureProcessor extends AbstractProcessor {
+                private boolean generated;
+                @Override public SourceVersion getSupportedSourceVersion() {
+                    return SourceVersion.latestSupported();
+                }
+                @Override public boolean process(Set<? extends TypeElement> annotations,
+                        RoundEnvironment round) {
+                    if (generated || round.processingOver()) return false;
+                    generated = true;
+                    String greeting = processingEnv.getOptions().getOrDefault("greeting", "default");
+                    try (Writer writer = processingEnv.getFiler()
+                            .createSourceFile("sample.generated.Fixture").openWriter()) {
+                        writer.write("package sample.generated; public final class Fixture { "
+                                + "public static String greeting() { return \\"" + greeting + "\\"; } }");
+                    } catch (IOException error) { throw new RuntimeException(error); }
+                    return false;
+                }
+            }
+            """),
+        "META-INF/services/javax.annotation.processing.Processor",
+        "sample.FixtureProcessor\n");
+    write("src/main/java/sample/App.java", "package sample; public final class App {}\n");
+    write(
+        "src/test/java/sample/ExampleTest.java",
+        "package sample; public final class ExampleTest { "
+            + "String greeting() { return sample.generated.Fixture.greeting(); } }\n");
+    write(
+        "jot.toml",
+        """
+        [project]
+        name = "test-processor-app"
+        layout = "maven"
+        [toolchains]
+        java = "%d"
+        [test-dependencies]
+        junit-console = "sample:junit-console:1.0"
+        [test-processors.fixture]
+        coords = "sample:test-processor:1.0"
+        options = { greeting = "first" }
+        """
+            .formatted(Runtime.version().feature()));
+    MavenResolver resolver =
+        new MavenResolver(temp.resolve("test-processor-cache"), repository.toUri());
+    ProjectConfig config = ProjectConfig.read(temp.resolve("jot.toml"), null);
+    WorkspaceProject project = new WorkspaceProject(temp, config, List.of());
+    Path lockfile = temp.resolve("jot.lock");
+
+    BuildEngine.lock(new ProjectWorkspace(List.of(project)), lockfile, resolver);
+    assertTrue(
+        Lockfile.read(lockfile).roots().stream()
+            .anyMatch(root -> root.notation().equals(processor.notation())));
+    BuildEngine.test(project, resolver);
+    Path generatedSource =
+        temp.resolve("target/generated-test-sources/sample/generated/Fixture.java");
+    assertTrue(Files.readString(generatedSource).contains("return \"first\""));
+
+    write(
+        "jot.toml",
+        Files.readString(temp.resolve("jot.toml"))
+            .replace("greeting = \"first\"", "greeting = \"second\""));
+    config = ProjectConfig.read(temp.resolve("jot.toml"), null);
+    BuildEngine.test(new WorkspaceProject(temp, config, List.of()), resolver);
+    assertTrue(Files.readString(generatedSource).contains("return \"second\""));
+  }
+
+  private void addMavenArtifact(
+      Path repository,
+      MavenCoordinate coordinate,
+      Map<String, String> sources,
+      String serviceFile,
+      String serviceContents)
+      throws Exception {
+    Path sourceRoot = temp.resolve("artifact-sources").resolve(coordinate.artifact());
+    Path classes = temp.resolve("artifact-classes").resolve(coordinate.artifact());
+    Files.createDirectories(sourceRoot);
+    Files.createDirectories(classes);
+    List<String> javac = new java.util.ArrayList<>(List.of("-proc:none", "-d", classes.toString()));
+    for (Map.Entry<String, String> source : sources.entrySet()) {
+      Path file = sourceRoot.resolve(source.getKey());
+      Files.createDirectories(file.getParent());
+      Files.writeString(file, source.getValue());
+      javac.add(file.toString());
+    }
+    assertEquals(
+        0,
+        ToolProvider.getSystemJavaCompiler().run(null, null, null, javac.toArray(String[]::new)));
+    Path jarPath = repository.resolve(coordinate.repositoryPath("jar"));
+    Files.createDirectories(jarPath.getParent());
+    try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(jarPath));
+        var classFiles = Files.walk(classes)) {
+      for (Path file : classFiles.filter(Files::isRegularFile).toList()) {
+        jar.putNextEntry(
+            new JarEntry(
+                classes.relativize(file).toString().replace(java.io.File.separatorChar, '/')));
+        Files.copy(file, jar);
+        jar.closeEntry();
+      }
+      if (serviceFile != null) {
+        jar.putNextEntry(new JarEntry(serviceFile));
+        jar.write(serviceContents.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        jar.closeEntry();
+      }
+    }
+    Path pom = repository.resolve(coordinate.pomPath());
+    Files.createDirectories(pom.getParent());
+    Files.writeString(
+        pom,
+        "<project><groupId>"
+            + coordinate.group()
+            + "</groupId><artifactId>"
+            + coordinate.artifact()
+            + "</artifactId><version>"
+            + coordinate.version()
+            + "</version></project>");
+  }
+
+  private void write(String relativePath, String contents) throws Exception {
+    Path file = temp.resolve(relativePath);
+    Files.createDirectories(file.getParent());
+    Files.writeString(file, contents);
+  }
+
+  private String generatedGreeting() throws Exception {
+    try (URLClassLoader loader =
+        new URLClassLoader(
+            new java.net.URL[] {temp.resolve("target/classes").toUri().toURL()}, null)) {
+      return (String) loader.loadClass("sample.App").getMethod("greeting").invoke(null);
+    }
+  }
+}
